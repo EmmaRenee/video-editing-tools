@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PowerShell module build output
+*.psd1
+*.psm1~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Output files
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.mp3
+*.wav
+*.srt
+*.vtt
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+temp/
+
+# Logs
+*.log
+
+# Test files
+test_*
+*_test.*
+
+# Proxy files
+*proxy*
