@@ -26,6 +26,7 @@ python --version
 |------|-------------|-------|
 | `inventory.py` | Scan directory and generate footage reports | `python inventory.py "footage/"` |
 | `auto_caption.py` | Burn SRT captions into video with styling | `python auto_caption.py video.mp4 out.mp4 subs.srt` |
+| `video_start.py` | Interactive project initializer | `python video_start.py --interactive` |
 
 ### Cloud API Tools
 
@@ -92,6 +93,51 @@ python auto_caption.py --list-styles
 | `social_mobile` | Mobile viewing, large text |
 | `vin_wiki` | Documentary, interviews |
 | `minimal` | Simple, clean look |
+
+### video_start.py
+
+Interactive project initializer that creates folder structures and config files.
+
+```bash
+# Interactive mode (walks through all options)
+python video_start.py --interactive
+
+# Quick setup
+python video_start.py "My Project" --type reel
+
+# With team config
+python video_start.py interview --type interview --team-config team_config.json
+
+# List available project types
+python video_start.py --list-types
+```
+
+**Project types:**
+| Type | Description |
+|------|-------------|
+| `reel` | Instagram Reel (9:16 vertical) |
+| `youtube` | YouTube video (16:9 horizontal) |
+| `documentary` | Long-form documentary |
+| `interview` | Interview/Talking head |
+| `broll` | B-roll footage package |
+| `podcast` | Podcast/Audio content |
+| `tutorial` | Tutorial/How-to video |
+
+**Team Config:**
+
+Create a `team_config.json` file to pre-define team members for lower thirds:
+
+```json
+{
+  "team_name": "Your Team",
+  "team_members": [
+    {"name": "Jane Doe", "role": "Host"},
+    {"name": "John Smith", "role": "Expert"}
+  ]
+}
+```
+
+See `team_config.example.json` for a template.
 
 ---
 

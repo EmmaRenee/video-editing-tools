@@ -1,0 +1,20 @@
+{
+  "team_name": "Your Team/Company Name",
+  "team_members": [
+    {
+      "name": "Person Name",
+      "role": "Role/Title",
+      "department": "Optional Department"
+    },
+    {
+      "name": "Another Person",
+      "role": "Another Role",
+      "department": "Optional Department"
+    }
+  ],
+  "branding": {
+    "primary_color": "#YourBrandColor",
+    "secondary_color": "#YourSecondaryColor",
+    "font": "Your Font Name"
+  }
+}
