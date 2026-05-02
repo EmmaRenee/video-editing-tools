@@ -11,6 +11,8 @@ AI-assisted video editing for cutting real footage, not generating from scratch.
 
 **This skill is portable** — works on Windows, macOS, and Linux with FFmpeg + Claude.
 
+**📦 Source Repository:** https://github.com/EmmaRenee/video-editing-tools
+
 **📚 Additional Resources:**
 - `SETUP.md` — Cross-platform installation and configuration guide
 - `VideoEditing.psm1` — PowerShell module with 20+ video editing cmdlets
