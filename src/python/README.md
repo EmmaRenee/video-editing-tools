@@ -4,6 +4,119 @@ Cross-platform Python scripts for video editing workflows.
 
 ---
 
+## Pipeline System (New)
+
+AI-first video editing pipeline system. Build, run, and automate video editing workflows.
+
+### Quick Start
+
+```bash
+# Install the pipeline package
+cd /path/to/video-editing-tools/src/python
+pip install -e .
+
+# Run a pipeline from preset
+videoedit init reel --output my_reel.yaml
+videoedit run my_reel.yaml --input footage.mp4 --output output/
+
+# Launch the TUI
+videoedit tui
+```
+
+### Python API
+
+```python
+from videoedit import Pipeline, Runner
+
+# Build a pipeline
+p = Pipeline("my_reel", "Create Instagram Reel")
+p.add("transcribe_whisper", model="small")
+p.add("detect_highlights_transcript", keywords=["wow", "amazing"])
+p.add("extract_segments", padding=0.5)
+p.add("format_video", aspect_ratio="9:16")
+p.add("burn_captions", style="automotive_racing")
+
+# Run it
+runner = Runner(p)
+result = runner.run("footage.mp4", "output/")
+```
+
+### Available Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `transcribe_whisper` | Transcribe video with Whisper AI |
+| `detect_highlights_audio` | Find highlights via audio spike detection |
+| `detect_highlights_transcript` | Find highlights via transcript analysis |
+| `extract_segments` | Extract clips from timestamps |
+| `format_video` | Resize, crop, or pad video |
+| `burn_captions` | Burn subtitles into video |
+| `generate_edl` | Create EDL for DaVinci Resolve |
+| `concatenate_videos` | Combine multiple video clips |
+| `add_crossfades` | Add crossfade transitions between clips |
+| `normalize_audio` | Normalize audio to target loudness |
+
+### CLI Commands
+
+```bash
+# Generate pipeline from preset
+videoedit init reel --output my_pipeline.yaml
+
+# Run pipeline
+videoedit run my_pipeline.yaml --input footage.mp4 --output output/
+
+# List operations
+videoedit operations
+
+# Validate pipeline
+videoedit validate my_pipeline.yaml
+
+# Launch TUI
+videoedit tui
+```
+
+### Presets
+
+Built-in presets for common workflows:
+
+- **reel**: Instagram Reel from raw footage
+- **youtube**: YouTube highlights (16:9)
+- **documentary**: Documentary rough cut with transcript analysis
+- **simple**: Basic audio highlight detection
+
+### Pipeline YAML Format
+
+```yaml
+name: "Instagram Reel"
+description: "Extract highlights and format for 9:16"
+
+steps:
+  - name: transcribe
+    operation: transcribe_whisper
+    params:
+      model: small
+
+  - name: detect_highlights
+    operation: detect_highlights_transcript
+    input: transcribe
+    params:
+      keywords: ["wow", "amazing"]
+      max_clips: 5
+
+  - name: extract_clips
+    operation: extract_segments
+    input: detect_highlights
+    params:
+      padding: 0.5
+
+  - name: format
+    operation: format_video
+    params:
+      aspect_ratio: "9:16"
+```
+
+---
+
 ## Installation
 
 ```bash

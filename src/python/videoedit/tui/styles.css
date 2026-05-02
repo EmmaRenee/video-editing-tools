@@ -1,0 +1,67 @@
+/* VideoEdit TUI Styles */
+
+Screen {
+    background: $background;
+}
+
+/* Button styles */
+Button {
+    margin: 1 2;
+}
+
+Button.primary {
+    background: $primary;
+    text-style: bold;
+}
+
+Button.success {
+    background: $success;
+}
+
+/* ListView styles */
+ListView {
+    margin: 1 2;
+}
+
+ListItem {
+    padding: 0 1;
+}
+
+ListItem.highlighted {
+    background: $primary 20%;
+}
+
+/* Panel styles */
+.panel {
+    background: $panel;
+    border: thick $primary;
+    border-title-color: $primary;
+    margin: 1 2;
+    padding: 1;
+}
+
+/* Footer styling */
+Footer {
+    background: $surface;
+}
+
+/* Header styling */
+Header {
+    background: $primary;
+    text-style: bold;
+}
+
+/* Status indicators */
+.status-success {
+    color: $success;
+    text-style: bold;
+}
+
+.status-error {
+    color: $error;
+    text-style: bold;
+}
+
+.status-pending {
+    color: $warning;
+}

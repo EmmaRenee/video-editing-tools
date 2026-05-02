@@ -1,0 +1,21 @@
+name: Instagram Reel from Raw
+description: Extract highlights and format for 9:16 vertical
+
+steps:
+  - name: detect_highlights
+    operation: detect_highlights_audio
+    params:
+      threshold: -25
+      max_clips: 5
+
+  - name: extract_clips
+    operation: extract_segments
+    input: detect_highlights
+    params:
+      padding: 0.5
+
+  - name: format_vertical
+    operation: format_video
+    params:
+      aspect_ratio: 9:16
+      resolution: 1080x1920

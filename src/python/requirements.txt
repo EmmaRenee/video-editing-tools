@@ -1,0 +1,18 @@
+# Video-Edit Pipeline System Requirements
+
+# CLI framework
+click>=8.0.0
+
+# YAML parsing
+pyyaml>=6.0
+
+# TUI framework (optional)
+textual>=0.50.0
+rich>=13.0.0
+
+# Existing dependencies
+openai-whisper>=20231117
+
+# Cloud APIs (optional)
+# elevenlabs
+# python-dotenv
