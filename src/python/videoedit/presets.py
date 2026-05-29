@@ -1,110 +1,167 @@
-"""
-Pipeline presets - Pre-configured workflows for common video editing tasks.
-"""
+"""Pipeline presets."""
+
+from __future__ import annotations
+
 
 PRESETS = {
-    "reel": {
-        "name": "Instagram Reel from Raw",
-        "description": "Extract highlights and format for 9:16 vertical",
+    "simple": {
+        "name": "simple",
+        "description": "FFmpeg-only highlight detection and rating",
         "steps": [
             {
-                "name": "transcribe",
-                "operation": "transcribe_whisper",
-                "params": {"model": "small"}
-            },
-            {
-                "name": "detect_highlights",
-                "operation": "detect_highlights_audio",
-                "params": {"threshold": -25, "max_clips": 5}
-            },
-            {
-                "name": "extract_clips",
-                "operation": "extract_segments",
-                "input": "detect_highlights",
-                "params": {"padding": 0.5}
-            },
-            {
-                "name": "format_vertical",
-                "operation": "format_video",
-                "params": {"aspect_ratio": "9:16", "resolution": "1080x1920"}
-            },
-            {
-                "name": "captions",
-                "operation": "burn_captions",
-                "input": "transcribe",
-                "params": {"style": "automotive_racing"}
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {"transcript_mode": "off", "max_candidates": 50},
             }
-        ]
+        ],
+    },
+    "reel": {
+        "name": "reel",
+        "description": "Rate footage and identify high-energy reel candidates",
+        "steps": [
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "transcript_mode": "auto",
+                    "max_candidates": 40,
+                    "window_pre_roll": 3,
+                    "window_post_roll": 9,
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "params": {"output": "${output}/edl"}},
+        ],
+    },
+    "roughcut": {
+        "name": "roughcut",
+        "description": "Rate footage, create review assets, approve defaults, export handoff, and assemble a rough cut",
+        "steps": [
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "transcript_mode": "auto",
+                    "max_candidates": 50,
+                    "min_review_score": 0,
+                    "window_pre_roll": 3,
+                    "window_post_roll": 12,
+                },
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 50,
+                    "proxy": False,
+                },
+            },
+            {
+                "name": "approve",
+                "operation": "approve_candidates",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/approved.json",
+                    "decisions": "review.decisions",
+                },
+            },
+            {
+                "name": "edl",
+                "operation": "generate_edl",
+                "input": "approve.approved",
+                "params": {"output": "${output}/edl"},
+            },
+            {
+                "name": "assemble",
+                "operation": "assemble_rough_cut",
+                "input": "approve.approved",
+                "params": {"output": "${output}/rough_cut.mp4"},
+            },
+        ],
     },
     "youtube": {
-        "name": "YouTube Highlights",
-        "description": "Extract highlights for 16:9 horizontal video",
+        "name": "youtube",
+        "description": "Rate footage and prepare longer highlight selections",
         "steps": [
             {
-                "name": "transcribe",
-                "operation": "transcribe_whisper",
-                "params": {"model": "base"}
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "transcript_mode": "auto",
+                    "max_candidates": 75,
+                    "window_pre_roll": 5,
+                    "window_post_roll": 20,
+                },
             },
-            {
-                "name": "detect_highlights",
-                "operation": "detect_highlights_audio",
-                "params": {"threshold": -20, "max_clips": 10}
-            },
-            {
-                "name": "extract_clips",
-                "operation": "extract_segments",
-                "input": "detect_highlights",
-                "params": {"padding": 1.0}
-            },
-            {
-                "name": "format_horizontal",
-                "operation": "format_video",
-                "params": {"aspect_ratio": "16:9", "resolution": "1920x1080"}
-            }
-        ]
+            {"name": "edl", "operation": "generate_edl", "params": {"output": "${output}/edl"}},
+        ],
     },
     "documentary": {
-        "name": "Documentary Rough Cut",
-        "description": "Transcribe and extract key moments for long-form content",
+        "name": "documentary",
+        "description": "Transcript-forward documentary rough selection",
         "steps": [
             {
-                "name": "transcribe",
-                "operation": "transcribe_whisper",
-                "params": {"model": "base"}
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "transcript_mode": "auto",
+                    "max_candidates": 100,
+                    "window_pre_roll": 8,
+                    "window_post_roll": 30,
+                },
             },
             {
-                "name": "find_moments",
+                "name": "transcript_highlights",
                 "operation": "detect_highlights_transcript",
-                "params": {"keywords": ["important", "reveal", "finally", "announcement"]}
+                "input": "rate.ratings",
+                "params": {"label": "transcript_hit"},
             },
             {
-                "name": "extract_segments",
-                "operation": "extract_segments",
-                "input": "find_moments",
-                "params": {"padding": 2.0}
-            },
-            {
-                "name": "generate_edl",
+                "name": "edl",
                 "operation": "generate_edl",
-                "params": {}
-            }
-        ]
+                "input": "transcript_highlights.selections",
+                "params": {"output": "${output}/edl"},
+            },
+        ],
     },
-    "simple": {
-        "name": "Simple Clip Extract",
-        "description": "Just find audio highlights and extract clips",
+    "motorsports": {
+        "name": "motorsports",
+        "description": "Racing footage rating with motorsports event and topic artifacts",
         "steps": [
             {
-                "name": "detect_highlights",
-                "operation": "detect_highlights_audio",
-                "params": {"threshold": -25, "max_clips": 5}
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "transcript_mode": "auto",
+                    "max_candidates": 75,
+                    "window_pre_roll": 4,
+                    "window_post_roll": 14,
+                },
             },
             {
-                "name": "extract_clips",
-                "operation": "extract_segments",
-                "input": "detect_highlights",
-                "params": {}
-            }
-        ]
-    }
+                "name": "events",
+                "operation": "detect_motorsports_events",
+                "input": "rate.ratings",
+                "params": {"output": "${output}/motorsports_events.json"},
+            },
+            {
+                "name": "topics",
+                "operation": "cluster_transcript_topics",
+                "input": "rate.ratings",
+                "params": {"output": "${output}/topic_clusters.json"},
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 75,
+                    "proxy": False,
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "params": {"output": "${output}/edl"}},
+        ],
+    },
 }

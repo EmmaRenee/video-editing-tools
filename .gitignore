@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
 
 # PowerShell module build output
 *.psd1
@@ -11,6 +12,8 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.venv/
+venv/
 
 # OS specific
 .DS_Store
@@ -38,6 +41,23 @@ desktop.ini
 *.wav
 *.srt
 *.vtt
+*.pt
+*.pth
+bus.jpg
+analysis/
+output/
+outputs/
+${output}/
+clips/
+edl/
+review/
+runs/
+pipeline_run.json
+approved.json
+roughcut.yaml
+reel.yaml
+documentary.yaml
+motorsports.yaml
 
 # Temporary files
 *.tmp
@@ -51,6 +71,8 @@ temp/
 # Test files
 test_*
 *_test.*
+!tests/
+!tests/**/*.py
 
 # Proxy files
 *proxy*

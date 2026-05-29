@@ -4,75 +4,137 @@ Cross-platform Python scripts for video editing workflows.
 
 ---
 
-## Pipeline System (New)
+## Footage Rating and Pipeline System
 
-AI-first video editing pipeline system. Build, run, and automate video editing workflows.
+Local-first video editing analysis package. V1 inventories footage, scores it, and writes explainable clip candidates. The `videoedit` package builds on that scanner with CLI commands, typed artifacts, reusable operations, YAML presets, DaVinci/FFmpeg handoff files, and rough-cut assembly.
 
 ### Quick Start
 
 ```bash
-# Install the pipeline package
-cd /path/to/video-editing-tools/src/python
-pip install -e .
+# Install the pipeline package from the repository root
+/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e "./src/python[whisper,advanced]"
 
-# Run a pipeline from preset
-videoedit init reel --output my_reel.yaml
-videoedit run my_reel.yaml --input footage.mp4 --output output/
+# V1-compatible scanner/rater
+python src/python/rate_footage.py footage/ --output analysis/
 
-# Launch the TUI
-videoedit tui
+# Package CLI
+videoedit doctor
+videoedit inventory footage/ --output analysis/
+videoedit rate footage/ --output analysis/
+
+# Pipeline preset
+videoedit init reel --output reel.yaml
+videoedit validate reel.yaml
+videoedit run reel.yaml --input footage/ --output output/
+
+# One-pass rough cut pipeline
+videoedit init roughcut --output roughcut.yaml
+videoedit run roughcut.yaml --input footage/ --output output/
+
+# Handoff and rough cut
+videoedit review-assets analysis/ratings.json --output review/
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit extract-segments approved.json --output clips/
+videoedit export-edl analysis/selections/*.json --output edl/
 ```
 
 ### Python API
 
 ```python
-from videoedit import Pipeline, Runner
+from videoedit import AnalysisConfig, run_rating
 
-# Build a pipeline
-p = Pipeline("my_reel", "Create Instagram Reel")
-p.add("transcribe_whisper", model="small")
-p.add("detect_highlights_transcript", keywords=["wow", "amazing"])
-p.add("extract_segments", padding=0.5)
-p.add("format_video", aspect_ratio="9:16")
-p.add("burn_captions", style="automotive_racing")
+config = AnalysisConfig(max_candidates=40, transcript_mode="auto")
+report = run_rating("footage/", "analysis/", config=config)
 
-# Run it
-runner = Runner(p)
-result = runner.run("footage.mp4", "output/")
+for clip in report.candidates[:10]:
+    print(clip.id, clip.score, clip.action, clip.reasons)
+```
+
+### Rating Outputs
+
+`videoedit rate` and `python rate_footage.py` write:
+
+- `inventory.json`, `inventory.csv`, `inventory.md`
+- `ratings.json`
+- `candidates.csv`
+- `review.md`
+- `review.html`
+- `selections/*.json`
+
+Scoring is deterministic and explainable. It combines technical metadata, scene-change density, silence/non-silence ratio, audio spike windows, and optional transcript keyword hits. Each candidate carries labels, signal scores, and human-readable reasons.
+
+### Review and Approval
+
+```bash
+# Generate thumbnails plus a browsable contact sheet
+videoedit review-assets analysis/ratings.json --output review/
+
+# Include low-resolution proxy clips
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+
+# Use review/contact_sheet.html or edit review/review_decisions.json to
+# promote/demote/reject/reorder clips, then create the assembly-ready file
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+
+# Approve by score/action
+videoedit approve analysis/ratings.json --output approved.json --actions select,review --min-score 70
+
+# Manually approve specific IDs from candidates.csv/review.html
+videoedit approve analysis/ratings.json --output approved.json --ids clip_0001,clip_0004
+
+# Assemble the approved JSON into a rough cut
+videoedit assemble approved.json --output rough_cut.mp4
 ```
 
 ### Available Operations
 
 | Operation | Description |
 |-----------|-------------|
+| `inventory` | Scan footage and write inventory artifacts |
+| `analyze_signals` | Analyze footage signals and write rating artifacts |
+| `rate_footage` | Inventory, score, and rank candidate clips |
 | `transcribe_whisper` | Transcribe video with Whisper AI |
-| `detect_highlights_audio` | Find highlights via audio spike detection |
-| `detect_highlights_transcript` | Find highlights via transcript analysis |
-| `extract_segments` | Extract clips from timestamps |
-| `format_video` | Resize, crop, or pad video |
+| `detect_highlights_audio` | Filter rating candidates with audio labels |
+| `detect_highlights_transcript` | Filter rating candidates with transcript labels |
+| `extract_segments` | Extract clips from selection JSON files |
+| `generate_edl` | Create EDL/XML/M3U and FFmpeg extraction scripts |
+| `generate_review_assets` | Generate thumbnails and an HTML contact sheet |
+| `approve_candidates` | Create approved.json from rating candidates |
+| `assemble_rough_cut` | Assemble a rough cut from approved selections |
+| `format_video` | Apply an FFmpeg video filter |
 | `burn_captions` | Burn subtitles into video |
-| `generate_edl` | Create EDL for DaVinci Resolve |
-| `concatenate_videos` | Combine multiple video clips |
-| `add_crossfades` | Add crossfade transitions between clips |
 | `normalize_audio` | Normalize audio to target loudness |
+| `concatenate_videos` | Combine multiple video clips |
+| `detect_ocr_signage` | Optional OCR/signage detection from sampled frames |
+| `detect_visual_objects` | Optional external object detector handoff |
+| `detect_face_person_presence` | Optional face/person presence detection from sampled frames |
+| `detect_motorsports_events` | Infer passes, incidents, starts, finishes, and pace moments |
+| `cluster_transcript_topics` | Group transcript hits into editing topics |
 
 ### CLI Commands
 
 ```bash
-# Generate pipeline from preset
-videoedit init reel --output my_pipeline.yaml
+videoedit inventory footage/ --output analysis/
+videoedit rate footage/ --output analysis/
+videoedit review-assets analysis/ratings.json --output review/
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit extract-segments approved.json --output clips/
+videoedit export-edl analysis/selections/*.json --output edl/
 
-# Run pipeline
-videoedit run my_pipeline.yaml --input footage.mp4 --output output/
+videoedit init reel --output pipeline.yaml
+videoedit validate pipeline.yaml
+videoedit plan pipeline.yaml --input footage/ --output output/
+videoedit run pipeline.yaml --input footage/ --output output/ --dry-run
+videoedit run pipeline.yaml --input footage/ --output output/
 
-# List operations
 videoedit operations
-
-# Validate pipeline
-videoedit validate my_pipeline.yaml
-
-# Launch TUI
-videoedit tui
+videoedit doctor
+videoedit doctor --json
 ```
 
 ### Presets
@@ -80,47 +142,64 @@ videoedit tui
 Built-in presets for common workflows:
 
 - **reel**: Instagram Reel from raw footage
+- **roughcut**: Rating, review assets, approval defaults, EDL export, rough cut
 - **youtube**: YouTube highlights (16:9)
 - **documentary**: Documentary rough cut with transcript analysis
+- **motorsports**: Racing-footage event/topic artifacts plus review outputs
 - **simple**: Basic audio highlight detection
 
 ### Pipeline YAML Format
 
 ```yaml
-name: "Instagram Reel"
-description: "Extract highlights and format for 9:16"
+name: reel
+description: Rate footage and identify high-energy reel candidates
 
 steps:
-  - name: transcribe
-    operation: transcribe_whisper
+  - name: rate
+    operation: rate_footage
     params:
-      model: small
+      transcript_mode: auto
+      max_candidates: 40
+      window_pre_roll: 3
+      window_post_roll: 9
 
-  - name: detect_highlights
-    operation: detect_highlights_transcript
-    input: transcribe
-    params:
-      keywords: ["wow", "amazing"]
-      max_clips: 5
-
-  - name: extract_clips
-    operation: extract_segments
-    input: detect_highlights
-    params:
-      padding: 0.5
-
-  - name: format
-    operation: format_video
-    params:
-      aspect_ratio: "9:16"
+  - name: edl
+    operation: generate_edl
+    params: {}
 ```
+
+Pipeline steps can reference previous artifacts by step name, for example `rate.ratings`, `review.decisions`, and `${output}/approved.json`.
+
+`videoedit validate` checks operation names, duplicate step names, and known step-result references before a run starts. `videoedit plan` and `videoedit run --dry-run` print the resolved execution plan without processing footage. `videoedit run` writes `pipeline_run.json` to the output directory with step results, durations, and final status.
+
+### Advanced Signals
+
+Advanced detectors are optional providers layered on top of the deterministic rating artifacts:
+
+- `detect_motorsports_events` reads `ratings.json` and writes `motorsports_events.json`.
+- `cluster_transcript_topics` reads transcript hits from `ratings.json` and writes `topic_clusters.json`.
+- `detect_ocr_signage` writes `ocr_signage.json`; it runs only when FFmpeg and Tesseract are installed.
+- `detect_visual_objects` writes `visual_objects.json`; it runs only when an object detector command such as `yolo` is available.
+- `detect_face_person_presence` writes `face_person_presence.json`; it runs only when FFmpeg and OpenCV are installed.
+
+These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
+
+Optional advanced dependencies can be installed separately:
+
+```bash
+python -m pip install -e "./src/python[whisper,advanced]"
+```
+
+The `detect_highlights_audio` and `detect_highlights_transcript` operations also write per-source selection JSON directories, so a pipeline can feed `audio_step.selections` or `transcript_step.selections` directly into `generate_edl`.
 
 ---
 
 ## Installation
 
+See [../../INSTALL.md](../../INSTALL.md) for the canonical full setup guide, including Python 3.12 virtual environments, YOLO/Ultralytics, Whisper, OpenCV, Tesseract, skill installation, and DaVinci handoff.
+
 ```bash
-# Requires Python 3.9+
+# Requires Python 3.10+; Python 3.12 is recommended for full local extras.
 python --version
 
 # Install FFmpeg (required)

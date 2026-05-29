@@ -1,22 +1,20 @@
-"""
-videoedit - AI-first video editing pipeline system
+"""Local-first video editing analysis and pipeline tools."""
 
-Provides a Python API and CLI for building and running video processing pipelines.
-Designed for Claude to use directly, with optional TUI for humans.
+from .config import AnalysisConfig
+from .diagnostics import run_diagnostics
+from .models import CandidateClip, MediaAsset, RatingReport, SelectionSet, SignalReport
+from .pipeline import plan_pipeline, run_pipeline
+from .rating import run_rating
 
-Usage:
-    from videoedit import Pipeline, Runner
-
-    pipeline = Pipeline()
-    pipeline.add("transcribe_whisper", model="small")
-    pipeline.add("detect_highlights_audio", threshold=-25)
-
-    runner = Runner(pipeline)
-    result = runner.run("footage.mp4")
-"""
-
-from .pipeline import Pipeline, Step, Runner
-
-__version__ = "0.2.0"
-
-__all__ = ["Pipeline", "Step", "Runner"]
+__all__ = [
+    "AnalysisConfig",
+    "CandidateClip",
+    "MediaAsset",
+    "plan_pipeline",
+    "RatingReport",
+    "run_diagnostics",
+    "run_pipeline",
+    "SelectionSet",
+    "SignalReport",
+    "run_rating",
+]

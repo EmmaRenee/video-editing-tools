@@ -2,6 +2,8 @@
 
 Cross-platform setup for the video-editing skill. Works on Windows, macOS, and Linux.
 
+> Canonical install guide: use [../INSTALL.md](../INSTALL.md) for current `videoedit`, YOLO/Ultralytics, Claude/Codex skill, PowerShell, and DaVinci setup. This file remains as a legacy platform-specific reference.
+
 ---
 
 ## Prerequisites Checklist

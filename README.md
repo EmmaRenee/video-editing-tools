@@ -21,6 +21,8 @@ This toolkit provides FFmpeg-based video editing workflows with optional PowerSh
 
 ## Quick Start
 
+For a complete installation path covering `videoedit`, YOLO/Ultralytics, PowerShell helpers, Claude/Codex skill installation, and DaVinci handoff, use the canonical [INSTALL.md](INSTALL.md).
+
 ### 1. Install FFmpeg
 
 ```bash
@@ -64,8 +66,28 @@ Copy-Item src\SKILL.md $env:USERPROFILE\.claude\skills\video-editing\SKILL.md
 # Clone or cd into repo
 cd video-editing-tools
 
+# Recommended local environment
+/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e "./src/python[whisper,advanced]"
+
 # Run inventory scanner
 python src/python/inventory.py "footage/"
+
+# Inventory, score, and select exciting moments
+python src/python/rate_footage.py "footage/" --output analysis/
+
+# Package CLI
+videoedit doctor
+videoedit rate footage/ --output analysis/
+videoedit review-assets analysis/ratings.json --output review/
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit init reel --output reel.yaml
+videoedit run reel.yaml --input footage/ --output output/
+videoedit init roughcut --output roughcut.yaml
+videoedit run roughcut.yaml --input footage/ --output output/
 
 # Burn captions
 python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
@@ -108,7 +130,9 @@ video-editing-tools/
 │   ├── powershell/
 │   │   └── VideoEditing.psm1  # PowerShell module (20+ cmdlets)
 │   ├── python/            # Python tools
-│   │   ├── inventory.py        # Footage scanner
+│   │   ├── inventory.py        # Footage inventory wrapper
+│   │   ├── rate_footage.py     # V1-compatible footage rater
+│   │   ├── videoedit/          # Installable scanner/rater/pipeline package
 │   │   ├── auto_caption.py     # Cross-platform caption burning
 │   │   ├── elevenlabs/         # TTS integration
 │   │   ├── heygen/             # Avatar generation
@@ -129,8 +153,9 @@ video-editing-tools/
 | Tool | Required | Version |
 |------|----------|---------|
 | FFmpeg | Yes | 4.0+ |
-| Python | Optional | 3.9+ (for Whisper) |
+| Python | Yes for `videoedit` | 3.12 recommended |
 | Whisper | Optional | Latest |
+| YOLO/Ultralytics | Optional | Latest compatible |
 | PowerShell | Optional | 5.1+ / 7+ |
 
 ---
@@ -199,8 +224,9 @@ git submodule add <your-repo-url> tools/video-editing
 
 | File | Description |
 |------|-------------|
+| [INSTALL.md](INSTALL.md) | Canonical install guide for all tooling, YOLO, and the skill |
 | [SKILL.md](src/SKILL.md) | Claude skill — workflows and techniques |
-| [SETUP.md](src/SETUP.md) | Platform-specific setup guide |
+| [SETUP.md](src/SETUP.md) | Legacy platform-specific setup reference |
 | [QUICKREF.md](src/QUICKREF.md) | PowerShell cmdlet reference |
 
 ---

@@ -1,22 +1,24 @@
 ---
 name: video-editing
-description: Use when editing racing footage, social media reels, or documentary content. Helps cut dead air, find highlights, create rough cuts, prepare footage for DaVinci Resolve, and format for Instagram/Facebook/YouTube. Use when overwhelmed by raw footage or needing captions.
+description: Use when editing racing footage, social media reels, or documentary content. Automates footage inventory, rating, highlight selection, review, rough cuts, DaVinci/FFmpeg handoff, captions, and social formats. Use when overwhelmed by raw footage or needing repeatable local editing workflows.
 ---
 
 # Video Editing for Racing & Social Media
 
 ## Overview
 
-AI-assisted video editing for cutting real footage, not generating from scratch. Focus: organize overwhelming raw footage, create rough cuts, remove dead air, and prepare for final polish in DaVinci Resolve.
+AI-assisted video editing for cutting real footage, not generating from scratch. Start with the local `videoedit` pipeline to inventory footage, score exciting moments, create reviewable candidates, assemble rough cuts, and prepare DaVinci/FFmpeg handoff files. Use manual FFmpeg commands only as fallback or low-level reference.
 
-**This skill is portable** — works on Windows, macOS, and Linux with FFmpeg + Claude.
+**This skill is portable** — works on Windows, macOS, and Linux with Python, FFmpeg, and ffprobe. Claude, Whisper, OCR, and visual detectors are optional layers.
 
 **📦 Source Repository:** https://github.com/EmmaRenee/video-editing-tools
 
 **📚 Additional Resources:**
+- Root `INSTALL.md` — Canonical installation for `videoedit`, YOLO, the skill, and optional tooling
 - `SETUP.md` — Cross-platform installation and configuration guide
 - `VideoEditing.psm1` — PowerShell module with 20+ video editing cmdlets
 - `QUICKREF.md` — Cmdlet quick reference and common workflows
+- `python/README.md` — `videoedit` package, CLI, presets, and pipeline docs
 
 ---
 
@@ -28,6 +30,7 @@ User mentions video editing?
   ├── Racing footage or motorsports content
   ├── YouTube content or documentary series
   ├── "Too much footage", "overwhelmed", "need rough cut"
+  ├── "Inventory/rate this footage", "find exciting moments"
   ├── Caption, subtitle, or dead air removal
   └── Repetitive cutting tasks
 ```
@@ -35,6 +38,9 @@ User mentions video editing?
 **Use when:**
 - Cutting racing footage into highlights or reels
 - Converting long recordings into social media clips
+- Inventorying and rating raw footage before editing
+- Generating candidate clips, review sheets, and selection JSON
+- Creating automated rough cuts from approved selections
 - Need to remove dead air, silence, or boring sections
 - Want captions or subtitles automatically
 - Preparing footage for DaVinci Resolve
@@ -49,25 +55,179 @@ User mentions video editing?
 
 ## Core Principle
 
-**Edit, don't generate.** The value is compression — turning hours of raw footage into minutes of compelling content. AI helps find the good parts; you make the creative decisions.
+**Edit, don't generate.** The value is compression — turning hours of raw footage into minutes of compelling content. The deterministic pipeline finds candidate moments and explains why; you make the creative decisions in review.
 
 ---
 
-## The Pipeline
+## Preferred Automated Pipeline
 
 ```
 Raw footage (hours)
-  → FFmpeg (analyze, cut, normalize)
-  → Claude (identify highlights, transcript, plan structure)
-  → FFmpeg (create rough cut)
+  → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
+  → ratings.json + candidates.csv + review assets
+  → review/contact_sheet.html or review_decisions.json
+  → approved.json
+  → rough_cut.mp4 + EDL/XML/M3U + extracted clips
   → DaVinci Resolve (final polish, color, export)
+```
+
+Use package automation first. It keeps outputs JSON-first and explainable, and it produces artifacts that can be reused by DaVinci, FFmpeg, or later pipeline steps.
+
+---
+
+## Preferred Automated Workflow
+
+### 1. Check local tools
+
+```bash
+videoedit doctor
+videoedit doctor --json
+```
+
+Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, and YOLO are optional providers.
+
+### 2. Inventory, score, and select candidates
+
+```bash
+videoedit rate footage/ --output analysis/
+```
+
+This writes inventory, ratings, candidates, review docs, and per-source selections. For V1 compatibility:
+
+```bash
+python src/python/rate_footage.py footage/ --output analysis/
+```
+
+### 3. Review and approve
+
+```bash
+videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+```
+
+Open the static review UI at `review/contact_sheet.html` to inspect thumbnails/proxies, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
+
+### 4. Assemble, extract, and export
+
+```bash
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit extract-segments approved.json --output clips/
+videoedit export-edl approved.json --output edl/
+```
+
+`approved.json` can contain mixed source files. The handoff includes EDL, XML, M3U, and extraction scripts.
+
+---
+
+## Preset-Based Workflows
+
+Use presets when you want a repeatable pipeline.
+
+```bash
+videoedit init roughcut --output roughcut.yaml
+videoedit init reel --output reel.yaml
+videoedit init documentary --output documentary.yaml
+videoedit init motorsports --output motorsports.yaml
+```
+
+Always validate or dry-run before a long scan:
+
+```bash
+videoedit validate roughcut.yaml
+videoedit plan roughcut.yaml --input footage/ --output output/
+videoedit run roughcut.yaml --input footage/ --output output/ --dry-run
+videoedit run roughcut.yaml --input footage/ --output output/
+```
+
+Preset intent:
+
+| Preset | Use |
+|--------|-----|
+| `simple` | FFmpeg-only rating with transcripts off |
+| `reel` | Short high-energy social candidates |
+| `roughcut` | Rate, review, approve, EDL, and assemble a rough cut |
+| `youtube` | Longer highlight candidates |
+| `documentary` | Transcript-heavy story and soundbite selection |
+| `motorsports` | Racing event/topic artifacts plus review outputs |
+
+---
+
+## Composable Operations
+
+Use `videoedit operations` to list supported pipeline steps. YAML pipelines can compose these typed artifact operations:
+
+```text
+inventory
+analyze_signals
+rate_footage
+transcribe_whisper
+detect_highlights_audio
+detect_highlights_transcript
+generate_review_assets
+approve_candidates
+assemble_rough_cut
+extract_segments
+generate_edl
+format_video
+burn_captions
+normalize_audio
+concatenate_videos
+detect_ocr_signage
+detect_visual_objects
+detect_face_person_presence
+detect_motorsports_events
+cluster_transcript_topics
+```
+
+Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants.
+
+---
+
+## Rating Outputs
+
+`videoedit rate` and `rate_footage.py` produce:
+
+| Artifact | Purpose |
+|----------|---------|
+| `inventory.json`, `inventory.csv`, `inventory.md` | Footage catalog with metadata |
+| `ratings.json` | Full machine-readable report with signals and candidates |
+| `candidates.csv` | Spreadsheet-friendly clip candidates |
+| `review.md` | Human-readable review summary |
+| `review.html` | Table view of candidates and score explanations |
+| `selections/*.json` | Per-source selection JSON for EDL/export operations |
+
+Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
+
+---
+
+## Advanced Optional Providers
+
+Keep these optional. The base pipeline should work with only FFmpeg/ffprobe.
+
+| Operation | Output | Dependency |
+|-----------|--------|------------|
+| `detect_ocr_signage` | `ocr_signage.json` | FFmpeg + Tesseract |
+| `detect_visual_objects` | `visual_objects.json` | External detector such as YOLO |
+| `detect_face_person_presence` | `face_person_presence.json` | FFmpeg + OpenCV |
+| `detect_motorsports_events` | `motorsports_events.json` | `ratings.json` |
+| `cluster_transcript_topics` | `topic_clusters.json` | Transcript hits in `ratings.json` |
+
+Install optional advanced dependencies only when needed:
+
+```bash
+python -m pip install -e "./src/python[whisper,advanced]"
 ```
 
 ---
 
-## Layer 1: Analyze Footage (FFmpeg)
+## Manual Fallback / Low-Level Reference
 
-Before editing, understand what you have.
+---
+
+## Manual Fallback: Analyze Footage (FFmpeg)
+
+Use these commands when the `videoedit` pipeline is unavailable or when you need a one-off low-level probe.
 
 ### Get video info
 
@@ -109,9 +269,9 @@ ffmpeg -i raw_footage.mp4 -af silencedetect=noise=-30dB:d=1 -f null - 2>&1 | fin
 
 ---
 
-## Layer 2: Identify Highlights (Claude)
+## Manual Fallback: Identify Highlights (Claude)
 
-Claude helps you find the good parts without watching everything.
+If `videoedit rate` is unavailable, Claude can still help interpret timestamps, transcripts, and notes. Prefer `ratings.json` and `candidates.csv` when available.
 
 ### Prompt template for racing footage
 
@@ -157,9 +317,9 @@ Suggest which footage supports each part of the story.
 
 ---
 
-## Layer 3: Create Rough Cut (FFmpeg)
+## Manual Fallback: Create Rough Cut (FFmpeg)
 
-Once you know what to keep, let FFmpeg do the cutting.
+Use this when you already have timestamps but are not using `videoedit assemble` or `videoedit extract-segments`.
 
 ### Extract specific segments
 
@@ -211,7 +371,7 @@ ffmpeg -i input.mp4 -af loudnorm=I=-16:TP=-1.5:LRA=11 -c:v copy normalized.mp4
 
 ---
 
-## Layer 4: Social Media Formats
+## Manual Fallback: Social Media Formats
 
 ### Reformat for different platforms
 
@@ -245,7 +405,7 @@ ffmpeg -i final_edit.mp4 -i raw.mp4 -map 0 -c copy -map 1 -c:v:1 libx264 -preset
 
 ---
 
-## Layer 5: Captions & Subtitles
+## Manual Fallback: Captions & Subtitles
 
 ### Generate SRT with Whisper
 
@@ -276,11 +436,11 @@ Standard FFmpeg builds on Windows may not include libass. Install a full-feature
 
 ---
 
-## Layer 6: DaVinci Resolve Prep
+## Manual Fallback: DaVinci Resolve Prep
 
-### Generate EDL from Claude highlights
+### Generate EDL from manual highlights
 
-When Claude identifies highlights with timestamps, create an EDL for DaVinci:
+Prefer `videoedit export-edl analysis/selections/*.json --output edl/` or `videoedit export-edl approved.json --output edl/`. Use this reference only when manually converting timestamp notes into a DaVinci handoff.
 
 **EDL format example:**
 ```
@@ -290,7 +450,7 @@ When Claude identifies highlights with timestamps, create an EDL for DaVinci:
 * | FROM CLIP NAME: race_raw.mp4
 ```
 
-**Or use a Python script to generate EDL from JSON:**
+**Manual JSON shape:**
 ```json
 {
   "source": "race_raw.mp4",
@@ -357,7 +517,7 @@ python tools/heygen/avatar.py --text "Welcome!" --output intro.mp4
 ### Format conversion scripts
 
 ```bash
-# If you have these scripts, use them. Otherwise, use the FFmpeg commands above.
+# Prefer videoedit commands first. If you have these older wrapper scripts, use them as low-level shortcuts.
 # Configure your script paths:
 
 # reels-format input.mp4 output_reel.mp4
@@ -388,13 +548,37 @@ function reels-format {
 
 ## Common Workflows
 
-### From raw racing footage to 3 reels
+### Automated: raw racing footage to rough cut and handoff
+
+```bash
+videoedit doctor
+videoedit init roughcut --output roughcut.yaml
+videoedit plan roughcut.yaml --input footage/ --output output/
+videoedit run roughcut.yaml --input footage/ --output output/ --dry-run
+videoedit run roughcut.yaml --input footage/ --output output/
+```
+
+The `roughcut` preset rates footage, creates review assets, approves the default high-value candidates, exports EDL/XML/M3U handoff files, and assembles a rough cut.
+
+### Automated: racing footage to reel candidates
+
+```bash
+videoedit init reel --output reel.yaml
+videoedit run reel.yaml --input footage/ --output reel_output/
+videoedit review-assets reel_output/ratings.json --output reel_review/
+videoedit approve reel_output/ratings.json --output approved_reels.json --decisions reel_review/review_decisions.json
+videoedit extract-segments approved_reels.json --output reel_clips/
+```
+
+Use `reel_review/contact_sheet.html`, `candidates.csv`, and `review.html` to pick the strongest moments before final social formatting.
+
+### Manual fallback: raw racing footage to 3 reels
 
 ```bash
 # 1. Analyze - find silence
 ffmpeg -i race_raw.mp4 -af silencedetect=noise=-30dB:d=1 -f null - 2>&1 | findstr silence > silence_log.txt
 
-# 2. Extract highlights (manually pick timestamps or use Claude analysis)
+# 2. Extract highlights from manual timestamps if videoedit candidates are unavailable
 # Example: overtake at 12:30, incident at 45:20, podium at 1:23:10
 ffmpeg -i race_raw.mp4 -ss 00:12:00 -to 00:13:30 -c copy overtake.mp4
 ffmpeg -i race_raw.mp4 -ss 00:45:00 -to 00:46:45 -c copy incident.mp4
@@ -406,7 +590,7 @@ ffmpeg -i incident.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reel_incident.mp4
 ffmpeg -i podium.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reel_podium.mp4
 ```
 
-### Create captioned reel
+### Manual fallback: create captioned reel
 
 ```bash
 # 1. Vertical format
@@ -425,8 +609,9 @@ ffmpeg -i vertical.mp4 -vf "subtitles=vertical.srt:force_style='FontSize=28,Bord
 
 | Tool | Best For | Portability |
 |------|----------|-------------|
-| **FFmpeg** | Boring cuts, batch processing, format conversion | ✅ Cross-platform |
-| **Claude** | Planning, highlights, transcripts, structure | ✅ Cross-platform |
+| **videoedit** | Inventory, scoring, candidate selection, review, rough cuts, EDL/XML/M3U handoff | ✅ Cross-platform |
+| **FFmpeg** | Low-level cuts, batch processing, format conversion | ✅ Cross-platform |
+| **Claude** | Editorial planning, interpreting transcripts/notes, narrative structure | ✅ Cross-platform |
 | **Whisper** | Transcription | ✅ Cross-platform |
 | **DaVinci Resolve** | Color grading, audio mix, final polish | Windows, Mac, Linux |
 | **Descript** | Text-based editing (MCP via Claude) | ✅ Web/cloud |
@@ -437,6 +622,36 @@ ffmpeg -i vertical.mp4 -vf "subtitles=vertical.srt:force_style='FontSize=28,Bord
 ---
 
 ## Quick Reference: Common Commands
+
+### videoedit Automated Pipeline
+
+```bash
+# Check dependencies
+videoedit doctor
+
+# Inventory only
+videoedit inventory footage/ --output analysis/
+
+# Inventory, analyze, rate, and write selections
+videoedit rate footage/ --output analysis/
+
+# Review and approve
+videoedit review-assets analysis/ratings.json --output review/
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+
+# Assemble and hand off
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit export-edl approved.json --output edl/
+videoedit extract-segments approved.json --output clips/
+
+# Preset pipelines
+videoedit init roughcut --output roughcut.yaml
+videoedit validate roughcut.yaml
+videoedit plan roughcut.yaml --input footage/ --output output/
+videoedit run roughcut.yaml --input footage/ --output output/ --dry-run
+videoedit run roughcut.yaml --input footage/ --output output/
+videoedit operations
+```
 
 ### PowerShell Cmdlets (Windows-first, cross-platform)
 
@@ -526,20 +741,24 @@ whisper video.mp4 --model medium --output_format srt
 
 | Mistake | Fix |
 |---------|-----|
+| Manually timestamping before scanning | Run `videoedit rate` first, then review `candidates.csv` and `review.html` |
+| Treating optional AI as required | Start with FFmpeg/ffprobe signals; add Whisper/OCR/object providers only when useful |
 | Re-encoding unnecessarily | Use `-c copy` for simple cuts |
 | Not normalizing audio | Levels vary wildly between clips |
-| Skipping preview | Always watch rough cut before final polish |
-| Starting in DaVinci with raw footage | Use FFmpeg to cut down first |
+| Skipping review | Inspect `review/contact_sheet.html` or `review.md` before assembling final output |
+| Starting in DaVinci with raw footage | Run `videoedit rate` or a preset pipeline first |
 | Forgetting aspect ratio | Square video doesn't fit reels |
 
 ---
 
 ## Learning Path
 
-**Start here:** Use FFmpeg to cut one highlight from your next race video.
+**Start here:** Run `videoedit doctor`, then `videoedit rate footage/ --output analysis/`.
 
-**Next:** Use Claude to analyze a transcript and suggest 3 reel concepts.
+**Next:** Review `candidates.csv`, `review.md`, `review.html`, and `selections/*.json` to understand why clips were selected.
 
-**Then:** Create a rough cut entirely with FFmpeg, export to DaVinci for polish.
+**Then:** Use `videoedit init roughcut`, `videoedit plan`, `videoedit run --dry-run`, and `videoedit run` to automate rough cuts and handoff files.
+
+**Advanced:** Add transcript, OCR/signage, object, face/person, motorsports-event, and topic-clustering providers after the deterministic pipeline is working.
 
 **Goal:** Spend 80% of your time on creative decisions in DaVinci, not on boring cutting.
