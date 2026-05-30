@@ -75,11 +75,19 @@ python -m pip install -e "./src/python[whisper,advanced]"
 # Run inventory scanner
 python src/python/inventory.py "footage/"
 
+# Automated package workflow
+videoedit doctor
+videoedit modules list
+videoedit rate footage/ --output analysis/
+videoedit review-assets analysis/ratings.json --output review/
+videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
+videoedit assemble approved.json --output rough_cut.mp4
+videoedit content-map analysis/ratings.json --output reports/
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+
 # Burn captions
 python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
-
-# Cloud API tools (require API keys)
-python src/python/elevenlabs/voiceover.py --text "Welcome" --output intro.mp3
+videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
 ```
 
 See [src/python/README.md](src/python/README.md) for full documentation.

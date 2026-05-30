@@ -63,11 +63,13 @@ User mentions video editing?
 
 ```
 Raw footage (hours)
+  → videoedit modules/doctor (confirm enabled feature surface)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
   → ratings.json + candidates.csv + review assets
+  → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
   → approved.json
-  → rough_cut.mp4 + EDL/XML/M3U + extracted clips
+  → rough_cut.mp4 + captioned clips + EDL/XML/M3U + extracted clips
   → DaVinci Resolve (final polish, color, export)
 ```
 
@@ -82,9 +84,39 @@ Use package automation first. It keeps outputs JSON-first and explainable, and i
 ```bash
 videoedit doctor
 videoedit doctor --json
+videoedit modules list
+videoedit modules doctor
 ```
 
 Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, and YOLO are optional providers.
+
+### 1a. Check or configure feature modules
+
+```bash
+videoedit modules list
+videoedit modules enable content.series
+videoedit modules disable advanced.vision
+videoedit modules scaffold my_feature --output videoedit-my-feature/
+```
+
+Core modules are always enabled. Optional modules are project-local via `.videoedit/config.json`. Pipelines may declare `requires_modules`; validate before long runs.
+
+Available built-in modules:
+
+| Module | Use |
+|--------|-----|
+| `core.inventory` | Footage catalog and metadata |
+| `core.rating` | Signal analysis, scoring, candidate selection |
+| `core.pipeline` | YAML planning, validation, and runs |
+| `core.review` | Review assets, approvals, rough cuts |
+| `core.handoff` | EDL/XML/M3U and clip extraction |
+| `delivery.captions` | Styled caption burning and delivery formats |
+| `content.series` | Reusable social/content series plans |
+| `content.reports` | Content maps and quote mining |
+| `project.scaffold` | Project folder scaffolding |
+| `advanced.vision` | OCR, object, face/person providers |
+| `advanced.motorsports` | Motorsports event/topic artifacts |
+| `cloud.adapters` | Future maintained cloud adapters |
 
 ### 2. Inventory, score, and select candidates
 
@@ -116,7 +148,18 @@ videoedit extract-segments approved.json --output clips/
 videoedit export-edl approved.json --output edl/
 ```
 
+Use editorial planning outputs when the user wants content strategy, social series, or interview paper-edit support:
+
+```bash
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+```
+
 `approved.json` can contain mixed source files. The handoff includes EDL, XML, M3U, and extraction scripts.
+
+`videoedit export-edl`, `videoedit extract-segments`, and `videoedit assemble` also accept Drive-style soundbite JSON with top-level `project`/`fps` and per-clip `source`, `start`, `end`, and `label`.
 
 ---
 
@@ -173,6 +216,10 @@ format_video
 burn_captions
 normalize_audio
 concatenate_videos
+plan_content_series
+generate_content_map
+quote_mining
+scaffold_project
 detect_ocr_signage
 detect_visual_objects
 detect_face_person_presence
@@ -198,6 +245,72 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `selections/*.json` | Per-source selection JSON for EDL/export operations |
 
 Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
+
+## Content Planning Outputs
+
+Use these after `videoedit rate` when the user wants editorial planning, reusable social series, or quote mining:
+
+```bash
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+```
+
+Outputs include `ranked_content_map.md`, `content_map.json`, `quote_mining.md`, `series_plan.json`, `caption_suggestions.md`, and `series_selections.json`.
+
+Initial series templates: `what_were_looking_for`, `team_tuesday`, `engine_build_montage`, and `shop_tour`.
+
+## Styled Captions
+
+Prefer the package command:
+
+```bash
+videoedit captions styles
+videoedit burn-captions clip.mp4 captions.srt --output captioned.mp4 --style automotive_racing --format reel
+```
+
+The standalone `python src/python/auto_caption.py` remains a compatibility wrapper. Styles include `automotive_racing`, `clean_tech`, `social_mobile`, `vin_wiki`, and `minimal`.
+
+## Project Scaffolding
+
+Use this when starting a fresh edit package or when the user needs a repeatable folder structure:
+
+```bash
+videoedit init-project "May Shop Reel" --type reel --output projects/
+videoedit init-project "Interview Pulls" --type interview --output projects/ --source footage/
+```
+
+Generated projects include `raw/`, `audio/`, `exports/`, `assets/`, `scripts/`, `drafts/`, `analysis/`, `review/`, `workflow_config.json`, `README.md`, and `.videoedit/config.json`.
+
+Supported project types: `reel`, `youtube`, `documentary`, `interview`, and `broll`.
+
+## Selection JSON And Soundbite Compatibility
+
+Use `videoedit export-edl`, `videoedit extract-segments`, and `videoedit assemble` for handoff or rough-cut generation from selection JSON. The shared loader accepts:
+
+- V1 per-source `selections/*.json`
+- `approved.json` from `videoedit approve`
+- Drive-style soundbite / paper-edit JSON with top-level `project` and `fps`
+
+Drive-style example:
+
+```json
+{
+  "project": "Vin Wiki Soundbites",
+  "fps": 30,
+  "clips": [
+    {
+      "source": "interview.mp4",
+      "start": "00:00:30",
+      "end": "00:01:00",
+      "label": "matt_intro"
+    }
+  ]
+}
+```
+
+If a selection has no top-level `source`, every clip must include `source`. FPS precedence is explicit `--fps`, then JSON `fps`, then `30`.
 
 ---
 
@@ -475,25 +588,16 @@ ffmpeg -i rough_cut.mp4 -c:v prores_ks -profile:v 3 -c:a pcm_s16le for_davinci.m
 
 ## Optional: Cloud AI Tools
 
-*If you have these tools set up, they can automate parts of your workflow.*
+Cloud tools are optional and should not be required for inventory, scoring, review, rough cuts, or handoff.
 
-### Eleven Labs - AI Voiceover
-
-Generate AI narration from text, transcripts, or scripts.
+Prefer maintained `cloud.adapters` modules when they exist:
 
 ```bash
-# Generate from text (requires tools/elevenlabs/voiceover.py)
-python tools/elevenlabs/voiceover.py --text "Welcome" --output intro.mp3
+videoedit modules list
+videoedit modules doctor
 ```
 
-### HeyGen - AI Avatar Videos
-
-Create AI avatar host segments without filming.
-
-```bash
-# Create avatar intro (requires tools/heygen/avatar.py)
-python tools/heygen/avatar.py --text "Welcome!" --output intro.mp4
-```
+Older direct ElevenLabs, HeyGen, and Descript scripts are legacy references unless restored as package-backed modules.
 
 ### Descript - Text-Based Editing (MCP)
 
@@ -628,6 +732,13 @@ ffmpeg -i vertical.mp4 -vf "subtitles=vertical.srt:force_style='FontSize=28,Bord
 ```bash
 # Check dependencies
 videoedit doctor
+videoedit modules list
+videoedit modules doctor
+
+# Configure optional feature modules for this project
+videoedit modules enable content.series
+videoedit modules disable advanced.vision
+videoedit modules scaffold my_feature --output videoedit-my-feature/
 
 # Inventory only
 videoedit inventory footage/ --output analysis/
@@ -643,6 +754,19 @@ videoedit approve analysis/ratings.json --output approved.json --decisions revie
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit export-edl approved.json --output edl/
 videoedit extract-segments approved.json --output clips/
+
+# Content and editorial planning
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+
+# Captions and delivery
+videoedit captions styles
+videoedit burn-captions clip.mp4 captions.srt --output captioned.mp4 --style automotive_racing --format reel
+
+# Project setup
+videoedit init-project "Race Day Reel" --type reel --output projects/
 
 # Preset pipelines
 videoedit init roughcut --output roughcut.yaml

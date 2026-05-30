@@ -8,15 +8,25 @@ import json
 import os
 import sys
 
+from .captions import burn_captions, list_caption_styles
 from .config import AnalysisConfig
+from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
 from .diagnostics import format_diagnostics, run_diagnostics
 from .edl import export_selection_file
 from .inventory import build_inventory, write_inventory_outputs
+from .modules import (
+    disable_module,
+    enable_module,
+    module_rows,
+    require_module_enabled,
+    run_module_diagnostics,
+    scaffold_module,
+)
 from .operations import default_registry, op_extract_segments
-from .pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
-from .presets import PRESETS
+from .pipeline import available_presets, load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
+from .scaffold import PROJECT_TYPES, scaffold_project
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_edl = sub.add_parser("export-edl", help="Generate EDL/XML/M3U artifacts from selection JSON")
     export_edl.add_argument("selections", nargs="+")
     export_edl.add_argument("--output", "-o", required=True)
-    export_edl.add_argument("--fps", type=float, default=30.0)
+    export_edl.add_argument("--fps", type=float, default=None)
     export_edl.set_defaults(func=cmd_export_edl)
 
     extract_segments = sub.add_parser("extract-segments", help="Extract clips from selection JSON files")
@@ -71,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     approve.set_defaults(func=cmd_approve)
 
     init = sub.add_parser("init", help="Write a pipeline preset YAML")
-    init.add_argument("preset", choices=sorted(PRESETS))
+    init.add_argument("preset", choices=sorted(available_presets()))
     init.add_argument("--output", "-o", required=True)
     init.set_defaults(func=cmd_init)
 
@@ -103,6 +113,63 @@ def build_parser() -> argparse.ArgumentParser:
     assemble_cmd.add_argument("selection")
     assemble_cmd.add_argument("--output", "-o", required=True)
     assemble_cmd.set_defaults(func=cmd_assemble)
+
+    captions = sub.add_parser("captions", help="Caption utilities")
+    captions_sub = captions.add_subparsers(dest="caption_command", required=True)
+    caption_styles = captions_sub.add_parser("styles", help="List caption styles")
+    caption_styles.set_defaults(func=cmd_caption_styles)
+
+    burn = sub.add_parser("burn-captions", help="Burn styled captions into a video")
+    burn.add_argument("input")
+    burn.add_argument("subtitles")
+    burn.add_argument("--output", "-o", required=True)
+    burn.add_argument("--style", default="automotive_racing")
+    burn.add_argument("--format", default="original", choices=["original", "reel", "youtube"])
+    burn.set_defaults(func=cmd_burn_captions)
+
+    series = sub.add_parser("series", help="Plan reusable content series from ratings")
+    series.add_argument("ratings", nargs="?", help="ratings.json, or 'templates' to list templates")
+    series.add_argument("--template", default="team_tuesday")
+    series.add_argument("--output", "-o")
+    series.add_argument("--max-clips", type=int, default=5)
+    series.set_defaults(func=cmd_series)
+
+    content_map = sub.add_parser("content-map", help="Generate a ranked editorial content map")
+    content_map.add_argument("ratings")
+    content_map.add_argument("--output", "-o", required=True)
+    content_map.set_defaults(func=cmd_content_map)
+
+    quote_mining = sub.add_parser("quote-mining", help="Generate transcript-forward quote-mining report")
+    quote_mining.add_argument("ratings")
+    quote_mining.add_argument("--output", "-o", required=True)
+    quote_mining.set_defaults(func=cmd_quote_mining)
+
+    project = sub.add_parser("init-project", help="Create a video project folder scaffold")
+    project.add_argument("name")
+    project.add_argument("--type", choices=sorted(PROJECT_TYPES), default="reel")
+    project.add_argument("--output", "-o", default=".")
+    project.add_argument("--source")
+    project.add_argument("--team-config")
+    project.set_defaults(func=cmd_init_project)
+
+    modules = sub.add_parser("modules", help="List, enable, disable, diagnose, and scaffold feature modules")
+    modules_sub = modules.add_subparsers(dest="modules_command", required=True)
+    modules_list = modules_sub.add_parser("list", help="List feature modules")
+    modules_list.add_argument("--json", action="store_true")
+    modules_list.set_defaults(func=cmd_modules_list)
+    modules_enable = modules_sub.add_parser("enable", help="Enable an optional module in .videoedit/config.json")
+    modules_enable.add_argument("module")
+    modules_enable.set_defaults(func=cmd_modules_enable)
+    modules_disable = modules_sub.add_parser("disable", help="Disable an optional module in .videoedit/config.json")
+    modules_disable.add_argument("module")
+    modules_disable.set_defaults(func=cmd_modules_disable)
+    modules_doctor = modules_sub.add_parser("doctor", help="Check module availability and optional dependencies")
+    modules_doctor.add_argument("--json", action="store_true")
+    modules_doctor.set_defaults(func=cmd_modules_doctor)
+    modules_scaffold = modules_sub.add_parser("scaffold", help="Scaffold a community module package")
+    modules_scaffold.add_argument("name")
+    modules_scaffold.add_argument("--output", "-o", required=True)
+    modules_scaffold.set_defaults(func=cmd_modules_scaffold)
 
     return parser
 
@@ -149,6 +216,7 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
 
 
 def cmd_inventory(args: argparse.Namespace) -> int:
+    require_module_enabled("core.inventory")
     items = build_inventory(args.footage)
     write_inventory_outputs(items, os.path.join(args.output, "inventory"))
     print(f"Inventory written to {args.output}")
@@ -156,12 +224,14 @@ def cmd_inventory(args: argparse.Namespace) -> int:
 
 
 def cmd_rate(args: argparse.Namespace) -> int:
+    require_module_enabled("core.rating")
     report = run_rating(args.footage, args.output, config=config_from_args(args))
     print(json.dumps(report.summary, indent=2))
     return 0
 
 
 def cmd_export_edl(args: argparse.Namespace) -> int:
+    require_module_enabled("core.handoff")
     output = args.output
     written = []
     for value in args.selections:
@@ -173,6 +243,7 @@ def cmd_export_edl(args: argparse.Namespace) -> int:
 
 
 def cmd_extract_segments(args: argparse.Namespace) -> int:
+    require_module_enabled("core.handoff")
     written = []
     for value in args.selections:
         result = op_extract_segments({}, {"input": value, "output": args.output})
@@ -182,6 +253,7 @@ def cmd_extract_segments(args: argparse.Namespace) -> int:
 
 
 def cmd_review_assets(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
     result = generate_review_assets(
         args.ratings,
         args.output,
@@ -194,6 +266,7 @@ def cmd_review_assets(args: argparse.Namespace) -> int:
 
 
 def cmd_approve(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
     output = create_approval_file(
         args.ratings,
         args.output,
@@ -235,22 +308,138 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 def cmd_operations(args: argparse.Namespace) -> int:
     for operation in default_registry().list():
-        print(f"{operation.name:28} {operation.description}")
+        print(f"{operation.name:28} {operation.module:22} {operation.description}")
     return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     report = run_diagnostics()
+    report["modules"] = run_module_diagnostics()["modules"]
     if args.json:
         print(json.dumps(report, indent=2))
     else:
         print(format_diagnostics(report))
+        print("")
+        print("modules:")
+        for row in report["modules"]:
+            status = "enabled" if row["enabled"] else "disabled"
+            if not row["available"]:
+                status = "unavailable"
+            print(f"  {status:11} {row['id']} - {row['description']}")
     return 0 if report["status"] == "ok" else 1
 
 
 def cmd_assemble(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
     output = assemble(args.selection, args.output)
     print(f"Rough cut written to {output}")
+    return 0
+
+
+def cmd_caption_styles(args: argparse.Namespace) -> int:
+    require_module_enabled("delivery.captions")
+    for item in list_caption_styles():
+        print(f"{item['name']:20} {item['font']} {item['fontsize']}px")
+    return 0
+
+
+def cmd_burn_captions(args: argparse.Namespace) -> int:
+    require_module_enabled("delivery.captions")
+    output = burn_captions(args.input, args.subtitles, args.output, style=args.style, format_type=args.format)
+    print(f"Captioned video written to {output}")
+    return 0
+
+
+def cmd_series(args: argparse.Namespace) -> int:
+    require_module_enabled("content.series")
+    if args.ratings == "templates":
+        for template in list_series_templates():
+            print(f"{template['id']:24} {template['name']} - {template['description']}")
+        return 0
+    if not args.ratings:
+        raise ValueError("ratings.json is required, or use `videoedit series templates`")
+    if not args.output:
+        raise ValueError("--output is required")
+    result = plan_content_series(args.ratings, args.output, template=args.template, max_clips=args.max_clips)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_content_map(args: argparse.Namespace) -> int:
+    require_module_enabled("content.reports")
+    result = generate_content_map(args.ratings, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_quote_mining(args: argparse.Namespace) -> int:
+    require_module_enabled("content.reports")
+    result = generate_quote_mining(args.ratings, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_init_project(args: argparse.Namespace) -> int:
+    require_module_enabled("project.scaffold")
+    result = scaffold_project(
+        args.name,
+        args.output,
+        project_type=args.type,
+        source=args.source,
+        team_config=args.team_config,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_modules_list(args: argparse.Namespace) -> int:
+    rows = module_rows()
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    for row in rows:
+        status = "enabled" if row["enabled"] else "disabled"
+        if not row["available"]:
+            status = "unavailable"
+        core = "core" if row["core"] else "optional"
+        print(f"{row['id']:24} {status:11} {core:8} {row['description']}")
+    return 0
+
+
+def cmd_modules_enable(args: argparse.Namespace) -> int:
+    path = enable_module(args.module)
+    print(f"Enabled module {args.module} in {path}")
+    return 0
+
+
+def cmd_modules_disable(args: argparse.Namespace) -> int:
+    path = disable_module(args.module)
+    print(f"Disabled module {args.module} in {path}")
+    return 0
+
+
+def cmd_modules_doctor(args: argparse.Namespace) -> int:
+    report = run_module_diagnostics()
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    for row in report["modules"]:
+        status = "enabled" if row["enabled"] else "disabled"
+        if not row["available"]:
+            status = "unavailable"
+        print(f"{row['id']:24} {status:11} {row['description']}")
+        for group in report["checks"]:
+            if group["module"] != row["id"]:
+                continue
+            for check in group["checks"]:
+                marker = "ok" if check["available"] else "missing"
+                print(f"  {marker:7} {check['name']}")
+    return 0
+
+
+def cmd_modules_scaffold(args: argparse.Namespace) -> int:
+    files = scaffold_module(args.name, args.output)
+    print(json.dumps(files, indent=2))
     return 0
 
 

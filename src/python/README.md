@@ -22,6 +22,7 @@ python src/python/rate_footage.py footage/ --output analysis/
 
 # Package CLI
 videoedit doctor
+videoedit modules list
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 
@@ -40,6 +41,13 @@ videoedit approve analysis/ratings.json --output approved.json --decisions revie
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl analysis/selections/*.json --output edl/
+
+# Editorial/content helpers
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+videoedit init-project "May Shop Reel" --type reel --output projects/
+videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
 ```
 
 ### Python API
@@ -66,6 +74,30 @@ for clip in report.candidates[:10]:
 - `selections/*.json`
 
 Scoring is deterministic and explainable. It combines technical metadata, scene-change density, silence/non-silence ratio, audio spike windows, and optional transcript keyword hits. Each candidate carries labels, signal scores, and human-readable reasons.
+
+### Modular Feature Modules
+
+`videoedit` has built-in feature modules so optional functionality can be enabled, disabled, and extended without changing the core rating pipeline.
+
+```bash
+videoedit modules list
+videoedit modules enable content.series
+videoedit modules disable advanced.vision
+videoedit modules doctor
+videoedit modules scaffold my_feature --output videoedit-my-feature/
+```
+
+Core modules are always enabled. Optional modules are project-local and are stored in `.videoedit/config.json` when you enable or disable them. Pipeline YAML may declare `requires_modules`; validation fails before processing if a required module is disabled or unavailable.
+
+Community packages can expose modules through the `videoedit.modules` Python entry point group. External modules may contribute operations, presets, diagnostics, and content templates.
+
+Community module conventions:
+
+- Use a stable dotted module ID such as `community.shop_reports` or `advanced.my_detector`.
+- Keep optional dependencies optional; diagnostics should report unavailable providers instead of breaking package import.
+- Operations should read/write JSON-first artifacts and return a small result dictionary.
+- Presets should declare `requires_modules` when they depend on optional modules.
+- Include unit tests for module metadata, operation registration, and generated artifacts.
 
 ### Review and Approval
 
@@ -114,6 +146,10 @@ videoedit assemble approved.json --output rough_cut.mp4
 | `detect_face_person_presence` | Optional face/person presence detection from sampled frames |
 | `detect_motorsports_events` | Infer passes, incidents, starts, finishes, and pace moments |
 | `cluster_transcript_topics` | Group transcript hits into editing topics |
+| `plan_content_series` | Generate content-series plan, captions, and selection JSON |
+| `generate_content_map` | Generate ranked editorial content-map artifacts |
+| `quote_mining` | Generate transcript-forward quote-mining report |
+| `scaffold_project` | Create a project folder scaffold and `.videoedit/config.json` |
 
 ### CLI Commands
 
@@ -133,8 +169,18 @@ videoedit run pipeline.yaml --input footage/ --output output/ --dry-run
 videoedit run pipeline.yaml --input footage/ --output output/
 
 videoedit operations
+videoedit modules list
+videoedit modules doctor
 videoedit doctor
 videoedit doctor --json
+
+videoedit captions styles
+videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit init-project "May Shop Reel" --type reel --output projects/
 ```
 
 ### Presets
@@ -171,6 +217,48 @@ steps:
 Pipeline steps can reference previous artifacts by step name, for example `rate.ratings`, `review.decisions`, and `${output}/approved.json`.
 
 `videoedit validate` checks operation names, duplicate step names, and known step-result references before a run starts. `videoedit plan` and `videoedit run --dry-run` print the resolved execution plan without processing footage. `videoedit run` writes `pipeline_run.json` to the output directory with step results, durations, and final status.
+
+Pipelines can require modules:
+
+```yaml
+requires_modules:
+  - content.series
+  - delivery.captions
+```
+
+If a required module is disabled in `.videoedit/config.json`, validation stops with a targeted error.
+
+### Selection And Soundbite JSON
+
+`videoedit export-edl`, `videoedit extract-segments`, and `videoedit assemble` share one selection loader. Existing per-source selection files and `approved.json` remain supported. Drive-style soundbite JSON is also accepted:
+
+```json
+{
+  "project": "Vin Wiki Soundbites",
+  "fps": 30,
+  "clips": [
+    {
+      "source": "interview.mp4",
+      "start": "00:00:30",
+      "end": "00:01:00",
+      "label": "matt_intro"
+    }
+  ]
+}
+```
+
+When no top-level `source` is present, each clip must include `source`. FPS precedence is explicit `--fps`, then JSON `fps`, then `30`.
+
+### Content Planning
+
+```bash
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+```
+
+Content reports group candidates into editorial pillars such as expert quotes, educational teardown, build diary, motion bank, branded assets, and motorsports moments. Series planning writes `series_plan.json`, `caption_suggestions.md`, and `series_selections.json`.
 
 ### Advanced Signals
 
@@ -220,14 +308,13 @@ python --version
 | `auto_caption.py` | Burn SRT captions into video with styling | `python auto_caption.py video.mp4 out.mp4 subs.srt` |
 | `video_start.py` | Interactive project initializer | `python video_start.py --interactive` |
 
-### Cloud API Tools
+### Optional Cloud/API Tools
+
+Cloud integrations are not required for local scanning, review, or rough cuts. Maintained integrations should be added as `cloud.adapters` modules. Older direct cloud scripts are legacy references unless restored as package-backed adapters.
 
 | Tool | Description | Setup |
 |------|-------------|-------|
-| `elevenlabs/voiceover.py` | AI text-to-speech voiceover generation | Requires Eleven Labs API key |
-| `heygen/avatar.py` | AI avatar video generation | Requires HeyGen API key |
-| `canva/design.py` | Motion graphics automation | Requires Canva API key |
-| `descript/mcp.py` | Descript MCP server setup | Requires Descript API key |
+| `canva/design.py` | Local/optional motion graphics automation | Optional Canva credentials |
 
 ### DaVinci Tools
 
@@ -335,31 +422,9 @@ See `team_config.example.json` for a template.
 
 ## Cloud API Setup
 
-### Eleven Labs (Voiceover)
+The local pipeline does not require cloud APIs. Future ElevenLabs, HeyGen, Descript, and similar integrations should be added as optional `cloud.adapters` modules through the `videoedit.modules` entry point group.
 
-1. Get API key from https://elevenlabs.io/app/settings/api-keys
-2. Set environment variable:
-   ```bash
-   export ELEVENLABS_API_KEY=your_key_here
-   ```
-3. Run:
-   ```bash
-   python elevenlabs/voiceover.py --text "Welcome to the show" --output intro.mp3
-   ```
-
-### HeyGen (Avatars)
-
-1. Get API key from https://dashboard.heygen.com/settings
-2. Set environment variable:
-   ```bash
-   export HEYGEN_API_KEY=your_key_here
-   ```
-3. Run:
-   ```bash
-   python heygen/avatar.py --text "Welcome!" --output intro.mp4
-   ```
-
-### Canva (Design)
+### Canva Design Helpers
 
 1. Get API key from https://www.canva.dev/developers/connect/api
 2. Set environment variables:
@@ -393,19 +458,9 @@ See `team_config.example.json` for a template.
 
 ## Requirements.txt
 
-Create a `requirements.txt` for easy setup:
+The package extras are preferred over a standalone `requirements.txt`:
 
-```txt
-# Cloud API tools (optional)
-elevenlabs
-python-dotenv
-requests
-
-# Transcription (optional)
-openai-whisper
-```
-
-Install with:
 ```bash
-pip install -r requirements.txt
+python -m pip install -e "./src/python[whisper,advanced]"
+python -m pip install -e "./src/python[cloud]"
 ```

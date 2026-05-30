@@ -126,6 +126,8 @@ command -v videoedit
 command -v yolo
 videoedit doctor
 videoedit operations
+videoedit modules list
+videoedit modules doctor
 yolo checks
 ```
 
@@ -179,6 +181,34 @@ videoedit run roughcut.yaml --input footage/ --output output/
 ```
 
 YOLO is used by the `detect_visual_objects` operation when the `yolo` command is available.
+
+## Optional Feature Modules
+
+`videoedit` is modular. Core inventory, rating, pipeline, review, and handoff modules are always enabled. Optional modules can be enabled or disabled per project in `.videoedit/config.json`:
+
+```bash
+videoedit modules list
+videoedit modules enable content.series
+videoedit modules disable advanced.vision
+videoedit modules doctor
+videoedit modules scaffold my_feature --output videoedit-my-feature/
+```
+
+Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group.
+
+## Content, Captions, And Projects
+
+```bash
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series templates
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+videoedit captions styles
+videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
+videoedit init-project "May Shop Reel" --type reel --output projects/
+```
+
+`videoedit export-edl`, `videoedit extract-segments`, and `videoedit assemble` accept normal `approved.json` files, per-source selections, and Drive-style soundbite JSON with top-level `project`/`fps` plus per-clip `source`, `start`, `end`, and `label`.
 
 ## Install The Skill
 

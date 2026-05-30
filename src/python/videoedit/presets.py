@@ -7,6 +7,7 @@ PRESETS = {
     "simple": {
         "name": "simple",
         "description": "FFmpeg-only highlight detection and rating",
+        "requires_modules": ["core.rating"],
         "steps": [
             {
                 "name": "rate",
@@ -18,6 +19,7 @@ PRESETS = {
     "reel": {
         "name": "reel",
         "description": "Rate footage and identify high-energy reel candidates",
+        "requires_modules": ["core.rating", "core.handoff"],
         "steps": [
             {
                 "name": "rate",
@@ -35,6 +37,7 @@ PRESETS = {
     "roughcut": {
         "name": "roughcut",
         "description": "Rate footage, create review assets, approve defaults, export handoff, and assemble a rough cut",
+        "requires_modules": ["core.rating", "core.review", "core.handoff"],
         "steps": [
             {
                 "name": "rate",
@@ -83,6 +86,7 @@ PRESETS = {
     "youtube": {
         "name": "youtube",
         "description": "Rate footage and prepare longer highlight selections",
+        "requires_modules": ["core.rating", "core.handoff"],
         "steps": [
             {
                 "name": "rate",
@@ -100,6 +104,7 @@ PRESETS = {
     "documentary": {
         "name": "documentary",
         "description": "Transcript-forward documentary rough selection",
+        "requires_modules": ["core.rating", "core.handoff"],
         "steps": [
             {
                 "name": "rate",
@@ -128,6 +133,7 @@ PRESETS = {
     "motorsports": {
         "name": "motorsports",
         "description": "Racing footage rating with motorsports event and topic artifacts",
+        "requires_modules": ["core.rating", "advanced.motorsports", "content.reports", "core.review", "core.handoff"],
         "steps": [
             {
                 "name": "rate",

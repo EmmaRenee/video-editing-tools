@@ -9,6 +9,7 @@ import re
 import time
 from typing import Any
 
+from .modules import PRESET_MODULES, all_modules, assert_modules_available, is_module_enabled, load_module_config, preset_enabled
 from .operations import OperationRegistry, default_registry
 from .presets import PRESETS
 from .simple_yaml import dumps, load_mapping
@@ -37,6 +38,10 @@ OPERATION_OUTPUTS = {
     "detect_face_person_presence": {"output", "count", "status", "warnings"},
     "detect_motorsports_events": {"output", "count"},
     "cluster_transcript_topics": {"output", "count"},
+    "plan_content_series": {"plan", "captions", "selections", "count"},
+    "generate_content_map": {"json", "markdown"},
+    "quote_mining": {"markdown", "candidates", "transcript_hits"},
+    "scaffold_project": {"project", "folders", "files"},
 }
 
 OPERATION_CONTEXT_OUTPUTS = {
@@ -52,19 +57,41 @@ OPERATION_CONTEXT_OUTPUTS = {
     "detect_face_person_presence": {"face_person_presence"},
     "detect_motorsports_events": {"motorsports_events"},
     "cluster_transcript_topics": {"topic_clusters"},
+    "plan_content_series": {"series_plan", "series_selections"},
+    "generate_content_map": {"content_map"},
+    "quote_mining": {"quote_mining"},
 }
 
 
 def write_preset(name: str, output: str) -> dict[str, Any]:
-    if name not in PRESETS:
+    presets = available_presets(enabled_only=False)
+    if name not in presets:
         raise KeyError(f"Unknown preset: {name}")
+    required = set(PRESET_MODULES.get(name, set()))
+    required.update(presets[name].get("requires_modules", []))
+    if required:
+        assert_modules_available(sorted(required))
     output = os.fspath(output)
     parent = os.path.dirname(output)
     if parent:
         os.makedirs(parent, exist_ok=True)
     with open(output, "w", encoding="utf-8") as handle:
-        handle.write(dumps(PRESETS[name]) + "\n")
-    return PRESETS[name]
+        handle.write(dumps(presets[name]) + "\n")
+    return presets[name]
+
+
+def available_presets(enabled_only: bool = True) -> dict[str, dict[str, Any]]:
+    presets = dict(PRESETS)
+    module_config = load_module_config()
+    for module in all_modules().values():
+        if not module.presets:
+            continue
+        if enabled_only and not is_module_enabled(module, module_config):
+            continue
+        presets.update(module.presets)
+    if not enabled_only:
+        return presets
+    return {name: preset for name, preset in presets.items() if _preset_is_enabled(name, preset)}
 
 
 def load_pipeline(path: str) -> dict[str, Any]:
@@ -78,7 +105,8 @@ def validate_pipeline(data: dict[str, Any]) -> None:
         raise ValueError("pipeline must be a mapping")
     if "steps" not in data or not isinstance(data["steps"], list):
         raise ValueError("pipeline requires a steps list")
-    registry = default_registry()
+    assert_modules_available(data.get("requires_modules", []))
+    registry = default_registry(enabled_only=False)
     step_infos = []
     step_names: set[str] = set()
     for index, step in enumerate(data["steps"], 1):
@@ -87,6 +115,7 @@ def validate_pipeline(data: dict[str, Any]) -> None:
         if "operation" not in step:
             raise ValueError(f"step {index} is missing operation")
         operation = registry.get(step["operation"])
+        assert_modules_available([operation.module])
         step_name = str(step.get("name") or operation.name)
         if not _valid_reference_name(step_name):
             raise ValueError(f"step {index} has invalid name: {step_name}")
@@ -119,7 +148,7 @@ def run_pipeline(
     input_path = os.fspath(input_path)
     output_dir = os.fspath(output_dir)
     pipeline = load_pipeline(path)
-    registry = registry or default_registry()
+    registry = registry or default_registry(enabled_only=False)
     os.makedirs(output_dir, exist_ok=True)
     started = datetime.now()
     started_monotonic = time.monotonic()
@@ -187,7 +216,7 @@ def plan_pipeline(path: str, input_path: str, output_dir: str) -> dict[str, Any]
     input_path = os.fspath(input_path)
     output_dir = os.fspath(output_dir)
     pipeline = load_pipeline(path)
-    registry = default_registry()
+    registry = default_registry(enabled_only=False)
     context: dict[str, Any] = {
         "input": input_path,
         "output": output_dir,
@@ -318,6 +347,19 @@ def _planned_result(
         return {"output": _json_output_plan(output, "motorsports_events.json"), "count": "unknown"}
     if operation_name == "cluster_transcript_topics":
         return {"output": _json_output_plan(output, "topic_clusters.json"), "count": "unknown"}
+    if operation_name == "plan_content_series":
+        return {
+            "plan": os.path.join(output, "series_plan.json"),
+            "captions": os.path.join(output, "caption_suggestions.md"),
+            "selections": os.path.join(output, "series_selections.json"),
+            "count": "unknown",
+        }
+    if operation_name == "generate_content_map":
+        return {"json": os.path.join(output, "content_map.json"), "markdown": os.path.join(output, "ranked_content_map.md")}
+    if operation_name == "quote_mining":
+        return {"markdown": os.path.join(output, "quote_mining.md"), "candidates": "unknown", "transcript_hits": "unknown"}
+    if operation_name == "scaffold_project":
+        return {"project": output, "folders": {}, "files": {}}
     return {"output": output}
 
 
@@ -331,6 +373,8 @@ def _planned_implicit_input(operation_name: str, params: dict[str, Any], context
     if operation_name in {"detect_highlights_audio", "detect_highlights_transcript"} and context.get("ratings"):
         return context["ratings"]
     if operation_name in {"detect_motorsports_events", "cluster_transcript_topics"} and context.get("ratings"):
+        return context["ratings"]
+    if operation_name in {"plan_content_series", "generate_content_map", "quote_mining"} and context.get("ratings"):
         return context["ratings"]
     if operation_name == "assemble_rough_cut" and context.get("approved"):
         return context["approved"]
@@ -362,6 +406,13 @@ def _apply_planned_context(operation_name: str, result: dict[str, Any], context:
         context["motorsports_events"] = result.get("output")
     elif operation_name == "cluster_transcript_topics":
         context["topic_clusters"] = result.get("output")
+    elif operation_name == "plan_content_series":
+        context["series_plan"] = result.get("plan")
+        context["series_selections"] = result.get("selections")
+    elif operation_name == "generate_content_map":
+        context["content_map"] = result.get("json")
+    elif operation_name == "quote_mining":
+        context["quote_mining"] = result.get("markdown")
 
 
 def _json_output_plan(value: str, default_name: str) -> str:
@@ -479,3 +530,17 @@ def _looks_like_reference(value: str) -> bool:
 
 def _valid_reference_name(value: str) -> bool:
     return bool(re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", value))
+
+
+def _preset_is_enabled(name: str, preset: dict[str, Any]) -> bool:
+    required = set(PRESET_MODULES.get(name, set()))
+    required.update(preset.get("requires_modules", []))
+    return preset_enabled(name) and all(_module_enabled(module_id) for module_id in required)
+
+
+def _module_enabled(module_id: str) -> bool:
+    try:
+        assert_modules_available([module_id])
+    except ValueError:
+        return False
+    return True

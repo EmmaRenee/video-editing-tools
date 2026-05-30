@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 
+from .selections import load_selection
 from .timecode import seconds_to_timecode, timecode_to_seconds
 
 
@@ -96,13 +96,12 @@ def generate_extract_script(clips: list[dict], source_file: str, clips_dir: str)
     return "\n".join(lines) + "\n"
 
 
-def export_selection_file(selection_path: str, output_dir: str, fps: float = 30.0) -> list[str]:
+def export_selection_file(selection_path: str, output_dir: str, fps: float | None = None) -> list[str]:
     selection_path = os.fspath(selection_path)
     output_dir = os.fspath(output_dir)
-    with open(selection_path, encoding="utf-8") as handle:
-        data = json.loads(handle.read())
-    source = data["source"]
-    clips = data.get("clips", [])
+    selection = load_selection(selection_path, fps=fps)
+    source = selection.source or "mixed"
+    clips = selection.clips
     os.makedirs(output_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(selection_path))[0]
     paths = [
@@ -112,8 +111,8 @@ def export_selection_file(selection_path: str, output_dir: str, fps: float = 30.
         os.path.join(output_dir, f"{stem}_extract.sh"),
     ]
     payloads = [
-        generate_edl(clips, source, fps=fps),
-        generate_xml(clips, source, fps=fps),
+        generate_edl(clips, source, fps=selection.fps),
+        generate_xml(clips, source, fps=selection.fps),
         generate_m3u(clips, source),
         generate_extract_script(clips, source, os.path.join(output_dir, f"{stem}_clips")),
     ]

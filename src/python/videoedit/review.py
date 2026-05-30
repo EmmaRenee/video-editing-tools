@@ -10,13 +10,14 @@ import re
 
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
+from .selections import load_selection
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
 def assemble(selection_json: str, output: str) -> str:
     selection_json = os.fspath(selection_json)
     output = os.fspath(output)
-    data = _read_json(selection_json)
+    selection = load_selection(selection_json)
     output_dir = os.path.dirname(output) or "."
     output_stem = os.path.splitext(os.path.basename(output))[0]
     os.makedirs(output_dir, exist_ok=True)
@@ -24,11 +25,8 @@ def assemble(selection_json: str, output: str) -> str:
     os.makedirs(clips_dir, exist_ok=True)
     concat = os.path.join(output_dir, f"{output_stem}_concat.txt")
     lines: list[str] = []
-    default_source = data.get("source")
-    for index, clip in enumerate(data.get("clips", []), 1):
-        source = clip.get("source") or default_source
-        if not source or source == "mixed":
-            raise ValueError(f"clip {index} is missing source")
+    for index, clip in enumerate(selection.clips, 1):
+        source = clip["source"]
         label = _safe_slug(clip.get("label") or clip.get("id") or f"clip_{index:03d}")
         clip_path = os.path.join(clips_dir, f"{index:03d}_{label}.mp4")
         run_command_check(

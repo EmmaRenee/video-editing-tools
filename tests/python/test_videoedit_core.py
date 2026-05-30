@@ -6,7 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PYTHON_SRC = os.path.join(ROOT, "src", "python")
@@ -19,17 +19,22 @@ from videoedit.advanced import (
     detect_motorsports_events,
     detect_visual_objects,
 )
+from videoedit.captions import srt_to_ass
 from videoedit.cli import main
 import videoedit.cli as cli_module
+from videoedit.content import generate_content_map, generate_quote_mining, plan_content_series
 from videoedit.diagnostics import format_diagnostics, run_diagnostics
 from videoedit.edl import export_selection_file
 from videoedit.ffmpeg import parse_audio_metadata_output, parse_scene_output, parse_silence_output, run_command_check
 from videoedit.models import AudioLevel, CandidateClip, MediaAsset, SignalReport
+from videoedit.modules import disable_module, enable_module, module_rows, operation_enabled
 from videoedit.operations import default_registry
 import videoedit.operations as operations_module
 from videoedit.pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from videoedit.rating import generate_candidates, score_signal
 from videoedit.review import create_approval_file, generate_review_assets
+from videoedit.scaffold import scaffold_project
+from videoedit.selections import load_selection
 from videoedit.simple_yaml import load_mapping
 
 
@@ -673,6 +678,183 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("/tmp/b.mp4", edl)
             self.assertIn("/tmp/a.mp4", m3u)
             self.assertIn("/tmp/b.mp4", m3u)
+
+    def test_drive_style_soundbite_json_exports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            selection = os.path.join(tmp, "soundbites.json")
+            output = os.path.join(tmp, "edl")
+            with open(selection, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "project": "Vin Wiki Soundbites",
+                            "fps": 24,
+                            "clips": [
+                                {
+                                    "source": "/tmp/interview.mp4",
+                                    "start": "00:00:30",
+                                    "end": "00:01:00",
+                                    "label": "matt_intro",
+                                }
+                            ],
+                        }
+                    )
+                )
+            document = load_selection(selection)
+            self.assertEqual(document.project, "Vin Wiki Soundbites")
+            self.assertEqual(document.fps, 24)
+            paths = export_selection_file(selection, output)
+            with open(paths[0], encoding="utf-8") as handle:
+                self.assertIn("/tmp/interview.mp4", handle.read())
+
+    def test_selection_requires_per_clip_source_without_top_level_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            selection = os.path.join(tmp, "bad.json")
+            with open(selection, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"project": "Paper Edit", "clips": [{"start": "00:00:01", "end": "00:00:02"}]}))
+            with self.assertRaisesRegex(ValueError, "missing source"):
+                load_selection(selection)
+
+
+class ModuleTests(unittest.TestCase):
+    def test_modules_can_disable_and_enable_optional_operations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(operation_enabled("plan_content_series", cwd=tmp))
+            disable_module("content.series", cwd=tmp)
+            self.assertFalse(operation_enabled("plan_content_series", cwd=tmp))
+            registry = default_registry(cwd=tmp)
+            with self.assertRaises(KeyError):
+                registry.get("plan_content_series")
+            enable_module("content.series", cwd=tmp)
+            self.assertTrue(operation_enabled("plan_content_series", cwd=tmp))
+
+    def test_cli_modules_list_and_scaffold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    self.assertEqual(main(["modules", "list"]), 0)
+                self.assertIn("content.series", buffer.getvalue())
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["modules", "disable", "content.series"]), 0)
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(["series", "templates"]), 1)
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["modules", "enable", "content.series"]), 0)
+                module_root = os.path.join(tmp, "videoedit-my-feature")
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["modules", "scaffold", "my_feature", "--output", module_root]), 0)
+                self.assertTrue(os.path.exists(os.path.join(module_root, "pyproject.toml")))
+                self.assertTrue(os.path.exists(os.path.join(module_root, "my_feature", "module.py")))
+            finally:
+                os.chdir(cwd)
+
+    def test_pipeline_requires_modules_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                disable_module("content.series")
+                with self.assertRaisesRegex(ValueError, "disabled module content.series"):
+                    validate_pipeline(
+                        {
+                            "name": "series",
+                            "requires_modules": ["content.series"],
+                            "steps": [{"name": "rate", "operation": "rate_footage"}],
+                        }
+                    )
+            finally:
+                os.chdir(cwd)
+
+
+class CaptionContentScaffoldTests(unittest.TestCase):
+    def test_srt_to_ass_uses_packaged_styles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            srt = os.path.join(tmp, "captions.srt")
+            with open(srt, "w", encoding="utf-8") as handle:
+                handle.write("1\n00:00:01,000 --> 00:00:02,000\nHello\nworld\n\n")
+            ass = srt_to_ass(srt, style_name="automotive_racing", width=1080, height=1920)
+            self.assertIn("PlayResX: 1080", ass)
+            self.assertIn("Style: Default,Arial", ass)
+            self.assertIn(r"Hello\Nworld", ass)
+
+    def test_content_series_and_reports_from_ratings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            _write_sample_ratings(ratings)
+            series_dir = os.path.join(tmp, "series")
+            series = plan_content_series(ratings, series_dir, template="team_tuesday", max_clips=2)
+            self.assertTrue(os.path.exists(series["plan"]))
+            self.assertTrue(os.path.exists(series["captions"]))
+            self.assertTrue(os.path.exists(series["selections"]))
+            reports = os.path.join(tmp, "reports")
+            content_map = generate_content_map(ratings, reports)
+            quote_mining = generate_quote_mining(ratings, reports)
+            self.assertTrue(os.path.exists(content_map["markdown"]))
+            self.assertTrue(os.path.exists(content_map["json"]))
+            self.assertTrue(os.path.exists(quote_mining["markdown"]))
+
+    def test_project_scaffold_writes_videoedit_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = scaffold_project("My Reel", tmp, project_type="reel")
+            project = result["project"]
+            self.assertTrue(os.path.isdir(os.path.join(project, "raw")))
+            self.assertTrue(os.path.exists(os.path.join(project, ".videoedit", "config.json")))
+            self.assertTrue(os.path.exists(os.path.join(project, "README.md")))
+
+
+def _write_sample_ratings(path: str) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "summary": {"files": 2, "candidates": 2, "total_duration": 120},
+                    "signals": [
+                        {
+                            "asset": {"filename": "interview.mp4", "filepath": "/tmp/interview.mp4"},
+                            "transcript_hits": [
+                                {
+                                    "start": 30,
+                                    "end": 40,
+                                    "start_tc": "00:00:30",
+                                    "end_tc": "00:00:40",
+                                    "text": "This is the part customers need to understand.",
+                                    "keywords": ["customers"],
+                                }
+                            ],
+                        }
+                    ],
+                    "candidates": [
+                        {
+                            "id": "clip_0001",
+                            "source": "/tmp/interview.mp4",
+                            "start": "00:00:30",
+                            "end": "00:00:45",
+                            "duration": 15,
+                            "score": 92,
+                            "action": "select",
+                            "labels": ["transcript_hit"],
+                            "reasons": ["transcript keywords: customers, detail"],
+                            "signals": {"transcript_score": 20},
+                        },
+                        {
+                            "id": "clip_0002",
+                            "source": "/tmp/shop.mp4",
+                            "start": "00:01:00",
+                            "end": "00:01:20",
+                            "duration": 20,
+                            "score": 84,
+                            "action": "review",
+                            "labels": ["audio_spike", "scene_change"],
+                            "reasons": ["engine build progress", "audio peak -10 dB RMS"],
+                            "signals": {"audio_interest_score": 25},
+                        },
+                    ],
+                }
+            )
+        )
 
 
 class SmokeTests(unittest.TestCase):

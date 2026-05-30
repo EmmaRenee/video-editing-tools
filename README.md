@@ -80,6 +80,7 @@ python src/python/rate_footage.py "footage/" --output analysis/
 
 # Package CLI
 videoedit doctor
+videoedit modules list
 videoedit rate footage/ --output analysis/
 videoedit review-assets analysis/ratings.json --output review/
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
@@ -88,12 +89,14 @@ videoedit init reel --output reel.yaml
 videoedit run reel.yaml --input footage/ --output output/
 videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
+videoedit content-map analysis/ratings.json --output reports/
+videoedit quote-mining analysis/ratings.json --output reports/
+videoedit series analysis/ratings.json --template team_tuesday --output series/
+videoedit init-project "May Shop Reel" --type reel --output projects/
 
 # Burn captions
 python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
-
-# Cloud API tools (require API keys)
-python src/python/elevenlabs/voiceover.py --text "Welcome" --output intro.mp3
+videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
 ```
 
 See [src/python/README.md](src/python/README.md) for full documentation.

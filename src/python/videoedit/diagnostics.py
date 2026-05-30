@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import importlib.util
+import os
 import shutil
 import sys
 from typing import Any, Callable
@@ -29,7 +30,7 @@ def run_diagnostics(
     resolver: Callable[[str], str | None] | None = None,
     module_resolver: Callable[[str], Any] | None = None,
 ) -> dict:
-    resolver = resolver or shutil.which
+    resolver = resolver or resolve_command
     module_resolver = module_resolver or importlib.util.find_spec
     required = [_command_status(name, purpose, resolver) for name, purpose in REQUIRED_COMMANDS.items()]
     optional = [_command_status(name, purpose, resolver) for name, purpose in OPTIONAL_COMMANDS.items()]
@@ -92,3 +93,17 @@ def _format_command(item: dict) -> str:
     marker = "ok" if item.get("available") else "missing"
     path = f" ({item['path']})" if item.get("path") else ""
     return f"  {marker:7} {item['name']} - {item['purpose']}{path}"
+
+
+def resolve_command(name: str) -> str | None:
+    path = shutil.which(name)
+    if path:
+        return path
+    scripts_dir = os.path.dirname(sys.executable)
+    candidates = [os.path.join(scripts_dir, name), os.path.join(sys.prefix, "bin", name)]
+    if sys.platform == "win32":
+        candidates.extend(f"{candidate}.exe" for candidate in list(candidates))
+    for candidate in candidates:
+        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None

@@ -6,7 +6,6 @@ import glob
 import json
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -17,12 +16,18 @@ from .advanced import (
     detect_ocr_signage,
     detect_visual_objects,
 )
+from .captions import burn_captions
 from .config import AnalysisConfig
+from .content import generate_content_map, generate_quote_mining, plan_content_series
+from .diagnostics import resolve_command
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
 from .inventory import build_inventory, write_inventory_outputs
+from .modules import all_modules, is_module_enabled, load_module_config, module_for_operation, operation_enabled
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
+from .scaffold import scaffold_project
+from .selections import load_selection
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
@@ -34,14 +39,20 @@ class Operation:
     name: str
     description: str
     func: OperationFunc
+    module: str = "core.pipeline"
 
 
 class OperationRegistry:
     def __init__(self) -> None:
         self._operations: dict[str, Operation] = {}
 
-    def register(self, name: str, description: str, func: OperationFunc) -> None:
-        self._operations[name] = Operation(name=name, description=description, func=func)
+    def register(self, name: str, description: str, func: OperationFunc, module: str | None = None) -> None:
+        self._operations[name] = Operation(
+            name=name,
+            description=description,
+            func=func,
+            module=module or module_for_operation(name),
+        )
 
     def get(self, name: str) -> Operation:
         if name not in self._operations:
@@ -52,33 +63,59 @@ class OperationRegistry:
         return [self._operations[key] for key in sorted(self._operations)]
 
 
-def default_registry() -> OperationRegistry:
+def default_registry(enabled_only: bool = True, cwd: str | None = None) -> OperationRegistry:
     registry = OperationRegistry()
-    registry.register("inventory", "Scan footage and write inventory artifacts", op_inventory)
-    registry.register("analyze_signals", "Analyze footage signals and write ratings artifacts", op_rate_footage)
-    registry.register("rate_footage", "Inventory, score, and rank candidate clips", op_rate_footage)
-    registry.register("detect_highlights_audio", "Filter rating candidates with audio labels", op_filter_audio_candidates)
-    registry.register(
+    _register(registry, enabled_only, cwd, "inventory", "Scan footage and write inventory artifacts", op_inventory)
+    _register(registry, enabled_only, cwd, "analyze_signals", "Analyze footage signals and write ratings artifacts", op_rate_footage)
+    _register(registry, enabled_only, cwd, "rate_footage", "Inventory, score, and rank candidate clips", op_rate_footage)
+    _register(registry, enabled_only, cwd, "detect_highlights_audio", "Filter rating candidates with audio labels", op_filter_audio_candidates)
+    _register(
+        registry,
+        enabled_only,
+        cwd,
         "detect_highlights_transcript",
         "Filter rating candidates with transcript labels",
         op_filter_transcript_candidates,
     )
-    registry.register("transcribe_whisper", "Run Whisper transcription for a single video or folder", op_transcribe_whisper)
-    registry.register("extract_segments", "Extract clips from selection JSON files", op_extract_segments)
-    registry.register("generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
-    registry.register("generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
-    registry.register("approve_candidates", "Create approved.json from rating candidates", op_approve_candidates)
-    registry.register("assemble_rough_cut", "Assemble a rough cut from approved selections", op_assemble)
-    registry.register("format_video", "Format a video with an FFmpeg video filter", op_format_video)
-    registry.register("burn_captions", "Burn subtitles into a video with FFmpeg", op_burn_captions)
-    registry.register("normalize_audio", "Normalize audio to target loudness", op_normalize_audio)
-    registry.register("concatenate_videos", "Concatenate extracted clips with FFmpeg", op_concatenate_videos)
-    registry.register("detect_ocr_signage", "Optionally detect OCR/signage text from sampled frames", op_detect_ocr)
-    registry.register("detect_visual_objects", "Optionally run an external object detector", op_detect_objects)
-    registry.register("detect_face_person_presence", "Optionally detect face/person presence from sampled frames", op_face_person)
-    registry.register("detect_motorsports_events", "Infer motorsports event moments from ratings", op_motorsports_events)
-    registry.register("cluster_transcript_topics", "Cluster transcript hits into editing topics", op_transcript_topics)
+    _register(registry, enabled_only, cwd, "transcribe_whisper", "Run Whisper transcription for a single video or folder", op_transcribe_whisper)
+    _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
+    _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
+    _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
+    _register(registry, enabled_only, cwd, "approve_candidates", "Create approved.json from rating candidates", op_approve_candidates)
+    _register(registry, enabled_only, cwd, "assemble_rough_cut", "Assemble a rough cut from approved selections", op_assemble)
+    _register(registry, enabled_only, cwd, "format_video", "Format a video with an FFmpeg video filter", op_format_video)
+    _register(registry, enabled_only, cwd, "burn_captions", "Burn subtitles into a video with FFmpeg", op_burn_captions)
+    _register(registry, enabled_only, cwd, "normalize_audio", "Normalize audio to target loudness", op_normalize_audio)
+    _register(registry, enabled_only, cwd, "concatenate_videos", "Concatenate extracted clips with FFmpeg", op_concatenate_videos)
+    _register(registry, enabled_only, cwd, "detect_ocr_signage", "Optionally detect OCR/signage text from sampled frames", op_detect_ocr)
+    _register(registry, enabled_only, cwd, "detect_visual_objects", "Optionally run an external object detector", op_detect_objects)
+    _register(registry, enabled_only, cwd, "detect_face_person_presence", "Optionally detect face/person presence from sampled frames", op_face_person)
+    _register(registry, enabled_only, cwd, "detect_motorsports_events", "Infer motorsports event moments from ratings", op_motorsports_events)
+    _register(registry, enabled_only, cwd, "cluster_transcript_topics", "Cluster transcript hits into editing topics", op_transcript_topics)
+    _register(registry, enabled_only, cwd, "plan_content_series", "Plan reusable content-series clips from ratings", op_plan_content_series)
+    _register(registry, enabled_only, cwd, "generate_content_map", "Generate a ranked editorial content map", op_generate_content_map)
+    _register(registry, enabled_only, cwd, "quote_mining", "Generate transcript-forward quote-mining report", op_quote_mining)
+    _register(registry, enabled_only, cwd, "scaffold_project", "Create a video project folder scaffold", op_scaffold_project)
+    module_config = load_module_config(cwd)
+    for module in all_modules(cwd).values():
+        if enabled_only and not is_module_enabled(module, module_config):
+            continue
+        for operation in module.operations:
+            registry.register(operation.name, operation.description, operation.func, module=module.id)
     return registry
+
+
+def _register(
+    registry: OperationRegistry,
+    enabled_only: bool,
+    cwd: str | None,
+    name: str,
+    description: str,
+    func: OperationFunc,
+) -> None:
+    if enabled_only and not operation_enabled(name, cwd):
+        return
+    registry.register(name, description, func)
 
 
 def op_inventory(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -141,7 +178,7 @@ def op_filter_transcript_candidates(context: dict[str, Any], params: dict[str, A
 
 
 def op_transcribe_whisper(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    whisper = shutil.which("whisper")
+    whisper = resolve_command("whisper")
     if not whisper:
         raise RuntimeError("whisper command not found")
     input_path = os.fspath(params.get("input") or context["input"])
@@ -161,7 +198,7 @@ def op_transcribe_whisper(context: dict[str, Any], params: dict[str, Any]) -> di
 def op_generate_edl(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     selection_glob = params.get("input") or context.get("selections")
     output_dir = os.fspath(params.get("output") or context["output"])
-    fps = float(params.get("fps", 30))
+    fps = float(params["fps"]) if "fps" in params and params["fps"] is not None else None
     selection_paths = _selection_paths(selection_glob)
     written = []
     for path in selection_paths:
@@ -217,11 +254,9 @@ def op_extract_segments(context: dict[str, Any], params: dict[str, Any]) -> dict
     os.makedirs(output_dir, exist_ok=True)
     written = []
     for selection_path in selection_paths:
-        with open(selection_path, encoding="utf-8") as handle:
-            data = json.loads(handle.read())
-        default_source = data.get("source")
-        for index, clip in enumerate(data.get("clips", []), 1):
-            source = _clip_source(clip, default_source, index)
+        selection = load_selection(selection_path)
+        for index, clip in enumerate(selection.clips, 1):
+            source = clip["source"]
             label = _safe_slug(clip.get("label") or clip.get("id") or f"clip_{index:03d}")
             source_stem = _safe_slug(os.path.splitext(os.path.basename(source))[0])
             output = os.path.join(output_dir, f"{source_stem}_{label}.mp4")
@@ -230,6 +265,47 @@ def op_extract_segments(context: dict[str, Any], params: dict[str, Any]) -> dict
             )
             written.append(output)
     return {"output": output_dir, "files": written}
+
+
+def op_plan_content_series(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "series"))
+    result = plan_content_series(
+        ratings_path,
+        output_dir,
+        template=params.get("template", "team_tuesday"),
+        max_clips=int(params.get("max_clips", 5)),
+    )
+    context["series_plan"] = result["plan"]
+    context["series_selections"] = result["selections"]
+    return result
+
+
+def op_generate_content_map(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "reports"))
+    result = generate_content_map(ratings_path, output_dir)
+    context["content_map"] = result["json"]
+    return result
+
+
+def op_quote_mining(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "reports"))
+    result = generate_quote_mining(ratings_path, output_dir)
+    context["quote_mining"] = result["markdown"]
+    return result
+
+
+def op_scaffold_project(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    result = scaffold_project(
+        params["name"],
+        os.fspath(params.get("output") or context.get("output") or "."),
+        project_type=params.get("type", params.get("project_type", "reel")),
+        source=params.get("source"),
+        team_config=params.get("team_config"),
+    )
+    return result
 
 
 def op_format_video(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -241,18 +317,14 @@ def op_format_video(context: dict[str, Any], params: dict[str, Any]) -> dict[str
 
 
 def op_burn_captions(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    run_command_check(
-        [
-            "ffmpeg",
-            "-i",
-            params["input"],
-            "-vf",
-            f"subtitles={params['subtitles']}",
-            params["output"],
-            "-y",
-        ]
+    output = burn_captions(
+        params["input"],
+        params["subtitles"],
+        params["output"],
+        style=params.get("style", "automotive_racing"),
+        format_type=params.get("format", params.get("format_type", "original")),
     )
-    return {"output": params["output"]}
+    return {"output": output}
 
 
 def op_normalize_audio(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
