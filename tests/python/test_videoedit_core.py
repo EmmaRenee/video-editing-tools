@@ -397,6 +397,22 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(json.loads(stdout.getvalue())["pipeline"], "simple")
             self.assertFalse(os.path.exists(os.path.join(output, "pipeline_run.json")))
 
+    def test_rate_operation_rejects_conflicting_signal_artifact_aliases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(
+                ValueError,
+                "visual_objects: visual_objects, visual_objects_path",
+            ):
+                operations_module.op_rate_footage(
+                    {"input": tmp, "output": tmp},
+                    {
+                        "config": {
+                            "visual_objects": "objects_a.json",
+                            "visual_objects_path": "objects_b.json",
+                        }
+                    },
+                )
+
     def test_cli_extract_segments_dispatches_to_operation(self):
         with tempfile.TemporaryDirectory() as tmp:
             selection = os.path.join(tmp, "approved.json")

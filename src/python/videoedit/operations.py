@@ -34,6 +34,16 @@ from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 OperationFunc = Callable[[dict[str, Any], dict[str, Any]], Any]
 
+SIGNAL_ARTIFACT_ALIASES = {
+    "visual_objects": "visual_objects",
+    "visual_objects_path": "visual_objects",
+    "ocr_signage": "ocr_signage",
+    "face_person": "face_person",
+    "face_person_presence": "face_person",
+    "motorsports_events": "motorsports_events",
+    "topic_clusters": "topic_clusters",
+}
+
 
 @dataclass
 class Operation:
@@ -136,27 +146,36 @@ def op_rate_footage(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     output_dir = os.fspath(params.get("output") or context["output"])
     config_data = params.get("config") if isinstance(params.get("config"), dict) else params
     config_data = dict(config_data)
-    artifacts = dict(config_data.get("signal_artifacts") or {})
-    for param_key, artifact_key in {
-        "visual_objects": "visual_objects",
-        "visual_objects_path": "visual_objects",
-        "ocr_signage": "ocr_signage",
-        "face_person": "face_person",
-        "face_person_presence": "face_person",
-        "motorsports_events": "motorsports_events",
-        "topic_clusters": "topic_clusters",
-    }.items():
-        if config_data.get(param_key):
-            artifacts[artifact_key] = config_data[param_key]
-    if artifacts:
-        config_data["signal_artifacts"] = artifacts
-        if artifacts.get("visual_objects"):
-            config_data["visual_objects_path"] = artifacts["visual_objects"]
+    _merge_signal_artifact_aliases(config_data)
     config = AnalysisConfig.from_mapping(config_data)
     report = run_rating(input_path, output_dir, config=config)
     context["ratings"] = os.path.join(output_dir, "ratings.json")
     context["selections"] = os.path.join(output_dir, "selections")
     return {"ratings": context["ratings"], "candidates": len(report.candidates)}
+
+
+def _merge_signal_artifact_aliases(config_data: dict[str, Any]) -> None:
+    artifacts = dict(config_data.get("signal_artifacts") or {})
+    present: dict[str, list[str]] = {}
+    for param_key, artifact_key in SIGNAL_ARTIFACT_ALIASES.items():
+        if config_data.get(param_key):
+            present.setdefault(artifact_key, []).append(param_key)
+
+    conflicts = {artifact_key: keys for artifact_key, keys in present.items() if len(keys) > 1}
+    if conflicts:
+        details = "; ".join(
+            f"{artifact_key}: {', '.join(keys)}"
+            for artifact_key, keys in sorted(conflicts.items())
+        )
+        raise ValueError(f"conflicting signal artifact aliases: {details}")
+
+    for artifact_key, keys in present.items():
+        artifacts[artifact_key] = config_data[keys[0]]
+
+    if artifacts:
+        config_data["signal_artifacts"] = artifacts
+        if artifacts.get("visual_objects"):
+            config_data["visual_objects_path"] = artifacts["visual_objects"]
 
 
 def op_filter_candidates(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
