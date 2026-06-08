@@ -8,6 +8,7 @@ import json
 import os
 import sys
 
+from .calibration import evaluate_ratings, init_annotation_file, tune_scoring
 from .captions import burn_captions, list_caption_styles
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
@@ -109,6 +110,24 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="Print machine-readable diagnostics")
     doctor.set_defaults(func=cmd_doctor)
 
+    calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
+    calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
+    calibrate_init = calibrate_sub.add_parser("init", help="Write a starter annotation JSON file")
+    calibrate_init.add_argument("--output", "-o", required=True)
+    calibrate_init.add_argument("--project", default="Videoedit Calibration")
+    calibrate_init.add_argument("--source-root", default="footage/")
+    calibrate_init.set_defaults(func=cmd_calibrate_init)
+    calibrate_evaluate = calibrate_sub.add_parser("evaluate", help="Evaluate ratings.json against annotation JSON")
+    calibrate_evaluate.add_argument("ratings")
+    calibrate_evaluate.add_argument("--annotations", required=True)
+    calibrate_evaluate.add_argument("--output", "-o", required=True)
+    calibrate_evaluate.set_defaults(func=cmd_calibrate_evaluate)
+    calibrate_tune = calibrate_sub.add_parser("tune", help="Write proposed scoring config candidates")
+    calibrate_tune.add_argument("ratings")
+    calibrate_tune.add_argument("--annotations", required=True)
+    calibrate_tune.add_argument("--output", "-o", required=True)
+    calibrate_tune.set_defaults(func=cmd_calibrate_tune)
+
     assemble_cmd = sub.add_parser("assemble", help="Assemble a rough cut from selection or approved JSON")
     assemble_cmd.add_argument("selection")
     assemble_cmd.add_argument("--output", "-o", required=True)
@@ -180,6 +199,7 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config")
     parser.add_argument("--transcript", choices=["off", "auto", "required"], default=None)
     parser.add_argument("--transcript-dir")
+    parser.add_argument("--visual-objects", help="visual_objects.json from detect_visual_objects")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -196,6 +216,8 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         config.transcript_mode = args.transcript
     if args.transcript_dir:
         config.transcript_dir = args.transcript_dir
+    if args.visual_objects:
+        config.visual_objects_path = args.visual_objects
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -327,6 +349,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 status = "unavailable"
             print(f"  {status:11} {row['id']} - {row['description']}")
     return 0 if report["status"] == "ok" else 1
+
+
+def cmd_calibrate_init(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    output = init_annotation_file(args.output, project=args.project, source_root=args.source_root)
+    print(f"Annotation template written to {output}")
+    return 0
+
+
+def cmd_calibrate_evaluate(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = evaluate_ratings(args.ratings, args.annotations, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_calibrate_tune(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = tune_scoring(args.ratings, args.annotations, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_assemble(args: argparse.Namespace) -> int:

@@ -104,12 +104,46 @@ class TranscriptHit:
 
 
 @dataclass
+class ObjectHit:
+    start: float
+    end: float
+    class_name: str
+    class_id: int | None = None
+    count: int = 1
+    confidence: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start": self.start,
+            "end": self.end,
+            "class_name": self.class_name,
+            "class_id": self.class_id,
+            "count": self.count,
+            "confidence": self.confidence,
+            "start_tc": seconds_to_hhmmss(self.start),
+            "end_tc": seconds_to_hhmmss(self.end),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ObjectHit":
+        return cls(
+            start=float(data.get("start_seconds", data.get("start", 0))),
+            end=float(data.get("end_seconds", data.get("end", data.get("start", 0)))),
+            class_name=str(data.get("class_name") or data.get("label") or "object"),
+            class_id=int(data["class_id"]) if data.get("class_id") is not None else None,
+            count=int(data.get("count", data.get("detection_count", 1))),
+            confidence=float(data["confidence"]) if data.get("confidence") is not None else None,
+        )
+
+
+@dataclass
 class SignalReport:
     asset: MediaAsset
     scene_changes: list[float] = field(default_factory=list)
     silence_intervals: list[SilenceInterval] = field(default_factory=list)
     audio_levels: list[AudioLevel] = field(default_factory=list)
     transcript_hits: list[TranscriptHit] = field(default_factory=list)
+    object_hits: list[ObjectHit] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -122,6 +156,7 @@ class SignalReport:
             "silence_intervals": [item.to_dict() for item in self.silence_intervals],
             "audio_levels": [item.to_dict() for item in self.audio_levels],
             "transcript_hits": [item.to_dict() for item in self.transcript_hits],
+            "object_hits": [item.to_dict() for item in self.object_hits],
             "scores": self.scores,
             "reasons": self.reasons,
             "warnings": self.warnings,
@@ -139,6 +174,7 @@ class SignalReport:
             transcript_hits=[
                 TranscriptHit.from_dict(item) for item in data.get("transcript_hits", [])
             ],
+            object_hits=[ObjectHit.from_dict(item) for item in data.get("object_hits", [])],
             scores=dict(data.get("scores", {})),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),

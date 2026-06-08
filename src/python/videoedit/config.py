@@ -24,6 +24,21 @@ class AnalysisConfig:
     min_broll_score: int = 55
     transcript_mode: str = "auto"
     transcript_dir: str | None = None
+    visual_objects_path: str | None = None
+    object_window_pre_roll: float = 1.0
+    object_window_post_roll: float = 2.0
+    object_interest_classes: list[str] = field(
+        default_factory=lambda: [
+            "person",
+            "car",
+            "truck",
+            "motorcycle",
+            "bicycle",
+            "bus",
+            "traffic light",
+            "stop sign",
+        ]
+    )
     cache: bool = True
     command_timeout: int = 180
     keywords: list[str] = field(
@@ -53,6 +68,7 @@ class AnalysisConfig:
             "visual": 25,
             "audio": 35,
             "transcript": 20,
+            "objects": 10,
         }
     )
 

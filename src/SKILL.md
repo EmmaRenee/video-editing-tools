@@ -65,7 +65,9 @@ User mentions video editing?
 Raw footage (hours)
   → videoedit modules/doctor (confirm enabled feature surface)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
+  → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
   → ratings.json + candidates.csv + review assets
+  → videoedit calibrate evaluate/tune when human annotations exist
   → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
   → approved.json
@@ -107,6 +109,7 @@ Available built-in modules:
 |--------|-----|
 | `core.inventory` | Footage catalog and metadata |
 | `core.rating` | Signal analysis, scoring, candidate selection |
+| `core.calibration` | Ground-truth scoring evaluation and tuning |
 | `core.pipeline` | YAML planning, validation, and runs |
 | `core.review` | Review assets, approvals, rough cuts |
 | `core.handoff` | EDL/XML/M3U and clip extraction |
@@ -129,6 +132,46 @@ This writes inventory, ratings, candidates, review docs, and per-source selectio
 ```bash
 python src/python/rate_footage.py footage/ --output analysis/
 ```
+
+### 2a. Optional YOLO object signals
+
+Use this only when `advanced.vision` is enabled and object/person/vehicle presence should influence B-roll or rough-cut selection. Create a one-step pipeline:
+
+```yaml
+name: vision
+requires_modules:
+  - advanced.vision
+steps:
+  - name: objects
+    operation: detect_visual_objects
+    params:
+      input: footage/
+      output: analysis/visual_objects.json
+      model: yolo26n.pt
+      max_detections: 5000
+```
+
+Then run:
+
+```bash
+videoedit run vision.yaml --input footage/ --output analysis/vision
+videoedit rate footage/ --output analysis_objects/ --visual-objects analysis/visual_objects.json
+```
+
+`visual_objects.json` contains parsed YOLO detections, class counts, and timestamped object segments. `rate --visual-objects` adds `object_*` labels, `object_hits`, and `object_presence_score` to ratings.
+
+### 2b. Calibrate scoring with human annotations
+
+Use calibration when the user has reviewed footage or wants to tune the scorer before rough cuts:
+
+```bash
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
+```
+
+Annotation ratings are `select`, `review`, `broll`, `reject`, `cut`, and `ignore`. Calibration writes precision/recall reports, missed moments, false positives, ranked config candidates, and `proposed_config.json`; it does not overwrite project defaults.
 
 ### 3. Review and approve
 
@@ -207,6 +250,8 @@ rate_footage
 transcribe_whisper
 detect_highlights_audio
 detect_highlights_transcript
+evaluate_ratings
+calibrate_scoring
 generate_review_assets
 approve_candidates
 assemble_rough_cut
@@ -243,6 +288,9 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `review.md` | Human-readable review summary |
 | `review.html` | Table view of candidates and score explanations |
 | `selections/*.json` | Per-source selection JSON for EDL/export operations |
+| `calibration_report.json`, `calibration_report.md` | Scoring precision/recall against annotations |
+| `missed_moments.csv`, `false_positives.csv` | Calibration review queues |
+| `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
 
 Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
 
@@ -321,7 +369,7 @@ Keep these optional. The base pipeline should work with only FFmpeg/ffprobe.
 | Operation | Output | Dependency |
 |-----------|--------|------------|
 | `detect_ocr_signage` | `ocr_signage.json` | FFmpeg + Tesseract |
-| `detect_visual_objects` | `visual_objects.json` | External detector such as YOLO |
+| `detect_visual_objects` | `visual_objects.json` | External detector such as YOLO; includes parsed detections, class counts, and timestamped object segments |
 | `detect_face_person_presence` | `face_person_presence.json` | FFmpeg + OpenCV |
 | `detect_motorsports_events` | `motorsports_events.json` | `ratings.json` |
 | `cluster_transcript_topics` | `topic_clusters.json` | Transcript hits in `ratings.json` |

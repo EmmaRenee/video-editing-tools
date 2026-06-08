@@ -16,6 +16,7 @@ from .advanced import (
     detect_ocr_signage,
     detect_visual_objects,
 )
+from .calibration import evaluate_ratings, tune_scoring
 from .captions import burn_captions
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, plan_content_series
@@ -78,6 +79,8 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
         op_filter_transcript_candidates,
     )
     _register(registry, enabled_only, cwd, "transcribe_whisper", "Run Whisper transcription for a single video or folder", op_transcribe_whisper)
+    _register(registry, enabled_only, cwd, "evaluate_ratings", "Evaluate ratings against human annotation JSON", op_evaluate_ratings)
+    _register(registry, enabled_only, cwd, "calibrate_scoring", "Tune scoring config candidates against annotations", op_calibrate_scoring)
     _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
@@ -193,6 +196,25 @@ def op_transcribe_whisper(context: dict[str, Any], params: dict[str, Any]) -> di
             [whisper, file_path, "--model", model, "--output_format", "srt", "--output_dir", output_dir],
         )
     return {"output": output_dir, "count": len(files)}
+
+
+def op_evaluate_ratings(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    annotations = os.fspath(params["annotations"])
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "calibration"))
+    result = evaluate_ratings(ratings_path, annotations, output_dir)
+    context["calibration_report"] = result["report"]
+    return result
+
+
+def op_calibrate_scoring(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    annotations = os.fspath(params["annotations"])
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "calibration"))
+    result = tune_scoring(ratings_path, annotations, output_dir)
+    context["calibration_report"] = result["report"]
+    context["proposed_config"] = result["proposed_config"]
+    return result
 
 
 def op_generate_edl(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -372,6 +394,10 @@ def op_detect_objects(context: dict[str, Any], params: dict[str, Any]) -> dict[s
         input_path,
         output,
         command=params.get("command"),
+        model=params.get("model"),
+        confidence=float(params["confidence"]) if params.get("confidence") is not None else None,
+        max_detections=int(params.get("max_detections", 5000)),
+        segment_merge_gap=float(params.get("segment_merge_gap", 1.0)),
         timeout=int(params.get("timeout", 180)),
     )
     context["visual_objects"] = output
