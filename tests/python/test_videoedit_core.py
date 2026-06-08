@@ -35,8 +35,10 @@ import videoedit.operations as operations_module
 from videoedit.pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from videoedit.rating import generate_candidates, score_signal
 from videoedit.review import create_approval_file, generate_review_assets
+from videoedit.review_tui import filter_review_clips, load_review_session, update_review_decision, write_review_decisions
 from videoedit.scaffold import scaffold_project
 from videoedit.selections import load_selection
+from videoedit.signals import load_signal_artifacts
 from videoedit.simple_yaml import load_mapping
 
 
@@ -96,7 +98,7 @@ class ScoringTests(unittest.TestCase):
             has_audio=True,
         )
         levels = [AudioLevel(time=5, rms_db=-40), AudioLevel(time=6, rms_db=-10)]
-        scores = score_signal(asset, [6], [], levels, [], [], config)
+        scores = score_signal(asset, [6], [], levels, [], [], [], config)
         report = SignalReport(asset=asset, scene_changes=[6], audio_levels=levels, scores=scores)
         candidates = generate_candidates([report], config)
         self.assertGreaterEqual(len(candidates), 1)
@@ -125,6 +127,72 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("object_presence", candidates[0].labels)
         self.assertIn("object_person", candidates[0].labels)
         self.assertGreater(candidates[0].signals["object_presence_score"], 0)
+
+    def test_advanced_hits_seed_labels_and_scores(self):
+        config = AnalysisConfig(max_candidates=10)
+        asset = MediaAsset(
+            filename="race.mp4",
+            filepath="/tmp/race.mp4",
+            duration=30,
+            width=1920,
+            height=1080,
+            codec="h264",
+            fps=30,
+            has_audio=False,
+        )
+        report = SignalReport(
+            asset=asset,
+            scores={"technical_score": 17},
+            advanced_hits=[
+                {"kind": "motorsports_event", "start": 5, "end": 8, "event_type": "pass", "confidence": 0.8},
+                {"kind": "topic_cluster", "start": 6, "end": 9, "topic": "racecraft"},
+                {"kind": "ocr_signage", "source_wide": True, "text": "DRIVE AUTO SPORTS"},
+                {"kind": "face_person", "source_wide": True, "face_count": 2, "person_count": 3},
+            ],
+        )
+        candidates = generate_candidates([report], config)
+        self.assertEqual(len(candidates), 1)
+        self.assertIn("motorsports_event", candidates[0].labels)
+        self.assertIn("topic_cluster", candidates[0].labels)
+        self.assertIn("ocr_signage", candidates[0].labels)
+        self.assertIn("face_presence", candidates[0].labels)
+        self.assertGreater(candidates[0].signals["motorsports_event_score"], 0)
+        self.assertGreater(candidates[0].signals["topic_cluster_score"], 0)
+
+    def test_signal_artifact_loader_matches_unique_basename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            visual = os.path.join(tmp, "visual_objects.json")
+            ocr = os.path.join(tmp, "ocr_signage.json")
+            with open(visual, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "sources": [
+                                {
+                                    "source": "clips/source.mp4",
+                                    "segments": [
+                                        {
+                                            "class_name": "person",
+                                            "class_id": 0,
+                                            "start_seconds": 1,
+                                            "end_seconds": 3,
+                                            "detection_count": 10,
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    )
+                )
+            with open(ocr, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"hits": [{"source": "clips/source.mp4", "text": "shop sign"}]}))
+            config = AnalysisConfig(
+                visual_objects_path=visual,
+                signal_artifacts={"ocr_signage": ocr},
+            )
+            bundle = load_signal_artifacts(config)
+            self.assertEqual(len(bundle.objects_for(os.path.join(tmp, "other", "source.mp4"))), 1)
+            self.assertEqual(bundle.advanced_for(os.path.join(tmp, "other", "source.mp4"))[0]["kind"], "ocr_signage")
 
 
 class PipelineTests(unittest.TestCase):
@@ -174,6 +242,18 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(data["steps"][2]["input"], "transcript_highlights.selections")
             self.assertEqual(data["steps"][2]["params"]["output"], "${output}/edl")
 
+    def test_vision_reel_preset_fuses_vision_outputs_into_rate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "vision_reel.yaml")
+            write_preset("vision_reel", output)
+            data = load_pipeline(output)
+            operations = [step["operation"] for step in data["steps"]]
+            self.assertEqual(operations[:4], ["detect_visual_objects", "detect_ocr_signage", "detect_face_person_presence", "rate_footage"])
+            self.assertEqual(data["steps"][3]["params"]["visual_objects"], "objects.output")
+            plan = plan_pipeline(output, tmp, os.path.join(tmp, "out"))
+            self.assertEqual(plan["steps"][0]["planned_result"]["status"], "planned")
+            self.assertIn("detection_count", plan["steps"][0]["planned_result"])
+
     def test_pipeline_validation_rejects_unknown_step_output_reference(self):
         pipeline = {
             "name": "bad_reference",
@@ -201,7 +281,7 @@ class PipelineTests(unittest.TestCase):
             validate_pipeline(pipeline)
 
     def test_pipeline_validation_accepts_all_presets(self):
-        for preset in ["simple", "reel", "roughcut", "youtube", "documentary", "motorsports"]:
+        for preset in ["simple", "reel", "roughcut", "youtube", "documentary", "motorsports", "vision_reel"]:
             with tempfile.TemporaryDirectory() as tmp:
                 output = os.path.join(tmp, f"{preset}.yaml")
                 write_preset(preset, output)
@@ -893,6 +973,139 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("downloadDecisions", html)
             self.assertIn('class="decision"', html)
             self.assertIn('value="approve"', html)
+
+    def test_generate_review_assets_includes_signal_and_calibration_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "source.mp4")
+            ratings = os.path.join(tmp, "ratings.json")
+            calibration = os.path.join(tmp, "calibration_report.json")
+            output = os.path.join(tmp, "review")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "inventory": [
+                                {
+                                    "filepath": source,
+                                    "filename": "source.mp4",
+                                    "duration": 10,
+                                    "duration_formatted": "00:00:10",
+                                    "resolution": "1920x1080",
+                                    "fps": 30,
+                                    "codec": "h264",
+                                    "has_audio": True,
+                                    "size_mb": 10,
+                                }
+                            ],
+                            "signals": [
+                                {
+                                    "asset": {"filepath": source},
+                                    "scores": {"object_presence_score": 10},
+                                    "object_hits": [
+                                        {
+                                            "start": 0,
+                                            "end": 4,
+                                            "class_name": "person",
+                                            "class_id": 0,
+                                            "count": 12,
+                                        }
+                                    ],
+                                    "advanced_hits": [
+                                        {"kind": "ocr_signage", "source_wide": True, "text": "shop"}
+                                    ],
+                                }
+                            ],
+                            "candidates": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": source,
+                                    "start_seconds": 1,
+                                    "end_seconds": 3,
+                                    "score": 70,
+                                    "action": "review",
+                                    "labels": ["object_person"],
+                                    "reasons": ["objects detected"],
+                                    "signals": {"object_presence_score": 10},
+                                }
+                            ],
+                        }
+                    )
+                )
+            with open(calibration, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "metrics": {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+                            "matches": [
+                                {
+                                    "annotation": {"id": "ann_1", "rating": "review"},
+                                    "candidate": {"id": "clip_0001"},
+                                    "overlap_seconds": 2,
+                                    "overlap_ratio": 1.0,
+                                }
+                            ],
+                            "false_positives": [],
+                            "missed_moments": [],
+                        }
+                    )
+                )
+            result = generate_review_assets(ratings, output, max_items=1, calibration_json=calibration)
+            with open(result["manifest"], encoding="utf-8") as handle:
+                manifest = json.loads(handle.read())
+            clip = manifest["clips"][0]
+            self.assertEqual(clip["calibration"]["status"], "matched")
+            self.assertEqual(clip["source_metadata"]["resolution"], "1920x1080")
+            self.assertEqual(clip["object_hits"][0]["class_name"], "person")
+            self.assertEqual(clip["advanced_hits"][0]["kind"], "ocr_signage")
+            with open(result["contact_sheet"], encoding="utf-8") as handle:
+                html = handle.read()
+            self.assertIn("searchFilter", html)
+            self.assertIn("Calibration: matched", html)
+            self.assertIn("Objects: person", html)
+
+    def test_review_tui_data_layer_filters_updates_and_saves_decisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = os.path.join(tmp, "review_assets.json")
+            decisions = os.path.join(tmp, "review_decisions.json")
+            with open(manifest, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "ratings": "ratings.json",
+                            "clips": [
+                                {
+                                    "id": "clip_0001",
+                                    "source_name": "a.mp4",
+                                    "action": "review",
+                                    "score": 80,
+                                    "labels": ["object_person"],
+                                    "reasons": ["objects"],
+                                    "start": "00:00:01",
+                                    "end": "00:00:02",
+                                },
+                                {
+                                    "id": "clip_0002",
+                                    "source_name": "b.mp4",
+                                    "action": "cut",
+                                    "score": 40,
+                                    "labels": ["low_signal"],
+                                    "reasons": ["fallback"],
+                                    "start": "00:00:03",
+                                    "end": "00:00:04",
+                                },
+                            ],
+                        }
+                    )
+                )
+            session = load_review_session(manifest)
+            filtered = filter_review_clips(session["clips"], label="object_person")
+            self.assertEqual([clip["id"] for clip in filtered], ["clip_0001"])
+            update_review_decision(session["clips"], "clip_0002", decision="promote", note="use it", order=0)
+            write_review_decisions(session["clips"], "ratings.json", decisions)
+            with open(decisions, encoding="utf-8") as handle:
+                data = json.loads(handle.read())
+            self.assertEqual(data["decisions"][0]["id"], "clip_0002")
+            self.assertEqual(data["decisions"][0]["decision"], "promote")
 
     def test_export_handoff_uses_per_clip_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

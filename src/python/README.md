@@ -39,7 +39,8 @@ videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
 
 # Handoff and rough cut
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
@@ -312,10 +313,10 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 
 These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
 
-Use parsed object detections as explicit rating input when people, vehicles, or other object classes should affect B-roll selection:
+Use parsed signal artifacts as explicit rating inputs when people, vehicles, signage, racing events, or topics should affect B-roll selection. The `vision_reel` preset runs object/OCR/face providers first, then rates with the generated artifacts:
 
 ```yaml
-name: vision
+name: vision_reel
 requires_modules:
   - advanced.vision
 steps:
@@ -329,8 +330,14 @@ steps:
 ```
 
 ```bash
-videoedit run vision.yaml --input footage/ --output analysis/vision
-videoedit rate footage/ --output analysis_objects/ --visual-objects analysis/visual_objects.json
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
 ```
 
 Optional advanced dependencies can be installed separately:

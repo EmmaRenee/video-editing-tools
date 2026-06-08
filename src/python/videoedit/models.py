@@ -144,6 +144,7 @@ class SignalReport:
     audio_levels: list[AudioLevel] = field(default_factory=list)
     transcript_hits: list[TranscriptHit] = field(default_factory=list)
     object_hits: list[ObjectHit] = field(default_factory=list)
+    advanced_hits: list[dict[str, Any]] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -157,6 +158,7 @@ class SignalReport:
             "audio_levels": [item.to_dict() for item in self.audio_levels],
             "transcript_hits": [item.to_dict() for item in self.transcript_hits],
             "object_hits": [item.to_dict() for item in self.object_hits],
+            "advanced_hits": self.advanced_hits,
             "scores": self.scores,
             "reasons": self.reasons,
             "warnings": self.warnings,
@@ -175,6 +177,7 @@ class SignalReport:
                 TranscriptHit.from_dict(item) for item in data.get("transcript_hits", [])
             ],
             object_hits=[ObjectHit.from_dict(item) for item in data.get("object_hits", [])],
+            advanced_hits=[dict(item) for item in data.get("advanced_hits", []) if isinstance(item, dict)],
             scores=dict(data.get("scores", {})),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),

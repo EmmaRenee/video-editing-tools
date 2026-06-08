@@ -133,32 +133,27 @@ This writes inventory, ratings, candidates, review docs, and per-source selectio
 python src/python/rate_footage.py footage/ --output analysis/
 ```
 
-### 2a. Optional YOLO object signals
+### 2a. Optional vision and signal fusion
 
-Use this only when `advanced.vision` is enabled and object/person/vehicle presence should influence B-roll or rough-cut selection. Create a one-step pipeline:
-
-```yaml
-name: vision
-requires_modules:
-  - advanced.vision
-steps:
-  - name: objects
-    operation: detect_visual_objects
-    params:
-      input: footage/
-      output: analysis/visual_objects.json
-      model: yolo26n.pt
-      max_detections: 5000
-```
-
-Then run:
+Use this only when optional providers should influence B-roll or rough-cut selection. `vision_reel` runs object, OCR, and face/person providers first, then rates with the generated artifacts:
 
 ```bash
-videoedit run vision.yaml --input footage/ --output analysis/vision
-videoedit rate footage/ --output analysis_objects/ --visual-objects analysis/visual_objects.json
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
 ```
 
-`visual_objects.json` contains parsed YOLO detections, class counts, and timestamped object segments. `rate --visual-objects` adds `object_*` labels, `object_hits`, and `object_presence_score` to ratings.
+For explicit fused rating:
+
+```bash
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
+```
+
+Fused ratings add labels and scores such as `object_*`, `ocr_signage`, `face_presence`, `person_presence`, `motorsports_event`, `topic_cluster`, `object_presence_score`, and provider-specific advanced scores.
 
 ### 2b. Calibrate scoring with human annotations
 
@@ -176,12 +171,13 @@ Annotation ratings are `select`, `review`, `broll`, `reject`, `cut`, and `ignore
 ### 3. Review and approve
 
 ```bash
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
 videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 ```
 
-Open the static review UI at `review/contact_sheet.html` to inspect thumbnails/proxies, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
+Open the static review UI at `review/contact_sheet.html` or use `videoedit review-tui` to inspect thumbnails/proxies, filter/sort clips, review signal and calibration context, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
 
 ### 4. Assemble, extract, and export
 
@@ -236,6 +232,7 @@ Preset intent:
 | `youtube` | Longer highlight candidates |
 | `documentary` | Transcript-heavy story and soundbite selection |
 | `motorsports` | Racing event/topic artifacts plus review outputs |
+| `vision_reel` | Optional vision providers plus fused rating and review |
 
 ---
 

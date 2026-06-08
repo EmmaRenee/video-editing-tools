@@ -67,10 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     review_assets = sub.add_parser("review-assets", help="Generate thumbnails and an HTML contact sheet")
     review_assets.add_argument("ratings")
     review_assets.add_argument("--output", "-o", required=True)
+    review_assets.add_argument("--calibration", help="Optional calibration_report.json for review context")
     review_assets.add_argument("--max-items", type=int, default=100)
     review_assets.add_argument("--proxy", action="store_true", help="Also render low-resolution proxy clips")
     review_assets.add_argument("--thumb-width", type=int, default=360)
     review_assets.set_defaults(func=cmd_review_assets)
+
+    review_tui = sub.add_parser("review-tui", help="Review clips from a review_assets.json manifest in the terminal")
+    review_tui.add_argument("manifest")
+    review_tui.add_argument("--decisions", required=True)
+    review_tui.set_defaults(func=cmd_review_tui)
 
     approve = sub.add_parser("approve", help="Create approved.json from ratings candidates")
     approve.add_argument("ratings")
@@ -200,6 +206,10 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--transcript", choices=["off", "auto", "required"], default=None)
     parser.add_argument("--transcript-dir")
     parser.add_argument("--visual-objects", help="visual_objects.json from detect_visual_objects")
+    parser.add_argument("--ocr-signage", help="ocr_signage.json from detect_ocr_signage")
+    parser.add_argument("--face-person", help="face_person_presence.json from detect_face_person_presence")
+    parser.add_argument("--motorsports-events", help="motorsports_events.json from detect_motorsports_events")
+    parser.add_argument("--topic-clusters", help="topic_clusters.json from cluster_transcript_topics")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -218,6 +228,15 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         config.transcript_dir = args.transcript_dir
     if args.visual_objects:
         config.visual_objects_path = args.visual_objects
+        config.signal_artifacts["visual_objects"] = args.visual_objects
+    if args.ocr_signage:
+        config.signal_artifacts["ocr_signage"] = args.ocr_signage
+    if args.face_person:
+        config.signal_artifacts["face_person"] = args.face_person
+    if args.motorsports_events:
+        config.signal_artifacts["motorsports_events"] = args.motorsports_events
+    if args.topic_clusters:
+        config.signal_artifacts["topic_clusters"] = args.topic_clusters
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -282,7 +301,17 @@ def cmd_review_assets(args: argparse.Namespace) -> int:
         max_items=args.max_items,
         proxies=args.proxy,
         thumbnail_width=args.thumb_width,
+        calibration_json=args.calibration,
     )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_review_tui(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
+    from .review_tui import run_review_tui
+
+    result = run_review_tui(args.manifest, args.decisions)
     print(json.dumps(result, indent=2))
     return 0
 

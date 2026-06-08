@@ -86,13 +86,16 @@ videoedit rate footage/ --output analysis/
 videoedit calibrate init --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit init reel --output reel.yaml
 videoedit run reel.yaml --input footage/ --output output/
 videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
 videoedit content-map analysis/ratings.json --output reports/
 videoedit quote-mining analysis/ratings.json --output reports/
 videoedit series analysis/ratings.json --template team_tuesday --output series/
@@ -117,12 +120,12 @@ videoedit calibrate tune analysis/ratings.json --annotations annotations.json --
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
-### Optional YOLO Object Signals
+### Optional Vision And Signal Fusion
 
-When `advanced.vision` is enabled and YOLO is installed, `detect_visual_objects` writes parsed object detections, class counts, and time-based object segments to `visual_objects.json`. Use that artifact as an explicit rating input when object/person/vehicle presence should influence B-roll and rough-cut candidates:
+When `advanced.vision` is enabled and YOLO is installed, `detect_visual_objects` writes parsed object detections, class counts, and time-based object segments to `visual_objects.json`. `videoedit rate` can also fuse OCR, face/person, motorsports event, and transcript-topic artifacts into deterministic score labels:
 
 ```yaml
-name: vision
+name: vision_reel
 requires_modules:
   - advanced.vision
 steps:
@@ -136,8 +139,13 @@ steps:
 ```
 
 ```bash
-videoedit run vision.yaml --input footage/ --output analysis/vision
-videoedit rate footage/ --output analysis_objects/ --visual-objects analysis/visual_objects.json
+videoedit run vision_reel.yaml --input footage/ --output analysis/vision
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
 ```
 
 ---

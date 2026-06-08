@@ -135,6 +135,23 @@ def op_rate_footage(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     input_path = os.fspath(params.get("input") or context["input"])
     output_dir = os.fspath(params.get("output") or context["output"])
     config_data = params.get("config") if isinstance(params.get("config"), dict) else params
+    config_data = dict(config_data)
+    artifacts = dict(config_data.get("signal_artifacts") or {})
+    for param_key, artifact_key in {
+        "visual_objects": "visual_objects",
+        "visual_objects_path": "visual_objects",
+        "ocr_signage": "ocr_signage",
+        "face_person": "face_person",
+        "face_person_presence": "face_person",
+        "motorsports_events": "motorsports_events",
+        "topic_clusters": "topic_clusters",
+    }.items():
+        if config_data.get(param_key):
+            artifacts[artifact_key] = config_data[param_key]
+    if artifacts:
+        config_data["signal_artifacts"] = artifacts
+        if artifacts.get("visual_objects"):
+            config_data["visual_objects_path"] = artifacts["visual_objects"]
     config = AnalysisConfig.from_mapping(config_data)
     report = run_rating(input_path, output_dir, config=config)
     context["ratings"] = os.path.join(output_dir, "ratings.json")
@@ -237,6 +254,7 @@ def op_review_assets(context: dict[str, Any], params: dict[str, Any]) -> dict[st
         max_items=int(params.get("max_items", 100)),
         proxies=bool(params.get("proxy") or params.get("proxies", False)),
         thumbnail_width=int(params.get("thumbnail_width", 360)),
+        calibration_json=params.get("calibration") or params.get("calibration_json") or context.get("calibration_report"),
     )
     context["review_assets"] = result["manifest"]
     context["review_decisions"] = result["decisions"]

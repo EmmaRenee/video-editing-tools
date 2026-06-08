@@ -170,4 +170,70 @@ PRESETS = {
             {"name": "edl", "operation": "generate_edl", "params": {"output": "${output}/edl"}},
         ],
     },
+    "vision_reel": {
+        "name": "vision_reel",
+        "description": "Run optional vision providers, then rate reel candidates with fused signal artifacts",
+        "requires_modules": ["core.rating", "advanced.vision", "core.review", "core.handoff"],
+        "steps": [
+            {
+                "name": "objects",
+                "operation": "detect_visual_objects",
+                "params": {
+                    "output": "${output}/signals/visual_objects.json",
+                    "model": "yolo26n.pt",
+                    "max_detections": 5000,
+                },
+            },
+            {
+                "name": "ocr",
+                "operation": "detect_ocr_signage",
+                "params": {
+                    "output": "${output}/signals/ocr_signage.json",
+                    "sample_interval": 10,
+                    "max_frames_per_file": 6,
+                },
+            },
+            {
+                "name": "faces",
+                "operation": "detect_face_person_presence",
+                "params": {
+                    "output": "${output}/signals/face_person_presence.json",
+                    "sample_interval": 10,
+                    "max_frames_per_file": 6,
+                },
+            },
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "output": "${output}/rate",
+                    "transcript_mode": "auto",
+                    "max_candidates": 60,
+                    "visual_objects": "objects.output",
+                    "ocr_signage": "ocr.output",
+                    "face_person": "faces.output",
+                },
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 60,
+                    "proxy": False,
+                },
+            },
+            {
+                "name": "approve",
+                "operation": "approve_candidates",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/approved.json",
+                    "decisions": "review.decisions",
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "input": "approve.approved", "params": {"output": "${output}/edl"}},
+        ],
+    },
 }

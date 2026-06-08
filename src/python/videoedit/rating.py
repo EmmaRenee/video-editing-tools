@@ -13,6 +13,7 @@ from .ffmpeg import analyze_audio_levels, detect_scene_changes, detect_silence, 
 from .inventory import write_inventory_outputs
 from .models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, RatingReport, SignalReport
 from .reports import write_candidate_csv, write_rating_json, write_review_html, write_review_markdown, write_selection_sets
+from .signals import load_signal_artifacts
 from .timecode import clamp_window
 from .transcript import find_transcript_hits
 
@@ -30,7 +31,7 @@ def run_rating(
     cache = _load_cache(output_dir) if config.cache else {}
     cache_changed = False
     signals: list[SignalReport] = []
-    object_index = _load_object_index(config.visual_objects_path)
+    signal_artifacts = load_signal_artifacts(config)
 
     for path in scan_video_files(footage_dir):
         key = os.path.abspath(path)
@@ -39,7 +40,12 @@ def run_rating(
         if cached and cached.get("signature") == signature:
             signals.append(SignalReport.from_dict(cached["report"]))
             continue
-        report = analyze_file(path, config, object_hits=_object_hits_for_path(object_index, path))
+        report = analyze_file(
+            path,
+            config,
+            object_hits=signal_artifacts.objects_for(path),
+            advanced_hits=signal_artifacts.advanced_for(path),
+        )
         signals.append(report)
         if config.cache:
             cache[key] = {"signature": signature, "report": report.to_dict()}
@@ -96,7 +102,12 @@ def run_rating(
     return report
 
 
-def analyze_file(path: str, config: AnalysisConfig, object_hits: list[ObjectHit] | None = None) -> SignalReport:
+def analyze_file(
+    path: str,
+    config: AnalysisConfig,
+    object_hits: list[ObjectHit] | None = None,
+    advanced_hits: list[dict[str, Any]] | None = None,
+) -> SignalReport:
     asset = probe_media(path, timeout=min(config.command_timeout, 60))
     warnings: list[str] = []
     reasons: list[str] = []
@@ -105,6 +116,7 @@ def analyze_file(path: str, config: AnalysisConfig, object_hits: list[ObjectHit]
     audio_levels: list[AudioLevel] = []
     transcript_hits = []
     object_hits = object_hits or []
+    advanced_hits = advanced_hits or []
 
     if asset.status != "ok":
         warnings.append(asset.error or "metadata probe failed")
@@ -149,9 +161,20 @@ def analyze_file(path: str, config: AnalysisConfig, object_hits: list[ObjectHit]
         audio_levels,
         transcript_hits,
         object_hits,
+        advanced_hits,
         config,
     )
-    reasons.extend(_file_reasons(scores, scene_changes, silence_intervals, audio_levels, transcript_hits, object_hits))
+    reasons.extend(
+        _file_reasons(
+            scores,
+            scene_changes,
+            silence_intervals,
+            audio_levels,
+            transcript_hits,
+            object_hits,
+            advanced_hits,
+        )
+    )
     return SignalReport(
         asset=asset,
         scene_changes=scene_changes,
@@ -159,6 +182,7 @@ def analyze_file(path: str, config: AnalysisConfig, object_hits: list[ObjectHit]
         audio_levels=audio_levels,
         transcript_hits=transcript_hits,
         object_hits=object_hits,
+        advanced_hits=advanced_hits,
         scores=scores,
         reasons=reasons,
         warnings=warnings,
@@ -172,6 +196,7 @@ def score_signal(
     audio_levels: list[AudioLevel],
     transcript_hits: list[Any],
     object_hits: list[ObjectHit],
+    advanced_hits: list[dict[str, Any]],
     config: AnalysisConfig,
 ) -> dict[str, float]:
     technical = _technical_score(asset, config.weights["technical"])
@@ -194,9 +219,10 @@ def score_signal(
 
     transcript = min(config.weights["transcript"], len(transcript_hits) * 8.0)
     object_score = _object_signal_score(object_hits, config)
-    total = min(100.0, technical + visual + audio + transcript + object_score)
+    advanced_scores = _advanced_signal_scores(advanced_hits, config)
+    total = min(100.0, technical + visual + audio + transcript + object_score + sum(advanced_scores.values()))
     peak_rms = max(finite_levels) if finite_levels else None
-    return {
+    scores = {
         "technical_score": round(technical, 2),
         "visual_activity_score": round(visual, 2),
         "audio_interest_score": round(audio, 2),
@@ -210,6 +236,9 @@ def score_signal(
         "object_hits": len(object_hits),
         "object_class_count": len({hit.class_name for hit in object_hits}),
     }
+    scores.update({key: round(value, 2) for key, value in advanced_scores.items()})
+    scores.update(_advanced_signal_counts(advanced_hits))
+    return scores
 
 
 def generate_candidates(signals: list[SignalReport], config: AnalysisConfig) -> list[CandidateClip]:
@@ -263,6 +292,15 @@ def _seed_windows(report: SignalReport, config: AnalysisConfig) -> list[dict[str
         start = max(0.0, hit.start - config.object_window_pre_roll)
         end = hit.end + config.object_window_post_roll
         windows.append({"start": start, "end": end, "labels": {"object_presence", f"object_{_slug(hit.class_name)}"}})
+    for hit in report.advanced_hits:
+        if hit.get("source_wide"):
+            continue
+        kind = str(hit.get("kind") or "")
+        if kind not in {"motorsports_event", "topic_cluster"}:
+            continue
+        start = max(0.0, float(hit.get("start", 0.0)) - config.window_pre_roll)
+        end = float(hit.get("end", start)) + config.window_post_roll
+        windows.append({"start": start, "end": end, "labels": {_advanced_label(hit)}})
     return windows
 
 
@@ -357,26 +395,35 @@ def _score_window(
             labels.add(f"object_{_slug(class_name)}")
         reasons.append(f"objects detected: {', '.join(object_classes[:6])}")
 
+    advanced_hits = _advanced_hits_in_window(report.advanced_hits, start, end)
+    advanced_scores = _advanced_signal_scores(advanced_hits, config)
+    for hit in advanced_hits:
+        labels.update(_advanced_labels(hit))
+    reasons.extend(_advanced_reasons(advanced_hits))
+
     if "low_signal" in labels:
         reasons.append("fallback candidate; no strong highlight signal found")
 
-    score = int(round(min(100.0, technical + visual + audio + transcript + object_score)))
+    score = int(round(min(100.0, technical + visual + audio + transcript + object_score + sum(advanced_scores.values()))))
+    signal_scores = {
+        "technical_score": round(technical, 2),
+        "visual_activity_score": round(visual, 2),
+        "audio_interest_score": round(audio, 2),
+        "transcript_score": round(transcript, 2),
+        "object_presence_score": round(object_score, 2),
+        "scene_changes": scene_count,
+        "peak_rms_db": round(peak, 2) if peak is not None else None,
+        "silence_ratio": round(silence_ratio, 3),
+        "object_hits": len(object_hits),
+        "object_class_count": len({hit.class_name for hit in object_hits}),
+    }
+    signal_scores.update({key: round(value, 2) for key, value in advanced_scores.items()})
+    signal_scores.update(_advanced_signal_counts(advanced_hits))
     return (
         score,
         labels,
         reasons,
-        {
-            "technical_score": round(technical, 2),
-            "visual_activity_score": round(visual, 2),
-            "audio_interest_score": round(audio, 2),
-            "transcript_score": round(transcript, 2),
-            "object_presence_score": round(object_score, 2),
-            "scene_changes": scene_count,
-            "peak_rms_db": round(peak, 2) if peak is not None else None,
-            "silence_ratio": round(silence_ratio, 3),
-            "object_hits": len(object_hits),
-            "object_class_count": len({hit.class_name for hit in object_hits}),
-        },
+        signal_scores,
     )
 
 
@@ -450,6 +497,92 @@ def _overlaps(start: float, end: float, hit_start: float, hit_end: float) -> boo
     return min(end, hit_end) > max(start, hit_start)
 
 
+def _advanced_hits_in_window(hits: list[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
+    selected = []
+    for hit in hits:
+        if hit.get("source_wide"):
+            selected.append(hit)
+            continue
+        hit_start = float(hit.get("start", 0.0))
+        hit_end = float(hit.get("end", hit_start))
+        if _overlaps(start, end, hit_start, hit_end):
+            selected.append(hit)
+    return selected
+
+
+def _advanced_signal_scores(hits: list[dict[str, Any]], config: AnalysisConfig) -> dict[str, float]:
+    ocr = [hit for hit in hits if hit.get("kind") == "ocr_signage"]
+    face = [hit for hit in hits if hit.get("kind") == "face_person"]
+    motorsports = [hit for hit in hits if hit.get("kind") == "motorsports_event"]
+    topics = [hit for hit in hits if hit.get("kind") == "topic_cluster"]
+    face_count = sum(int(hit.get("face_count", 0) or 0) for hit in face)
+    person_count = sum(int(hit.get("person_count", 0) or 0) for hit in face)
+    motorsports_confidence = sum(float(hit.get("confidence") or 0.0) for hit in motorsports)
+    return {
+        "ocr_signage_score": min(float(config.weights.get("ocr", 8)), len(ocr) * 4.0),
+        "face_person_score": min(float(config.weights.get("face_person", 6)), face_count * 1.5 + person_count * 0.75),
+        "motorsports_event_score": min(
+            float(config.weights.get("motorsports", 12)),
+            len(motorsports) * 5.0 + motorsports_confidence * 4.0,
+        ),
+        "topic_cluster_score": min(float(config.weights.get("topics", 10)), len(topics) * 5.0),
+    }
+
+
+def _advanced_signal_counts(hits: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "ocr_hits": sum(1 for hit in hits if hit.get("kind") == "ocr_signage"),
+        "face_person_hits": sum(1 for hit in hits if hit.get("kind") == "face_person"),
+        "motorsports_events": sum(1 for hit in hits if hit.get("kind") == "motorsports_event"),
+        "topic_hits": sum(1 for hit in hits if hit.get("kind") == "topic_cluster"),
+    }
+
+
+def _advanced_labels(hit: dict[str, Any]) -> set[str]:
+    labels = {_advanced_label(hit)}
+    kind = hit.get("kind")
+    if kind == "face_person":
+        if int(hit.get("face_count", 0) or 0) > 0:
+            labels.add("face_presence")
+        if int(hit.get("person_count", 0) or 0) > 0:
+            labels.add("person_presence")
+    elif kind == "motorsports_event" and hit.get("event_type"):
+        labels.add(f"motorsports_{_slug(str(hit['event_type']))}")
+    elif kind == "topic_cluster" and hit.get("topic"):
+        labels.add(f"topic_{_slug(str(hit['topic']))}")
+    return labels
+
+
+def _advanced_label(hit: dict[str, Any]) -> str:
+    kind = str(hit.get("kind") or "advanced_signal")
+    if kind == "ocr_signage":
+        return "ocr_signage"
+    if kind == "face_person":
+        return "face_person"
+    if kind == "motorsports_event":
+        return "motorsports_event"
+    if kind == "topic_cluster":
+        return "topic_cluster"
+    return _slug(kind)
+
+
+def _advanced_reasons(hits: list[dict[str, Any]]) -> list[str]:
+    reasons = []
+    if any(hit.get("kind") == "ocr_signage" for hit in hits):
+        reasons.append("OCR/signage text detected")
+    face_count = sum(int(hit.get("face_count", 0) or 0) for hit in hits if hit.get("kind") == "face_person")
+    person_count = sum(int(hit.get("person_count", 0) or 0) for hit in hits if hit.get("kind") == "face_person")
+    if face_count or person_count:
+        reasons.append(f"face/person presence detected ({face_count} faces, {person_count} people)")
+    event_types = sorted({str(hit.get("event_type")) for hit in hits if hit.get("kind") == "motorsports_event" and hit.get("event_type")})
+    if event_types:
+        reasons.append(f"motorsports events: {', '.join(event_types[:6])}")
+    topics = sorted({str(hit.get("topic")) for hit in hits if hit.get("kind") == "topic_cluster" and hit.get("topic")})
+    if topics:
+        reasons.append(f"transcript topics: {', '.join(topics[:6])}")
+    return reasons
+
+
 def _action_for_score(score: int, config: AnalysisConfig) -> str:
     if score >= config.min_select_score:
         return "select"
@@ -467,6 +600,7 @@ def _file_reasons(
     audio_levels: list[AudioLevel],
     transcript_hits: list[Any],
     object_hits: list[ObjectHit],
+    advanced_hits: list[dict[str, Any]],
 ) -> list[str]:
     reasons = []
     if scenes:
@@ -480,6 +614,9 @@ def _file_reasons(
     if object_hits:
         classes = sorted({hit.class_name for hit in object_hits})
         reasons.append(f"object detections: {', '.join(classes[:6])}")
+    if advanced_hits:
+        labels = sorted({_advanced_label(hit) for hit in advanced_hits})
+        reasons.append(f"advanced signal artifacts: {', '.join(labels[:6])}")
     if not reasons:
         reasons.append("no strong highlight signals detected")
     return reasons
@@ -496,64 +633,16 @@ def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
         "transcript_mode": config.transcript_mode,
         "keywords": config.keywords,
         "visual_objects_path": config.visual_objects_path,
-        "visual_objects_signature": _artifact_signature(config.visual_objects_path),
+        "signal_artifacts": config.signal_artifacts,
+        "signal_artifacts_signature": _artifact_signatures(config),
     }
 
 
-def _load_object_index(path: str | None) -> dict[str, list[ObjectHit]]:
-    if not path:
-        return {}
-    path = os.fspath(path)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.loads(handle.read())
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-    raw: dict[str, list[ObjectHit]] = {}
-    for source_payload in data.get("sources", []):
-        source = source_payload.get("source")
-        if not source:
-            continue
-        hits = [_object_hit_from_segment(segment) for segment in source_payload.get("segments", [])]
-        hits = [hit for hit in hits if hit.end >= hit.start]
-        if hits:
-            raw[os.fspath(source)] = hits
-    return _indexed_by_source(raw)
-
-
-def _object_hit_from_segment(segment: dict[str, Any]) -> ObjectHit:
-    start = float(segment.get("start_seconds", segment.get("start", 0.0)))
-    end = float(segment.get("end_seconds", segment.get("end", start)))
-    return ObjectHit(
-        start=start,
-        end=end,
-        class_name=str(segment.get("class_name") or segment.get("label") or "object"),
-        class_id=int(segment["class_id"]) if segment.get("class_id") is not None else None,
-        count=int(segment.get("detection_count", segment.get("count", 1))),
-        confidence=float(segment["average_confidence"]) if segment.get("average_confidence") is not None else None,
-    )
-
-
-def _indexed_by_source(raw: dict[str, list[ObjectHit]]) -> dict[str, list[ObjectHit]]:
-    index: dict[str, list[ObjectHit]] = {}
-    basenames: dict[str, list[list[ObjectHit]]] = {}
-    for source, hits in raw.items():
-        index[source] = hits
-        index[os.path.abspath(source)] = hits
-        basenames.setdefault(os.path.basename(source), []).append(hits)
-    for basename, candidates in basenames.items():
-        if len(candidates) == 1:
-            index[basename] = candidates[0]
-    return index
-
-
-def _object_hits_for_path(index: dict[str, list[ObjectHit]], path: str) -> list[ObjectHit]:
-    if not index:
-        return []
-    return list(index.get(path) or index.get(os.path.abspath(path)) or index.get(os.path.basename(path)) or [])
+def _artifact_signatures(config: AnalysisConfig) -> dict[str, Any]:
+    paths = dict(config.signal_artifacts or {})
+    if config.visual_objects_path:
+        paths["visual_objects"] = config.visual_objects_path
+    return {key: _artifact_signature(value) for key, value in sorted(paths.items()) if value}
 
 
 def _artifact_signature(path: str | None) -> dict[str, Any] | None:

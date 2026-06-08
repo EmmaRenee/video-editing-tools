@@ -380,7 +380,15 @@ def _planned_result(
     if operation_name == "detect_ocr_signage":
         return {"output": _json_output_plan(output, "ocr_signage.json"), "count": "unknown", "status": "planned", "warnings": []}
     if operation_name == "detect_visual_objects":
-        return {"output": _json_output_plan(output, "visual_objects.json"), "count": "unknown", "status": "planned", "warnings": []}
+        return {
+            "output": _json_output_plan(output, "visual_objects.json"),
+            "count": "unknown",
+            "detection_count": "unknown",
+            "class_count": "unknown",
+            "segment_count": "unknown",
+            "status": "planned",
+            "warnings": [],
+        }
     if operation_name == "detect_face_person_presence":
         return {"output": _json_output_plan(output, "face_person_presence.json"), "count": "unknown", "status": "planned", "warnings": []}
     if operation_name == "detect_motorsports_events":
