@@ -35,7 +35,13 @@ import videoedit.operations as operations_module
 from videoedit.pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from videoedit.rating import generate_candidates, score_signal
 from videoedit.review import create_approval_file, generate_review_assets
-from videoedit.review_tui import filter_review_clips, load_review_session, update_review_decision, write_review_decisions
+from videoedit.review_tui import (
+    _interactive_loop,
+    filter_review_clips,
+    load_review_session,
+    update_review_decision,
+    write_review_decisions,
+)
 from videoedit.scaffold import scaffold_project
 from videoedit.selections import load_selection
 from videoedit.signals import load_signal_artifacts
@@ -1106,6 +1112,63 @@ class ReviewTests(unittest.TestCase):
                 data = json.loads(handle.read())
             self.assertEqual(data["decisions"][0]["id"], "clip_0002")
             self.assertEqual(data["decisions"][0]["decision"], "promote")
+
+    def test_review_tui_accepts_decision_without_note(self):
+        clips = [
+            {
+                "id": "clip_0001",
+                "source_name": "a.mp4",
+                "action": "review",
+                "score": 80,
+                "labels": [],
+                "reasons": [],
+                "decision": "review",
+                "order": 1,
+            }
+        ]
+        commands = iter(["approve clip_0001", "save"])
+        original_input = builtins.input
+        try:
+            builtins.input = lambda prompt="": next(commands)
+            with redirect_stdout(io.StringIO()):
+                _interactive_loop(clips)
+        finally:
+            builtins.input = original_input
+
+        self.assertEqual(clips[0]["decision"], "approve")
+
+    def test_review_tui_handles_invalid_order_and_eof(self):
+        clips = [
+            {
+                "id": "clip_0001",
+                "source_name": "a.mp4",
+                "action": "review",
+                "score": 80,
+                "labels": [],
+                "reasons": [],
+                "decision": "review",
+                "order": 1,
+            }
+        ]
+        commands = iter(["order clip_0001 abc"])
+
+        def fake_input(prompt=""):
+            try:
+                return next(commands)
+            except StopIteration as exc:
+                raise EOFError from exc
+
+        original_input = builtins.input
+        output = io.StringIO()
+        try:
+            builtins.input = fake_input
+            with redirect_stdout(output):
+                _interactive_loop(clips)
+        finally:
+            builtins.input = original_input
+
+        self.assertEqual(clips[0]["order"], 1)
+        self.assertIn("Invalid order value: abc", output.getvalue())
 
     def test_export_handoff_uses_per_clip_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

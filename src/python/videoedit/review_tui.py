@@ -126,19 +126,27 @@ def _interactive_loop(clips: list[dict[str, Any]]) -> None:
                 f"{clip.get('order'):>3} {clip.get('id')} "
                 f"{clip.get('score')} {clip.get('decision')} {clip.get('source_name')} {labels}"
             )
-        command = input("review> ").strip()
+        try:
+            command = input("review> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
         if command in {"q", "quit", "save", "exit"}:
             return
         if command.startswith("filter "):
             query = command.split(" ", 1)[1].strip()
             continue
-        parts = command.split(" ", 3)
-        if len(parts) >= 3 and parts[0] in {"approve", "review", "reject", "cut", "broll", "promote"}:
-            note = parts[3] if len(parts) == 4 else None
+        parts = command.split(" ", 2)
+        if len(parts) >= 2 and parts[0] in {"approve", "review", "reject", "cut", "broll", "promote"}:
+            note = parts[2] if len(parts) >= 3 else None
             update_review_decision(clips, parts[1], decision=parts[0], note=note)
             continue
         if len(parts) >= 3 and parts[0] == "order":
-            update_review_decision(clips, parts[1], order=int(parts[2]))
+            try:
+                order = int(parts[2])
+            except ValueError:
+                print(f"Invalid order value: {parts[2]}")
+                continue
+            update_review_decision(clips, parts[1], order=order)
             continue
         if len(parts) >= 3 and parts[0] == "note":
             update_review_decision(clips, parts[1], note=command.split(" ", 2)[2])
