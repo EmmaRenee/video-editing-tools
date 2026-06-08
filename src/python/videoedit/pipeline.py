@@ -24,6 +24,17 @@ OPERATION_OUTPUTS = {
     "detect_highlights_audio": {"output", "selections", "files", "count"},
     "detect_highlights_transcript": {"output", "selections", "files", "count"},
     "transcribe_whisper": {"output", "count"},
+    "evaluate_ratings": {"report", "markdown", "missed", "false_positives", "metrics"},
+    "calibrate_scoring": {
+        "report",
+        "markdown",
+        "missed",
+        "false_positives",
+        "config_candidates",
+        "proposed_config",
+        "best",
+        "metrics",
+    },
     "extract_segments": {"output", "files"},
     "generate_edl": {"output", "files"},
     "generate_review_assets": {"manifest", "contact_sheet", "decisions", "clips", "thumbnails", "proxies", "warnings"},
@@ -34,7 +45,15 @@ OPERATION_OUTPUTS = {
     "normalize_audio": {"output"},
     "concatenate_videos": {"output"},
     "detect_ocr_signage": {"output", "count", "status", "warnings"},
-    "detect_visual_objects": {"output", "count", "status", "warnings"},
+    "detect_visual_objects": {
+        "output",
+        "count",
+        "detection_count",
+        "class_count",
+        "segment_count",
+        "status",
+        "warnings",
+    },
     "detect_face_person_presence": {"output", "count", "status", "warnings"},
     "detect_motorsports_events": {"output", "count"},
     "cluster_transcript_topics": {"output", "count"},
@@ -50,6 +69,8 @@ OPERATION_CONTEXT_OUTPUTS = {
     "rate_footage": {"ratings", "selections"},
     "detect_highlights_audio": {"filtered_candidates", "filtered_selections"},
     "detect_highlights_transcript": {"filtered_candidates", "filtered_selections"},
+    "evaluate_ratings": {"calibration_report"},
+    "calibrate_scoring": {"calibration_report", "proposed_config"},
     "generate_review_assets": {"review_assets", "review_decisions"},
     "approve_candidates": {"approved"},
     "detect_ocr_signage": {"ocr_signage"},
@@ -333,6 +354,25 @@ def _planned_result(
         return {"output": output, "files": []}
     if operation_name == "transcribe_whisper":
         return {"output": output, "count": "unknown"}
+    if operation_name == "evaluate_ratings":
+        return {
+            "report": os.path.join(output, "calibration_report.json"),
+            "markdown": os.path.join(output, "calibration_report.md"),
+            "missed": os.path.join(output, "missed_moments.csv"),
+            "false_positives": os.path.join(output, "false_positives.csv"),
+            "metrics": {},
+        }
+    if operation_name == "calibrate_scoring":
+        return {
+            "report": os.path.join(output, "calibration_report.json"),
+            "markdown": os.path.join(output, "calibration_report.md"),
+            "missed": os.path.join(output, "missed_moments.csv"),
+            "false_positives": os.path.join(output, "false_positives.csv"),
+            "config_candidates": os.path.join(output, "config_candidates.csv"),
+            "proposed_config": os.path.join(output, "proposed_config.json"),
+            "best": "unknown",
+            "metrics": {},
+        }
     if operation_name == "assemble_rough_cut":
         return {"output": output}
     if operation_name in {"format_video", "burn_captions", "normalize_audio", "concatenate_videos"}:
@@ -340,7 +380,15 @@ def _planned_result(
     if operation_name == "detect_ocr_signage":
         return {"output": _json_output_plan(output, "ocr_signage.json"), "count": "unknown", "status": "planned", "warnings": []}
     if operation_name == "detect_visual_objects":
-        return {"output": _json_output_plan(output, "visual_objects.json"), "count": "unknown", "status": "planned", "warnings": []}
+        return {
+            "output": _json_output_plan(output, "visual_objects.json"),
+            "count": "unknown",
+            "detection_count": "unknown",
+            "class_count": "unknown",
+            "segment_count": "unknown",
+            "status": "planned",
+            "warnings": [],
+        }
     if operation_name == "detect_face_person_presence":
         return {"output": _json_output_plan(output, "face_person_presence.json"), "count": "unknown", "status": "planned", "warnings": []}
     if operation_name == "detect_motorsports_events":
@@ -372,6 +420,8 @@ def _planned_implicit_input(operation_name: str, params: dict[str, Any], context
         return context["ratings"]
     if operation_name in {"detect_highlights_audio", "detect_highlights_transcript"} and context.get("ratings"):
         return context["ratings"]
+    if operation_name in {"evaluate_ratings", "calibrate_scoring"} and context.get("ratings"):
+        return context["ratings"]
     if operation_name in {"detect_motorsports_events", "cluster_transcript_topics"} and context.get("ratings"):
         return context["ratings"]
     if operation_name in {"plan_content_series", "generate_content_map", "quote_mining"} and context.get("ratings"):
@@ -391,6 +441,11 @@ def _apply_planned_context(operation_name: str, result: dict[str, Any], context:
     elif operation_name in {"detect_highlights_audio", "detect_highlights_transcript"}:
         context["filtered_candidates"] = result.get("output")
         context["filtered_selections"] = result.get("selections")
+    elif operation_name == "evaluate_ratings":
+        context["calibration_report"] = result.get("report")
+    elif operation_name == "calibrate_scoring":
+        context["calibration_report"] = result.get("report")
+        context["proposed_config"] = result.get("proposed_config")
     elif operation_name == "generate_review_assets":
         context["review_assets"] = result.get("manifest")
         context["review_decisions"] = result.get("decisions")

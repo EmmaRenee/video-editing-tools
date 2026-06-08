@@ -8,6 +8,7 @@ import json
 import os
 import sys
 
+from .calibration import evaluate_ratings, init_annotation_file, tune_scoring
 from .captions import burn_captions, list_caption_styles
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
@@ -66,10 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     review_assets = sub.add_parser("review-assets", help="Generate thumbnails and an HTML contact sheet")
     review_assets.add_argument("ratings")
     review_assets.add_argument("--output", "-o", required=True)
+    review_assets.add_argument("--calibration", help="Optional calibration_report.json for review context")
     review_assets.add_argument("--max-items", type=int, default=100)
     review_assets.add_argument("--proxy", action="store_true", help="Also render low-resolution proxy clips")
     review_assets.add_argument("--thumb-width", type=int, default=360)
     review_assets.set_defaults(func=cmd_review_assets)
+
+    review_tui = sub.add_parser("review-tui", help="Review clips from a review_assets.json manifest in the terminal")
+    review_tui.add_argument("manifest")
+    review_tui.add_argument("--decisions", required=True)
+    review_tui.set_defaults(func=cmd_review_tui)
 
     approve = sub.add_parser("approve", help="Create approved.json from ratings candidates")
     approve.add_argument("ratings")
@@ -108,6 +115,24 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Check required and optional local dependencies")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable diagnostics")
     doctor.set_defaults(func=cmd_doctor)
+
+    calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
+    calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
+    calibrate_init = calibrate_sub.add_parser("init", help="Write a starter annotation JSON file")
+    calibrate_init.add_argument("--output", "-o", required=True)
+    calibrate_init.add_argument("--project", default="Videoedit Calibration")
+    calibrate_init.add_argument("--source-root", default="footage/")
+    calibrate_init.set_defaults(func=cmd_calibrate_init)
+    calibrate_evaluate = calibrate_sub.add_parser("evaluate", help="Evaluate ratings.json against annotation JSON")
+    calibrate_evaluate.add_argument("ratings")
+    calibrate_evaluate.add_argument("--annotations", required=True)
+    calibrate_evaluate.add_argument("--output", "-o", required=True)
+    calibrate_evaluate.set_defaults(func=cmd_calibrate_evaluate)
+    calibrate_tune = calibrate_sub.add_parser("tune", help="Write proposed scoring config candidates")
+    calibrate_tune.add_argument("ratings")
+    calibrate_tune.add_argument("--annotations", required=True)
+    calibrate_tune.add_argument("--output", "-o", required=True)
+    calibrate_tune.set_defaults(func=cmd_calibrate_tune)
 
     assemble_cmd = sub.add_parser("assemble", help="Assemble a rough cut from selection or approved JSON")
     assemble_cmd.add_argument("selection")
@@ -180,6 +205,11 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config")
     parser.add_argument("--transcript", choices=["off", "auto", "required"], default=None)
     parser.add_argument("--transcript-dir")
+    parser.add_argument("--visual-objects", help="visual_objects.json from detect_visual_objects")
+    parser.add_argument("--ocr-signage", help="ocr_signage.json from detect_ocr_signage")
+    parser.add_argument("--face-person", help="face_person_presence.json from detect_face_person_presence")
+    parser.add_argument("--motorsports-events", help="motorsports_events.json from detect_motorsports_events")
+    parser.add_argument("--topic-clusters", help="topic_clusters.json from cluster_transcript_topics")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -196,6 +226,17 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         config.transcript_mode = args.transcript
     if args.transcript_dir:
         config.transcript_dir = args.transcript_dir
+    if args.visual_objects:
+        config.visual_objects_path = args.visual_objects
+        config.signal_artifacts["visual_objects"] = args.visual_objects
+    if args.ocr_signage:
+        config.signal_artifacts["ocr_signage"] = args.ocr_signage
+    if args.face_person:
+        config.signal_artifacts["face_person"] = args.face_person
+    if args.motorsports_events:
+        config.signal_artifacts["motorsports_events"] = args.motorsports_events
+    if args.topic_clusters:
+        config.signal_artifacts["topic_clusters"] = args.topic_clusters
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -260,7 +301,17 @@ def cmd_review_assets(args: argparse.Namespace) -> int:
         max_items=args.max_items,
         proxies=args.proxy,
         thumbnail_width=args.thumb_width,
+        calibration_json=args.calibration,
     )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_review_tui(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
+    from .review_tui import run_review_tui
+
+    result = run_review_tui(args.manifest, args.decisions)
     print(json.dumps(result, indent=2))
     return 0
 
@@ -327,6 +378,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 status = "unavailable"
             print(f"  {status:11} {row['id']} - {row['description']}")
     return 0 if report["status"] == "ok" else 1
+
+
+def cmd_calibrate_init(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    output = init_annotation_file(args.output, project=args.project, source_root=args.source_root)
+    print(f"Annotation template written to {output}")
+    return 0
+
+
+def cmd_calibrate_evaluate(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = evaluate_ratings(args.ratings, args.annotations, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_calibrate_tune(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = tune_scoring(args.ratings, args.annotations, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_assemble(args: argparse.Namespace) -> int:

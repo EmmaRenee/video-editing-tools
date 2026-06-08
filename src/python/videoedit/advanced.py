@@ -12,7 +12,8 @@ import os
 import re
 from typing import Any
 
-from .ffmpeg import has_command, run_command, run_command_check, scan_video_files
+from .diagnostics import resolve_command
+from .ffmpeg import has_command, probe_media, run_command, run_command_check, scan_video_files
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
@@ -31,6 +32,89 @@ TRANSCRIPT_TOPICS = {
     "performance": ["fast", "quick", "lap", "speed", "pace", "setup", "tires"],
     "results": ["win", "winner", "podium", "position", "place", "finish"],
 }
+
+COCO_CLASS_NAMES = [
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
+]
 
 
 def detect_motorsports_events(ratings_json: str, output: str, min_confidence: float = 0.2) -> dict[str, Any]:
@@ -179,11 +263,15 @@ def detect_visual_objects(
     input_path: str,
     output: str,
     command: str | None = None,
+    model: str | None = None,
+    confidence: float | None = None,
+    max_detections: int = 5000,
+    segment_merge_gap: float = 1.0,
     timeout: int = 180,
 ) -> dict[str, Any]:
     output = os.fspath(output)
-    detector = command or "yolo"
-    if not detector or not has_command(detector):
+    detector = command or resolve_command("yolo")
+    if not detector or (command and not has_command(detector)):
         payload = _unavailable_payload(
             "visual_objects",
             input_path,
@@ -193,39 +281,84 @@ def detect_visual_objects(
         return {"output": output, "count": 0, "status": payload["status"]}
 
     output_dir = os.path.dirname(output) or "."
-    project_dir = os.path.join(output_dir, "object_detector")
+    project_dir = os.path.abspath(os.path.join(output_dir, "object_detector"))
     warnings: list[str] = []
     runs = []
+    sources = []
     for source in _input_files(input_path):
         name = _safe_slug(os.path.splitext(os.path.basename(source))[0])
+        expected_run = os.path.join(project_dir, name)
+        command_args = [
+            detector,
+            "predict",
+            f"source={source}",
+            f"project={project_dir}",
+            f"name={name}",
+            "exist_ok=True",
+            "save=False",
+            "save_txt=True",
+            "save_conf=True",
+        ]
+        if model:
+            command_args.insert(2, f"model={model}")
+        if confidence is not None:
+            command_args.append(f"conf={confidence}")
         result = run_command(
-            [
-                detector,
-                "predict",
-                f"source={source}",
-                f"project={project_dir}",
-                f"name={name}",
-                "save=False",
-                "save_txt=True",
-            ],
+            command_args,
             timeout=timeout,
         )
         if result.returncode == 0:
-            runs.append({"source": source, "run": os.path.join(project_dir, name)})
+            run_dir = _resolve_yolo_run_dir(expected_run)
+            asset = probe_media(source, timeout=min(timeout, 60))
+            source_summary = _parse_yolo_run(
+                source=source,
+                run_dir=run_dir,
+                fps=asset.fps,
+                duration=asset.duration,
+                max_detections=max_detections,
+                segment_merge_gap=segment_merge_gap,
+            )
+            warnings.extend(source_summary.pop("warnings"))
+            sources.append(source_summary)
+            runs.append(
+                {
+                    "source": source,
+                    "run": run_dir,
+                    "labels_dir": source_summary.get("labels_dir"),
+                    "detection_count": source_summary.get("detection_count", 0),
+                    "class_count": len(source_summary.get("class_counts", [])),
+                    "segment_count": len(source_summary.get("segments", [])),
+                }
+            )
         else:
             warnings.append(f"object detection failed for {source}: {(result.stderr or result.stdout).strip()}")
 
+    detection_count = sum(int(item.get("detection_count", 0)) for item in sources)
+    classes = sorted({item["class_name"] for source in sources for item in source.get("class_counts", [])})
+    segment_count = sum(len(source.get("segments", [])) for source in sources)
     payload = {
         "generated": datetime.now().isoformat(),
         "provider": detector,
         "status": "ok" if runs else "error",
         "input": os.fspath(input_path),
         "count": len(runs),
+        "detection_count": detection_count,
+        "class_count": len(classes),
+        "segment_count": segment_count,
         "runs": runs,
+        "sources": sources,
         "warnings": warnings,
     }
     _write_json(output, payload)
-    return {"output": output, "count": len(runs), "status": payload["status"], "warnings": warnings}
+    return {
+        "output": output,
+        "count": len(runs),
+        "detection_count": detection_count,
+        "class_count": len(classes),
+        "segment_count": segment_count,
+        "status": payload["status"],
+        "warnings": warnings,
+    }
 
 
 def detect_face_person_presence(
@@ -381,6 +514,266 @@ def _matching_frames(frames_dir: str, stem: str) -> list[str]:
         for filename in os.listdir(frames_dir)
         if filename.startswith(prefix) and filename.lower().endswith(".jpg")
     ]
+
+
+def _resolve_yolo_run_dir(expected_run: str) -> str:
+    if os.path.isdir(os.path.join(expected_run, "labels")):
+        return expected_run
+    cwd = os.getcwd()
+    try:
+        relative = os.path.relpath(expected_run, cwd)
+    except ValueError:
+        relative = expected_run
+    fallback = os.path.join(cwd, "runs", "detect", relative)
+    if os.path.isdir(os.path.join(fallback, "labels")):
+        return fallback
+    basename = os.path.basename(expected_run)
+    matches = []
+    for current_dir, dirnames, _filenames in os.walk(os.path.join(cwd, "runs", "detect")):
+        if os.path.basename(current_dir) == basename and "labels" in dirnames:
+            matches.append(current_dir)
+    if len(matches) == 1:
+        return matches[0]
+    return expected_run
+
+
+def _parse_yolo_run(
+    source: str,
+    run_dir: str,
+    fps: float | None,
+    duration: float,
+    max_detections: int,
+    segment_merge_gap: float,
+) -> dict[str, Any]:
+    labels_dir = os.path.join(run_dir, "labels")
+    warnings: list[str] = []
+    detections: list[dict[str, Any]] = []
+    summary_detections: list[dict[str, Any]] = []
+    total_detections = 0
+    if not os.path.isdir(labels_dir):
+        return {
+            "source": source,
+            "run": run_dir,
+            "labels_dir": labels_dir,
+            "fps": fps,
+            "duration": duration,
+            "detection_count": 0,
+            "detections": [],
+            "detections_truncated": False,
+            "class_counts": [],
+            "segments": [],
+            "warnings": [f"YOLO labels directory not found for {source}: {labels_dir}"],
+        }
+
+    label_files = sorted(
+        [
+            os.path.join(labels_dir, filename)
+            for filename in os.listdir(labels_dir)
+            if filename.lower().endswith(".txt")
+        ],
+        key=_label_sort_key,
+    )
+    for label_path in label_files:
+        frame = _frame_number_from_label(label_path)
+        time_seconds = _frame_time(frame, fps)
+        try:
+            with open(label_path, encoding="utf-8") as handle:
+                lines = handle.readlines()
+        except OSError as exc:
+            warnings.append(f"failed to read YOLO label file {label_path}: {exc}")
+            continue
+        for index, line in enumerate(lines, 1):
+            parsed = _parse_yolo_label_line(line, label_path, index, frame, time_seconds, source)
+            if parsed is None:
+                continue
+            total_detections += 1
+            summary_detections.append(parsed)
+            if len(detections) < max_detections:
+                detections.append(parsed)
+
+    class_counts = _summarize_classes(summary_detections)
+    segments = _summarize_segments(summary_detections, fps, duration, segment_merge_gap)
+    return {
+        "source": source,
+        "run": run_dir,
+        "labels_dir": labels_dir,
+        "fps": fps,
+        "duration": duration,
+        "detection_count": total_detections,
+        "detections": detections,
+        "detections_truncated": total_detections > len(detections),
+        "class_counts": class_counts,
+        "segments": segments,
+        "warnings": warnings,
+    }
+
+
+def _parse_yolo_label_line(
+    line: str,
+    label_path: str,
+    line_number: int,
+    frame: int | None,
+    time_seconds: float | None,
+    source: str,
+) -> dict[str, Any] | None:
+    parts = line.strip().split()
+    if len(parts) < 5:
+        return None
+    try:
+        class_id = int(float(parts[0]))
+        x_center, y_center, width, height = [float(value) for value in parts[1:5]]
+        confidence = float(parts[5]) if len(parts) >= 6 else None
+    except ValueError:
+        return None
+    detection = {
+        "source": source,
+        "label_file": label_path,
+        "line": line_number,
+        "frame": frame,
+        "class_id": class_id,
+        "class_name": _class_name(class_id),
+        "confidence": round(confidence, 4) if confidence is not None else None,
+        "bbox_norm": {
+            "x_center": round(x_center, 6),
+            "y_center": round(y_center, 6),
+            "width": round(width, 6),
+            "height": round(height, 6),
+        },
+    }
+    if time_seconds is not None:
+        detection["time_seconds"] = round(time_seconds, 3)
+        detection["time"] = seconds_to_hhmmss(time_seconds)
+    return detection
+
+
+def _summarize_classes(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_class: dict[int, dict[str, Any]] = {}
+    for detection in detections:
+        class_id = int(detection["class_id"])
+        summary = by_class.setdefault(
+            class_id,
+            {
+                "class_id": class_id,
+                "class_name": detection["class_name"],
+                "count": 0,
+                "frames": set(),
+                "confidences": [],
+                "times": [],
+            },
+        )
+        summary["count"] += 1
+        if detection.get("frame") is not None:
+            summary["frames"].add(detection["frame"])
+        if detection.get("confidence") is not None:
+            summary["confidences"].append(float(detection["confidence"]))
+        if detection.get("time_seconds") is not None:
+            summary["times"].append(float(detection["time_seconds"]))
+
+    rows = []
+    for summary in by_class.values():
+        times = summary["times"]
+        confidences = summary["confidences"]
+        row = {
+            "class_id": summary["class_id"],
+            "class_name": summary["class_name"],
+            "count": summary["count"],
+            "frame_count": len(summary["frames"]),
+        }
+        if confidences:
+            row["average_confidence"] = round(sum(confidences) / len(confidences), 4)
+        if times:
+            first = min(times)
+            last = max(times)
+            row.update(
+                {
+                    "first_seen_seconds": round(first, 3),
+                    "first_seen": seconds_to_hhmmss(first),
+                    "last_seen_seconds": round(last, 3),
+                    "last_seen": seconds_to_hhmmss(last),
+                }
+            )
+        rows.append(row)
+    return sorted(rows, key=lambda item: (-item["count"], item["class_name"]))
+
+
+def _summarize_segments(
+    detections: list[dict[str, Any]],
+    fps: float | None,
+    duration: float,
+    merge_gap: float,
+) -> list[dict[str, Any]]:
+    by_class: dict[int, list[dict[str, Any]]] = {}
+    for detection in detections:
+        if detection.get("time_seconds") is None:
+            continue
+        by_class.setdefault(int(detection["class_id"]), []).append(detection)
+
+    frame_duration = 1.0 / fps if fps and fps > 0 else 0.0
+    segments: list[dict[str, Any]] = []
+    for class_id, items in by_class.items():
+        items.sort(key=lambda item: float(item["time_seconds"]))
+        current: list[dict[str, Any]] = []
+        last_time: float | None = None
+        for item in items:
+            current_time = float(item["time_seconds"])
+            if current and last_time is not None and current_time > last_time + merge_gap:
+                segments.append(_segment_from_detections(current, frame_duration, duration))
+                current = []
+            current.append(item)
+            last_time = current_time
+        if current:
+            segments.append(_segment_from_detections(current, frame_duration, duration))
+    return sorted(segments, key=lambda item: (-item["detection_count"], item["start_seconds"]))[:500]
+
+
+def _segment_from_detections(items: list[dict[str, Any]], frame_duration: float, duration: float) -> dict[str, Any]:
+    times = [float(item["time_seconds"]) for item in items]
+    start = min(times)
+    end = max(times) + frame_duration
+    if duration:
+        end = min(duration, end)
+    confidences = [float(item["confidence"]) for item in items if item.get("confidence") is not None]
+    frames = {item.get("frame") for item in items if item.get("frame") is not None}
+    segment = {
+        "class_id": int(items[0]["class_id"]),
+        "class_name": items[0]["class_name"],
+        "start_seconds": round(start, 3),
+        "end_seconds": round(max(start, end), 3),
+        "start": seconds_to_hhmmss(start),
+        "end": seconds_to_hhmmss(max(start, end)),
+        "detection_count": len(items),
+        "frame_count": len(frames),
+    }
+    if confidences:
+        segment["average_confidence"] = round(sum(confidences) / len(confidences), 4)
+    return segment
+
+
+def _frame_number_from_label(path: str) -> int | None:
+    stem = os.path.splitext(os.path.basename(path))[0]
+    match = re.search(r"_(\d+)$", stem)
+    if match:
+        return int(match.group(1))
+    if stem.isdigit():
+        return int(stem)
+    return None
+
+
+def _frame_time(frame: int | None, fps: float | None) -> float | None:
+    if frame is None or not fps or fps <= 0:
+        return None
+    return max(0.0, (float(frame) - 1.0) / fps)
+
+
+def _label_sort_key(path: str) -> tuple[int, str]:
+    frame = _frame_number_from_label(path)
+    return (frame if frame is not None else 0, path)
+
+
+def _class_name(class_id: int) -> str:
+    if 0 <= class_id < len(COCO_CLASS_NAMES):
+        return COCO_CLASS_NAMES[class_id]
+    return f"class_{class_id}"
 
 
 def _unavailable_payload(provider: str, input_path: str, reason: str) -> dict[str, Any]:

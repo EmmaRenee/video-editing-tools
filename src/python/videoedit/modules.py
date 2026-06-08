@@ -56,6 +56,12 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
         category="core",
         core=True,
     ),
+    "core.calibration": FeatureModule(
+        id="core.calibration",
+        description="Ground-truth scoring evaluation and calibration reports",
+        category="core",
+        core=True,
+    ),
     "core.pipeline": FeatureModule(
         id="core.pipeline",
         description="YAML pipeline planning, validation, and execution",
@@ -121,6 +127,8 @@ OPERATION_MODULES = {
     "detect_highlights_audio": "core.rating",
     "detect_highlights_transcript": "core.rating",
     "transcribe_whisper": "core.rating",
+    "evaluate_ratings": "core.calibration",
+    "calibrate_scoring": "core.calibration",
     "extract_segments": "core.handoff",
     "generate_edl": "core.handoff",
     "generate_review_assets": "core.review",

@@ -65,7 +65,9 @@ User mentions video editing?
 Raw footage (hours)
   → videoedit modules/doctor (confirm enabled feature surface)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
+  → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
   → ratings.json + candidates.csv + review assets
+  → videoedit calibrate evaluate/tune when human annotations exist
   → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
   → approved.json
@@ -107,6 +109,7 @@ Available built-in modules:
 |--------|-----|
 | `core.inventory` | Footage catalog and metadata |
 | `core.rating` | Signal analysis, scoring, candidate selection |
+| `core.calibration` | Ground-truth scoring evaluation and tuning |
 | `core.pipeline` | YAML planning, validation, and runs |
 | `core.review` | Review assets, approvals, rough cuts |
 | `core.handoff` | EDL/XML/M3U and clip extraction |
@@ -130,15 +133,51 @@ This writes inventory, ratings, candidates, review docs, and per-source selectio
 python src/python/rate_footage.py footage/ --output analysis/
 ```
 
+### 2a. Optional vision and signal fusion
+
+Use this only when optional providers should influence B-roll or rough-cut selection. `vision_reel` runs object, OCR, and face/person providers first, then rates with the generated artifacts:
+
+```bash
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
+```
+
+For explicit fused rating:
+
+```bash
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
+```
+
+Fused ratings add labels and scores such as `object_*`, `ocr_signage`, `face_presence`, `person_presence`, `motorsports_event`, `topic_cluster`, `object_presence_score`, and provider-specific advanced scores.
+
+### 2b. Calibrate scoring with human annotations
+
+Use calibration when the user has reviewed footage or wants to tune the scorer before rough cuts:
+
+```bash
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
+```
+
+Annotation ratings are `select`, `review`, `broll`, `reject`, `cut`, and `ignore`. Calibration writes precision/recall reports, missed moments, false positives, ranked config candidates, and `proposed_config.json`; it does not overwrite project defaults.
+
 ### 3. Review and approve
 
 ```bash
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
 videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 ```
 
-Open the static review UI at `review/contact_sheet.html` to inspect thumbnails/proxies, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
+Open the static review UI at `review/contact_sheet.html` or use `videoedit review-tui` to inspect thumbnails/proxies, filter/sort clips, review signal and calibration context, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
 
 ### 4. Assemble, extract, and export
 
@@ -193,6 +232,7 @@ Preset intent:
 | `youtube` | Longer highlight candidates |
 | `documentary` | Transcript-heavy story and soundbite selection |
 | `motorsports` | Racing event/topic artifacts plus review outputs |
+| `vision_reel` | Optional vision providers plus fused rating and review |
 
 ---
 
@@ -207,6 +247,8 @@ rate_footage
 transcribe_whisper
 detect_highlights_audio
 detect_highlights_transcript
+evaluate_ratings
+calibrate_scoring
 generate_review_assets
 approve_candidates
 assemble_rough_cut
@@ -243,6 +285,9 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `review.md` | Human-readable review summary |
 | `review.html` | Table view of candidates and score explanations |
 | `selections/*.json` | Per-source selection JSON for EDL/export operations |
+| `calibration_report.json`, `calibration_report.md` | Scoring precision/recall against annotations |
+| `missed_moments.csv`, `false_positives.csv` | Calibration review queues |
+| `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
 
 Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
 
@@ -321,7 +366,7 @@ Keep these optional. The base pipeline should work with only FFmpeg/ffprobe.
 | Operation | Output | Dependency |
 |-----------|--------|------------|
 | `detect_ocr_signage` | `ocr_signage.json` | FFmpeg + Tesseract |
-| `detect_visual_objects` | `visual_objects.json` | External detector such as YOLO |
+| `detect_visual_objects` | `visual_objects.json` | External detector such as YOLO; includes parsed detections, class counts, and timestamped object segments |
 | `detect_face_person_presence` | `face_person_presence.json` | FFmpeg + OpenCV |
 | `detect_motorsports_events` | `motorsports_events.json` | `ratings.json` |
 | `cluster_transcript_topics` | `topic_clusters.json` | Transcript hits in `ratings.json` |

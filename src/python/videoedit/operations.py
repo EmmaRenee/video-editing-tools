@@ -16,6 +16,7 @@ from .advanced import (
     detect_ocr_signage,
     detect_visual_objects,
 )
+from .calibration import evaluate_ratings, tune_scoring
 from .captions import burn_captions
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, plan_content_series
@@ -32,6 +33,16 @@ from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
 OperationFunc = Callable[[dict[str, Any], dict[str, Any]], Any]
+
+SIGNAL_ARTIFACT_ALIASES = {
+    "visual_objects": "visual_objects",
+    "visual_objects_path": "visual_objects",
+    "ocr_signage": "ocr_signage",
+    "face_person": "face_person",
+    "face_person_presence": "face_person",
+    "motorsports_events": "motorsports_events",
+    "topic_clusters": "topic_clusters",
+}
 
 
 @dataclass
@@ -78,6 +89,8 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
         op_filter_transcript_candidates,
     )
     _register(registry, enabled_only, cwd, "transcribe_whisper", "Run Whisper transcription for a single video or folder", op_transcribe_whisper)
+    _register(registry, enabled_only, cwd, "evaluate_ratings", "Evaluate ratings against human annotation JSON", op_evaluate_ratings)
+    _register(registry, enabled_only, cwd, "calibrate_scoring", "Tune scoring config candidates against annotations", op_calibrate_scoring)
     _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
@@ -132,11 +145,37 @@ def op_rate_footage(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     input_path = os.fspath(params.get("input") or context["input"])
     output_dir = os.fspath(params.get("output") or context["output"])
     config_data = params.get("config") if isinstance(params.get("config"), dict) else params
+    config_data = dict(config_data)
+    _merge_signal_artifact_aliases(config_data)
     config = AnalysisConfig.from_mapping(config_data)
     report = run_rating(input_path, output_dir, config=config)
     context["ratings"] = os.path.join(output_dir, "ratings.json")
     context["selections"] = os.path.join(output_dir, "selections")
     return {"ratings": context["ratings"], "candidates": len(report.candidates)}
+
+
+def _merge_signal_artifact_aliases(config_data: dict[str, Any]) -> None:
+    artifacts = dict(config_data.get("signal_artifacts") or {})
+    present: dict[str, list[str]] = {}
+    for param_key, artifact_key in SIGNAL_ARTIFACT_ALIASES.items():
+        if config_data.get(param_key):
+            present.setdefault(artifact_key, []).append(param_key)
+
+    conflicts = {artifact_key: keys for artifact_key, keys in present.items() if len(keys) > 1}
+    if conflicts:
+        details = "; ".join(
+            f"{artifact_key}: {', '.join(keys)}"
+            for artifact_key, keys in sorted(conflicts.items())
+        )
+        raise ValueError(f"conflicting signal artifact aliases: {details}")
+
+    for artifact_key, keys in present.items():
+        artifacts[artifact_key] = config_data[keys[0]]
+
+    if artifacts:
+        config_data["signal_artifacts"] = artifacts
+        if artifacts.get("visual_objects"):
+            config_data["visual_objects_path"] = artifacts["visual_objects"]
 
 
 def op_filter_candidates(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +234,25 @@ def op_transcribe_whisper(context: dict[str, Any], params: dict[str, Any]) -> di
     return {"output": output_dir, "count": len(files)}
 
 
+def op_evaluate_ratings(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    annotations = os.fspath(params["annotations"])
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "calibration"))
+    result = evaluate_ratings(ratings_path, annotations, output_dir)
+    context["calibration_report"] = result["report"]
+    return result
+
+
+def op_calibrate_scoring(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    annotations = os.fspath(params["annotations"])
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "calibration"))
+    result = tune_scoring(ratings_path, annotations, output_dir)
+    context["calibration_report"] = result["report"]
+    context["proposed_config"] = result["proposed_config"]
+    return result
+
+
 def op_generate_edl(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     selection_glob = params.get("input") or context.get("selections")
     output_dir = os.fspath(params.get("output") or context["output"])
@@ -215,6 +273,7 @@ def op_review_assets(context: dict[str, Any], params: dict[str, Any]) -> dict[st
         max_items=int(params.get("max_items", 100)),
         proxies=bool(params.get("proxy") or params.get("proxies", False)),
         thumbnail_width=int(params.get("thumbnail_width", 360)),
+        calibration_json=params.get("calibration") or params.get("calibration_json") or context.get("calibration_report"),
     )
     context["review_assets"] = result["manifest"]
     context["review_decisions"] = result["decisions"]
@@ -372,6 +431,10 @@ def op_detect_objects(context: dict[str, Any], params: dict[str, Any]) -> dict[s
         input_path,
         output,
         command=params.get("command"),
+        model=params.get("model"),
+        confidence=float(params["confidence"]) if params.get("confidence") is not None else None,
+        max_detections=int(params.get("max_detections", 5000)),
+        segment_merge_gap=float(params.get("segment_merge_gap", 1.0)),
         timeout=int(params.get("timeout", 180)),
     )
     context["visual_objects"] = output

@@ -13,6 +13,7 @@ This toolkit provides FFmpeg-based video editing workflows with optional PowerSh
 **What it does:**
 - Cut dead air and silence from footage
 - Extract highlights and create rough cuts
+- Calibrate scoring against human-reviewed moments
 - Format for social media (Reels, YouTube, Square)
 - Generate captions with Whisper
 - Prepare footage for DaVinci Resolve
@@ -82,13 +83,19 @@ python src/python/rate_footage.py "footage/" --output analysis/
 videoedit doctor
 videoedit modules list
 videoedit rate footage/ --output analysis/
-videoedit review-assets analysis/ratings.json --output review/
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit init reel --output reel.yaml
 videoedit run reel.yaml --input footage/ --output output/
 videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
 videoedit content-map analysis/ratings.json --output reports/
 videoedit quote-mining analysis/ratings.json --output reports/
 videoedit series analysis/ratings.json --template team_tuesday --output series/
@@ -100,6 +107,46 @@ videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_r
 ```
 
 See [src/python/README.md](src/python/README.md) for full documentation.
+
+### Calibration Loop
+
+Use calibration after the first `videoedit rate` pass to compare machine-selected candidates against human annotations. `evaluate` writes precision/recall reports, missed moments, and false positives. `tune` writes `config_candidates.csv` and `proposed_config.json`; it does not overwrite project defaults.
+
+```bash
+videoedit rate footage/ --output analysis/
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
+```
+
+### Optional Vision And Signal Fusion
+
+When `advanced.vision` is enabled and YOLO is installed, `detect_visual_objects` writes parsed object detections, class counts, and time-based object segments to `visual_objects.json`. `videoedit rate` can also fuse OCR, face/person, motorsports event, and transcript-topic artifacts into deterministic score labels:
+
+```yaml
+name: vision_reel
+requires_modules:
+  - advanced.vision
+steps:
+  - name: objects
+    operation: detect_visual_objects
+    params:
+      input: footage/
+      output: analysis/visual_objects.json
+      model: yolo26n.pt
+      max_detections: 5000
+```
+
+```bash
+videoedit run vision_reel.yaml --input footage/ --output analysis/vision
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
+```
 
 ---
 

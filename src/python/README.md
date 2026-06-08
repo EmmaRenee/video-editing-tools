@@ -25,6 +25,9 @@ videoedit doctor
 videoedit modules list
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
 
 # Pipeline preset
 videoedit init reel --output reel.yaml
@@ -36,7 +39,8 @@ videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
 
 # Handoff and rough cut
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 videoedit assemble approved.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
@@ -74,6 +78,41 @@ for clip in report.candidates[:10]:
 - `selections/*.json`
 
 Scoring is deterministic and explainable. It combines technical metadata, scene-change density, silence/non-silence ratio, audio spike windows, and optional transcript keyword hits. Each candidate carries labels, signal scores, and human-readable reasons.
+
+### Calibration and Scoring Evaluation
+
+Calibration measures whether `videoedit rate` found the moments a human editor marked as valuable, then proposes scoring configs without changing defaults.
+
+```bash
+videoedit rate footage/ --output analysis/
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
+```
+
+Annotation JSON is the canonical ground-truth format:
+
+```json
+{
+  "project": "Drive Auto Sports Calibration",
+  "source_root": "footage/",
+  "clips": [
+    {
+      "source": "race_day/interview.mp4",
+      "start": "00:00:30",
+      "end": "00:00:45",
+      "rating": "select",
+      "tags": ["quote", "team_tuesday"],
+      "notes": "Strong intro soundbite"
+    }
+  ]
+}
+```
+
+Supported annotation ratings are `select`, `review`, `broll`, `reject`, `cut`, and `ignore`. Positive ratings are matched to candidates by source plus time overlap; `ignore` clips are excluded from false-positive counts.
+
+Calibration writes `calibration_report.json`, `calibration_report.md`, `missed_moments.csv`, and `false_positives.csv`. `tune` also writes `config_candidates.csv` and `proposed_config.json`, ranked by F1, recall, precision, then fewer candidates.
 
 ### Modular Feature Modules
 
@@ -132,6 +171,8 @@ videoedit assemble approved.json --output rough_cut.mp4
 | `transcribe_whisper` | Transcribe video with Whisper AI |
 | `detect_highlights_audio` | Filter rating candidates with audio labels |
 | `detect_highlights_transcript` | Filter rating candidates with transcript labels |
+| `evaluate_ratings` | Evaluate candidates against human annotation JSON |
+| `calibrate_scoring` | Generate ranked scoring config candidates |
 | `extract_segments` | Extract clips from selection JSON files |
 | `generate_edl` | Create EDL/XML/M3U and FFmpeg extraction scripts |
 | `generate_review_assets` | Generate thumbnails and an HTML contact sheet |
@@ -267,10 +308,37 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 - `detect_motorsports_events` reads `ratings.json` and writes `motorsports_events.json`.
 - `cluster_transcript_topics` reads transcript hits from `ratings.json` and writes `topic_clusters.json`.
 - `detect_ocr_signage` writes `ocr_signage.json`; it runs only when FFmpeg and Tesseract are installed.
-- `detect_visual_objects` writes `visual_objects.json`; it runs only when an object detector command such as `yolo` is available.
+- `detect_visual_objects` writes `visual_objects.json`; it runs only when an object detector command such as `yolo` is available. YOLO labels are parsed into bounded `detections`, `class_counts`, and time-based `segments`.
 - `detect_face_person_presence` writes `face_person_presence.json`; it runs only when FFmpeg and OpenCV are installed.
 
 These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
+
+Use parsed signal artifacts as explicit rating inputs when people, vehicles, signage, racing events, or topics should affect B-roll selection. The `vision_reel` preset runs object/OCR/face providers first, then rates with the generated artifacts:
+
+```yaml
+name: vision_reel
+requires_modules:
+  - advanced.vision
+steps:
+  - name: objects
+    operation: detect_visual_objects
+    params:
+      input: footage/
+      output: analysis/visual_objects.json
+      model: yolo26n.pt
+      max_detections: 5000
+```
+
+```bash
+videoedit init vision_reel --output vision_reel.yaml
+videoedit run vision_reel.yaml --input footage/ --output output/
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
+```
 
 Optional advanced dependencies can be installed separately:
 

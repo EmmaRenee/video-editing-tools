@@ -8,7 +8,7 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 |-------|----------|---------|
 | FFmpeg + ffprobe | Yes | Metadata, signal analysis, clip extraction, rough-cut assembly |
 | Python 3.12 virtual environment | Yes for `videoedit` | Local package, CLI, YAML pipelines, review assets |
-| `videoedit` package | Yes for automation | Inventory, rating, selections, EDL/XML/M3U, rough cuts |
+| `videoedit` package | Yes for automation | Inventory, rating, calibration, selections, EDL/XML/M3U, rough cuts |
 | Whisper | Optional | Transcript signals and captions |
 | Tesseract | Optional | OCR/signage detection |
 | YOLO / Ultralytics | Optional | Visual object detection through `detect_visual_objects` |
@@ -155,10 +155,22 @@ videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 ```
 
+Calibrate scoring after marking human-approved moments:
+
+```bash
+videoedit calibrate init --output annotations.json
+videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
+```
+
+Calibration writes precision/recall reports, missed moments, false positives, ranked config candidates, and a proposed config. It never overwrites `.videoedit/config.json` or package defaults.
+
 Review and approve candidates:
 
 ```bash
-videoedit review-assets analysis/ratings.json --output review/
+videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 ```
 
@@ -174,13 +186,42 @@ Preset pipelines:
 
 ```bash
 videoedit init roughcut --output roughcut.yaml
+videoedit init vision_reel --output vision_reel.yaml
 videoedit validate roughcut.yaml
 videoedit plan roughcut.yaml --input footage/ --output output/
 videoedit run roughcut.yaml --input footage/ --output output/ --dry-run
 videoedit run roughcut.yaml --input footage/ --output output/
 ```
 
-YOLO is used by the `detect_visual_objects` operation when the `yolo` command is available.
+YOLO is used by the `detect_visual_objects` operation when the `yolo` command is available. The operation writes `visual_objects.json` with parsed YOLO labels, bounded timestamped detections, class counts, and object-presence segments. `videoedit rate` can fuse that file with optional OCR, face/person, motorsports event, and transcript-topic artifacts.
+
+Example one-step vision pipeline:
+
+```yaml
+name: vision
+requires_modules:
+  - advanced.vision
+steps:
+  - name: objects
+    operation: detect_visual_objects
+    params:
+      input: footage/
+      output: analysis/visual_objects.json
+      model: yolo26n.pt
+      max_detections: 5000
+```
+
+Use those parsed object signals during rating:
+
+```bash
+videoedit run vision_reel.yaml --input footage/ --output analysis/vision
+videoedit rate footage/ --output analysis_fused/ \
+  --visual-objects analysis/visual_objects.json \
+  --ocr-signage analysis/ocr_signage.json \
+  --face-person analysis/face_person_presence.json \
+  --motorsports-events analysis/motorsports_events.json \
+  --topic-clusters analysis/topic_clusters.json
+```
 
 ## Optional Feature Modules
 
