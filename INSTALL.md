@@ -159,8 +159,11 @@ Calibrate scoring after marking human-approved moments:
 
 ```bash
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
@@ -177,7 +180,8 @@ videoedit approve analysis/ratings.json --output approved.json --decisions revie
 Assemble and export handoff files:
 
 ```bash
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence diversified --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl approved.json --output edl/
 ```
@@ -214,6 +218,13 @@ steps:
 Use those parsed object signals during rating:
 
 ```bash
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
+
 videoedit run vision_reel.yaml --input footage/ --output analysis/vision
 videoedit rate footage/ --output analysis_fused/ \
   --visual-objects analysis/visual_objects.json \

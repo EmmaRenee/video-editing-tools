@@ -36,7 +36,7 @@ PRESETS = {
     },
     "roughcut": {
         "name": "roughcut",
-        "description": "Rate footage, create review assets, approve defaults, export handoff, and assemble a rough cut",
+        "description": "Rate footage, create review assets, approve defaults, plan a rough cut, export handoff, and assemble",
         "requires_modules": ["core.rating", "core.review", "core.handoff"],
         "steps": [
             {
@@ -74,6 +74,17 @@ PRESETS = {
                 "operation": "generate_edl",
                 "input": "approve.approved",
                 "params": {"output": "${output}/edl"},
+            },
+            {
+                "name": "plan",
+                "operation": "plan_roughcut",
+                "input": "approve.approved",
+                "params": {
+                    "output": "${output}/roughcut_plan.json",
+                    "sequence": "review_order",
+                    "format": "original",
+                    "render_mode": "copy",
+                },
             },
             {
                 "name": "assemble",

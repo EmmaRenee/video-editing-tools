@@ -10,14 +10,15 @@ import re
 
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
+from .roughcut import clips_from_plan
 from .selections import load_selection
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
-def assemble(selection_json: str, output: str) -> str:
+def assemble(selection_json: str, output: str, plan_json: str | None = None) -> str:
     selection_json = os.fspath(selection_json)
     output = os.fspath(output)
-    selection = load_selection(selection_json)
+    clips = clips_from_plan(plan_json) if plan_json else load_selection(selection_json).clips
     output_dir = os.path.dirname(output) or "."
     output_stem = os.path.splitext(os.path.basename(output))[0]
     os.makedirs(output_dir, exist_ok=True)
@@ -25,13 +26,11 @@ def assemble(selection_json: str, output: str) -> str:
     os.makedirs(clips_dir, exist_ok=True)
     concat = os.path.join(output_dir, f"{output_stem}_concat.txt")
     lines: list[str] = []
-    for index, clip in enumerate(selection.clips, 1):
+    for index, clip in enumerate(clips, 1):
         source = clip["source"]
         label = _safe_slug(clip.get("label") or clip.get("id") or f"clip_{index:03d}")
         clip_path = os.path.join(clips_dir, f"{index:03d}_{label}.mp4")
-        run_command_check(
-            ["ffmpeg", "-i", source, "-ss", clip["start"], "-to", clip["end"], "-c", "copy", clip_path, "-y"],
-        )
+        _extract_roughcut_clip(source, clip, clip_path)
         lines.append(f"file '{os.path.abspath(clip_path)}'")
     if not lines:
         raise ValueError("selection has no clips to assemble")
@@ -39,6 +38,19 @@ def assemble(selection_json: str, output: str) -> str:
         handle.write("\n".join(lines) + "\n")
     run_command_check(["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat, "-c", "copy", output, "-y"])
     return output
+
+
+def _extract_roughcut_clip(source: str, clip: dict, clip_path: str) -> None:
+    if clip.get("render_mode") != "render":
+        run_command_check(
+            ["ffmpeg", "-i", source, "-ss", clip["start"], "-to", clip["end"], "-c", "copy", clip_path, "-y"],
+        )
+        return
+    args = ["ffmpeg", "-i", source, "-ss", clip["start"], "-to", clip["end"]]
+    if clip.get("video_filter"):
+        args.extend(["-vf", clip["video_filter"]])
+    args.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", clip_path, "-y"])
+    run_command_check(args)
 
 
 def create_approval_file(

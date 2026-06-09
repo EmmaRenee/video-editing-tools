@@ -133,6 +133,7 @@ OPERATION_MODULES = {
     "generate_edl": "core.handoff",
     "generate_review_assets": "core.review",
     "approve_candidates": "core.review",
+    "plan_roughcut": "core.review",
     "assemble_rough_cut": "core.review",
     "format_video": "delivery.captions",
     "burn_captions": "delivery.captions",

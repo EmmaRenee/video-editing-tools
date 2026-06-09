@@ -23,6 +23,10 @@ MOTORSPORTS_EVENTS = {
     "start": ["start", "green flag", "launch", "restart"],
     "finish": ["finish", "checkered", "checker", "podium", "win", "winner"],
     "pace": ["fast", "quick", "lap", "sector", "speed", "pace"],
+    "battle": ["battle", "side by side", "door to door", "defend", "defending", "attack"],
+    "yellow": ["yellow", "caution", "safety car", "full course yellow"],
+    "pit": ["pit", "pitlane", "pit lane", "stop", "fuel", "tires"],
+    "mechanical": ["mechanical", "engine", "gearbox", "brake", "failure", "broken"],
 }
 
 TRANSCRIPT_TOPICS = {
@@ -31,6 +35,7 @@ TRANSCRIPT_TOPICS = {
     "race_control": ["start", "restart", "yellow", "green", "checkered", "flag", "finish"],
     "performance": ["fast", "quick", "lap", "speed", "pace", "setup", "tires"],
     "results": ["win", "winner", "podium", "position", "place", "finish"],
+    "mechanical": ["engine", "gearbox", "brake", "failure", "broken", "setup"],
 }
 
 COCO_CLASS_NAMES = [
@@ -116,6 +121,8 @@ COCO_CLASS_NAMES = [
     "toothbrush",
 ]
 
+SIGNAL_SCHEMA_VERSION = "videoedit.signal.v1"
+
 
 def detect_motorsports_events(ratings_json: str, output: str, min_confidence: float = 0.2) -> dict[str, Any]:
     data = _read_json(ratings_json)
@@ -144,6 +151,7 @@ def detect_motorsports_events(ratings_json: str, output: str, min_confidence: fl
         "count": len(events),
         "events": events,
     }
+    _attach_signal_metadata(payload, "motorsports_events", payload["provider"], ratings_json, events)
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(events)}
 
@@ -191,6 +199,7 @@ def cluster_transcript_topics(ratings_json: str, output: str) -> dict[str, Any]:
         "count": len(topics),
         "topics": topics,
     }
+    _attach_signal_metadata(payload, "topic_clusters", payload["provider"], ratings_json, _topic_records(topics))
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(topics)}
 
@@ -255,6 +264,7 @@ def detect_ocr_signage(
         "hits": hits,
         "warnings": warnings,
     }
+    _attach_signal_metadata(payload, "ocr_signage", payload["provider"], input_path, hits)
     _write_json(output, payload)
     return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
 
@@ -339,6 +349,8 @@ def detect_visual_objects(
     payload = {
         "generated": datetime.now().isoformat(),
         "provider": detector,
+        "model": model,
+        "confidence": confidence,
         "status": "ok" if runs else "error",
         "input": os.fspath(input_path),
         "count": len(runs),
@@ -349,6 +361,7 @@ def detect_visual_objects(
         "sources": sources,
         "warnings": warnings,
     }
+    _attach_signal_metadata(payload, "visual_objects", detector, input_path, sources)
     _write_json(output, payload)
     return {
         "output": output,
@@ -444,6 +457,7 @@ def detect_face_person_presence(
         "hits": hits,
         "warnings": warnings,
     }
+    _attach_signal_metadata(payload, "face_person_presence", payload["provider"], input_path, hits)
     _write_json(output, payload)
     return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
 
@@ -487,11 +501,84 @@ def _event_from_clip(clip: dict[str, Any], event_type: str, matched: list[str]) 
 
 def _inferred_event(clip: dict[str, Any]) -> dict[str, Any] | None:
     labels = set(clip.get("labels", []))
+    reasons = " ".join(str(item).lower() for item in clip.get("reasons", []))
+    if {"object_car", "object_truck", "object_motorcycle"} & labels and "audio_spike" in labels:
+        return _event_from_clip(clip, "vehicle_action", ["object_vehicle", "audio_spike"])
+    if "motorsports_event" in labels:
+        return _event_from_clip(clip, "motorsports_context", ["motorsports_event"])
+    if "engine" in reasons and "audio_spike" in labels:
+        return _event_from_clip(clip, "mechanical", ["engine", "audio_spike"])
     if "audio_spike" in labels and ("scene_change" in labels or "scene_cluster" in labels):
         return _event_from_clip(clip, "high_energy", ["audio_spike", "scene_change"])
     if "scene_cluster" in labels:
         return _event_from_clip(clip, "visual_activity", ["scene_cluster"])
     return None
+
+
+def _attach_signal_metadata(
+    payload: dict[str, Any],
+    artifact_kind: str,
+    provider_name: str,
+    input_path: str,
+    records: list[dict[str, Any]],
+) -> None:
+    summaries = _source_summaries(records)
+    payload["schema_version"] = SIGNAL_SCHEMA_VERSION
+    payload["artifact_kind"] = artifact_kind
+    payload["provider_metadata"] = {
+        "name": provider_name,
+        "version": "unknown",
+        "artifact_kind": artifact_kind,
+    }
+    payload["source_count"] = len(summaries)
+    payload["source_summaries"] = summaries
+    payload.setdefault("input", os.fspath(input_path))
+
+
+def _source_summaries(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for record in records:
+        source = record.get("source")
+        if not source:
+            continue
+        row = rows.setdefault(
+            os.fspath(source),
+            {
+                "source": os.fspath(source),
+                "count": 0,
+                "detection_count": 0,
+                "segment_count": 0,
+                "class_count": 0,
+                "confidence_values": [],
+            },
+        )
+        row["count"] += int(record.get("count", 1) or 1)
+        row["detection_count"] += int(record.get("detection_count", 0) or 0)
+        row["segment_count"] += len(record.get("segments", [])) if isinstance(record.get("segments"), list) else 0
+        row["class_count"] = max(
+            int(row["class_count"]),
+            len(record.get("class_counts", [])) if isinstance(record.get("class_counts"), list) else 0,
+        )
+        for key in ["confidence", "average_confidence"]:
+            if record.get(key) is not None:
+                row["confidence_values"].append(float(record[key]))
+    summaries = []
+    for row in rows.values():
+        values = row.pop("confidence_values")
+        if values:
+            row["average_confidence"] = round(sum(values) / len(values), 4)
+        summaries.append(row)
+    return sorted(summaries, key=lambda item: item["source"])
+
+
+def _topic_records(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records = []
+    for topic in topics:
+        for hit in topic.get("hits", []):
+            row = dict(hit)
+            row["topic"] = topic.get("topic")
+            records.append(row)
+    return records
 
 
 def _clip_seconds(clip: dict[str, Any], formatted_key: str, seconds_key: str) -> float:
@@ -777,15 +864,21 @@ def _class_name(class_id: int) -> str:
 
 
 def _unavailable_payload(provider: str, input_path: str, reason: str) -> dict[str, Any]:
-    return {
+    payload = {
         "generated": datetime.now().isoformat(),
         "provider": provider,
+        "schema_version": SIGNAL_SCHEMA_VERSION,
+        "artifact_kind": provider,
+        "provider_metadata": {"name": provider, "version": "unknown", "artifact_kind": provider},
         "status": "unavailable",
         "input": os.fspath(input_path),
         "count": 0,
         "hits": [],
+        "source_count": 0,
+        "source_summaries": [],
         "warnings": [reason],
     }
+    return payload
 
 
 def _opencv_face_detector(cv2: Any, warnings: list[str]) -> Any:
