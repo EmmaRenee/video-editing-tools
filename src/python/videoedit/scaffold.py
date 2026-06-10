@@ -108,7 +108,12 @@ videoedit series analysis/ratings.json --template team_tuesday --output analysis
 
 
 def _safe_slug(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_") or "video_project"
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value))
+    slug = re.sub(r"\.{2,}", "_", slug)
+    slug = slug.strip("._-")
+    if not slug or slug in {".", ".."} or ".." in slug:
+        return "video_project"
+    return slug
 
 
 def _write_json(path: str, payload: dict[str, Any]) -> None:

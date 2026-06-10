@@ -16,7 +16,9 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
-The deterministic pipeline works with only Python, FFmpeg, and ffprobe. Install YOLO and other advanced providers only when you need those signal artifacts.
+The deterministic pipeline works with only Python, FFmpeg, and ffprobe. The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library; install extras only when you need Whisper, YOLO/OpenCV, UI, or cloud providers.
+
+`videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for this repository's full local setup. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
 ## macOS Setup
 

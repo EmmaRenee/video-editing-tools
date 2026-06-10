@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 
 from .selections import load_selection
 from .timecode import seconds_to_timecode, timecode_to_seconds
@@ -89,11 +90,34 @@ def generate_extract_script(clips: list[dict], source_file: str, clips_dir: str)
     for index, clip in enumerate(clips, 1):
         clip_source = clip.get("source") or source_file
         label = re.sub(r"[^\w.-]+", "_", clip.get("label", f"clip_{index:03d}"))
+        label = label.strip("._-") or f"clip_{index:03d}"
         output = os.path.join(clips_dir, f"{label}.mp4")
+        start_seconds = max(0.0, timecode_to_seconds(clip["start"]))
+        end_seconds = max(0.0, timecode_to_seconds(clip["end"]))
+        if end_seconds <= start_seconds:
+            raise ValueError(f"clip {label} end must be after start")
         lines.append(
-            f'ffmpeg -i "{clip_source}" -ss {clip["start"]} -to {clip["end"]} -c copy "{output}" -y'
+            "ffmpeg -i "
+            f"{shlex.quote(os.fspath(clip_source))} "
+            f"-ss {shlex.quote(_time_arg(start_seconds))} "
+            f"-to {shlex.quote(_time_arg(end_seconds))} "
+            f"-c copy {shlex.quote(output)} -y"
         )
     return "\n".join(lines) + "\n"
+
+
+def _time_arg(seconds: float) -> str:
+    seconds = max(0.0, float(seconds or 0))
+    whole = int(seconds)
+    milliseconds = int(round((seconds - whole) * 1000))
+    if milliseconds >= 1000:
+        whole += 1
+        milliseconds = 0
+    hours = whole // 3600
+    minutes = (whole % 3600) // 60
+    secs = whole % 60
+    base = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{base}.{milliseconds:03d}".rstrip("0").rstrip(".") if milliseconds else base
 
 
 def export_selection_file(selection_path: str, output_dir: str, fps: float | None = None) -> list[str]:

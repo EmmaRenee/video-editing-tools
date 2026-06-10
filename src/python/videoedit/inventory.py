@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 
@@ -11,8 +12,17 @@ from .models import MediaAsset
 from .timecode import seconds_to_hhmmss
 
 
+logger = logging.getLogger(__name__)
+
+
 def build_inventory(directory: str, timeout: int = 60) -> list[MediaAsset]:
-    return [probe_media(path, timeout=timeout) for path in scan_video_files(directory)]
+    items: list[MediaAsset] = []
+    for path in scan_video_files(directory):
+        try:
+            items.append(probe_media(path, timeout=timeout))
+        except Exception as exc:
+            logger.warning("Skipping media probe failure for %s: %s", path, exc)
+    return items
 
 
 def inventory_payload(items: list[MediaAsset]) -> dict:

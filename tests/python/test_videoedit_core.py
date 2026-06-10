@@ -13,6 +13,7 @@ PYTHON_SRC = os.path.join(ROOT, "src", "python")
 sys.path.insert(0, PYTHON_SRC)
 
 from videoedit.config import AnalysisConfig
+import videoedit.inventory as inventory_module
 from videoedit.advanced import (
     cluster_transcript_topics,
     detect_face_person_presence,
@@ -32,7 +33,7 @@ from videoedit.cli import main
 import videoedit.cli as cli_module
 from videoedit.content import generate_content_map, generate_quote_mining, plan_content_series
 from videoedit.diagnostics import format_diagnostics, run_diagnostics
-from videoedit.edl import export_selection_file
+from videoedit.edl import export_selection_file, generate_extract_script
 from videoedit.ffmpeg import CommandResult, parse_audio_metadata_output, parse_scene_output, parse_silence_output, run_command_check
 from videoedit.models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, SignalReport
 from videoedit.modules import disable_module, enable_module, module_rows, operation_enabled
@@ -82,6 +83,33 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(levels), 2)
         self.assertEqual(levels[1].time, 1)
         self.assertEqual(levels[1].rms_db, -12.25)
+
+
+class InventoryTests(unittest.TestCase):
+    def test_build_inventory_skips_probe_failures(self):
+        original_scan = inventory_module.scan_video_files
+        original_probe = inventory_module.probe_media
+
+        def fake_scan(_directory):
+            return ["/tmp/bad.mp4", "/tmp/good.mp4"]
+
+        def fake_probe(path, timeout=60):
+            if path.endswith("bad.mp4"):
+                raise RuntimeError("probe failed")
+            return MediaAsset(filename=os.path.basename(path), filepath=path, duration=1.0)
+
+        inventory_module.scan_video_files = fake_scan
+        inventory_module.probe_media = fake_probe
+        try:
+            with self.assertLogs("videoedit.inventory", level="WARNING") as logs:
+                items = inventory_module.build_inventory("/tmp")
+        finally:
+            inventory_module.scan_video_files = original_scan
+            inventory_module.probe_media = original_probe
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].filename, "good.mp4")
+        self.assertIn("probe failed", logs.output[0])
 
 
 class ScoringTests(unittest.TestCase):
@@ -955,6 +983,32 @@ class OperationTests(unittest.TestCase):
             self.assertTrue(result["files"][0].endswith("a_cam_clip_a.mp4"))
             self.assertTrue(result["files"][1].endswith("b_clip_b.mp4"))
 
+    def test_extract_script_quotes_shell_arguments_and_validates_times(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = generate_extract_script(
+                [
+                    {
+                        "source": "/tmp/source; touch pwned.mp4",
+                        "start": "00:00:01",
+                        "end": "00:00:02.5",
+                        "label": "clip; name",
+                    }
+                ],
+                "/tmp/fallback.mp4",
+                tmp,
+            )
+            self.assertIn("'/tmp/source; touch pwned.mp4'", script)
+            self.assertIn("-ss 00:00:01", script)
+            self.assertIn("-to 00:00:02.5", script)
+            self.assertIn("clip_name.mp4", script)
+            self.assertNotIn("clip; name.mp4", script)
+            with self.assertRaises(ValueError):
+                generate_extract_script(
+                    [{"source": "/tmp/a.mp4", "start": "00:00:02", "end": "00:00:01", "label": "bad"}],
+                    "/tmp/fallback.mp4",
+                    tmp,
+                )
+
 
 class DiagnosticsTests(unittest.TestCase):
     def test_diagnostics_reports_required_dependency_status(self):
@@ -1534,6 +1588,12 @@ class CaptionContentScaffoldTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(os.path.join(project, "raw")))
             self.assertTrue(os.path.exists(os.path.join(project, ".videoedit", "config.json")))
             self.assertTrue(os.path.exists(os.path.join(project, "README.md")))
+
+    def test_project_scaffold_rejects_path_traversal_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = scaffold_project("../..", tmp, project_type="reel")
+            self.assertEqual(os.path.basename(result["project"]), "video_project")
+            self.assertTrue(os.path.realpath(result["project"]).startswith(os.path.realpath(tmp)))
 
 
 def _write_sample_ratings(path: str) -> None:

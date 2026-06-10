@@ -222,6 +222,10 @@ video-editing-tools/
 | YOLO/Ultralytics | Optional | Latest compatible |
 | PowerShell | Optional | 5.1+ / 7+ |
 
+`videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for the full local toolchain. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
+
+The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library. Install optional provider groups only when needed: `./src/python[whisper]`, `./src/python[advanced]`, `./src/python[ui]`, or `./src/python[cloud]`.
+
 ---
 
 ## Platform Support

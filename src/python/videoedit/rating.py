@@ -139,7 +139,7 @@ def analyze_file(
             audio_levels, warning = analyze_audio_levels(path, timeout=config.command_timeout)
             if warning:
                 warnings.append(warning)
-        elif asset.status == "ok":
+        else:
             warnings.append("no audio stream")
 
         if config.transcript_mode != "off":

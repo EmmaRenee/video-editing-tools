@@ -410,6 +410,10 @@ python --version
 # Linux: sudo apt install ffmpeg
 ```
 
+`videoedit` 0.5.0 supports Python 3.10+. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
+
+The base package has no mandatory Python runtime dependencies beyond the standard library. Optional provider dependencies stay in extras: `whisper`, `advanced`, `ui`, and `cloud`.
+
 ---
 
 ## Tools
