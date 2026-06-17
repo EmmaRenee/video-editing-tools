@@ -1237,6 +1237,14 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("downloadDecisions", html)
             self.assertIn('class="decision"', html)
             self.assertIn('value="approve"', html)
+            self.assertIn("decisionFilter", html)
+            self.assertIn("bulkDecision", html)
+            self.assertIn("applyBulkDecision", html)
+            self.assertIn("clearFilters", html)
+            self.assertIn("preserveScroll", html)
+            self.assertIn("visibleCount", html)
+            self.assertIn("showExportPanel", html)
+            self.assertIn("exportDecisionsText", html)
 
     def test_generate_review_assets_includes_signal_and_calibration_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1326,6 +1334,9 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("searchFilter", html)
             self.assertIn("Calibration: matched", html)
             self.assertIn("Objects: person", html)
+            self.assertIn("Approve visible", html)
+            self.assertIn("B-roll visible", html)
+            self.assertIn("Refresh and select JSON", html)
 
     def test_review_tui_data_layer_filters_updates_and_saves_decisions(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -525,11 +525,16 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
     header {{ position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #d9e2ec; background: rgba(255,255,255,0.96); }}
     h1 {{ font-size: 18px; margin: 0; }}
     .meta {{ font-size: 12px; color: #52606d; margin: 3px 0 0; }}
-    .toolbar {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+    .toolbar {{ display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }}
+    .bulk-controls {{ display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; padding-left: 10px; border-left: 1px solid #d9e2ec; }}
+    .bulk-controls label {{ min-width: 132px; }}
     .filters {{ display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid #d9e2ec; background: #fff; }}
     .counts {{ font-size: 12px; color: #334e68; }}
+    .visible-count {{ font-size: 12px; font-weight: 700; color: #102a43; }}
     button {{ border: 1px solid #9fb3c8; background: #fff; color: #102a43; border-radius: 6px; padding: 8px 10px; font: inherit; cursor: pointer; }}
     button:hover {{ background: #f0f4f8; }}
+    .export-panel {{ margin: 16px; padding: 12px; border: 1px solid #bcccdc; border-radius: 6px; background: #fff; }}
+    .export-panel textarea {{ min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding: 16px; }}
     .clip {{ border: 1px solid #d9e2ec; border-radius: 6px; background: #fff; overflow: hidden; }}
     .clip[data-state="approve"], .clip[data-state="promote"] {{ border-color: #51a36d; }}
@@ -565,17 +570,47 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
       <p class="meta">{html.escape(calibration_summary)}</p>
     </div>
     <div class="toolbar">
+      <span class="visible-count" id="visibleCount"></span>
       <span class="counts" id="decisionCounts"></span>
+      <div class="bulk-controls">
+        <label>Bulk decision
+          <select id="bulkDecision">
+            <option value="approve">Approve</option>
+            <option value="promote">Promote</option>
+            <option value="review">Review</option>
+            <option value="reject">Reject</option>
+            <option value="broll">B-roll</option>
+            <option value="cut">Cut</option>
+          </select>
+        </label>
+        <button type="button" onclick="applyBulkDecision()">Apply to visible</button>
+        <button type="button" onclick="quickBulkDecision('approve')">Approve visible</button>
+        <button type="button" onclick="quickBulkDecision('reject')">Reject visible</button>
+        <button type="button" onclick="quickBulkDecision('broll')">B-roll visible</button>
+        <button type="button" onclick="quickBulkDecision('cut')">Cut visible</button>
+      </div>
       <button type="button" onclick="downloadDecisions()">Download decisions JSON</button>
       <button type="button" onclick="copyDecisions()">Copy JSON</button>
+      <button type="button" onclick="showExportPanel()">Show JSON</button>
     </div>
   </header>
   <section class="filters">
     <label>Search<input id="searchFilter" type="search" placeholder="clip, source, label, reason"></label>
     <label>Action<select id="actionFilter"><option value="">All actions</option></select></label>
+    <label>Decision<select id="decisionFilter"><option value="">All decisions</option><option value="approve">Approve</option><option value="promote">Promote</option><option value="review">Review</option><option value="reject">Reject</option><option value="broll">B-roll</option><option value="cut">Cut</option></select></label>
     <label>Label<select id="labelFilter"><option value="">All labels</option></select></label>
     <label>Calibration<select id="calibrationFilter"><option value="">All calibration</option></select></label>
     <label>Sort<select id="sortMode"><option value="rank">Rank</option><option value="score-desc">Score high-low</option><option value="score-asc">Score low-high</option><option value="source">Source</option><option value="order">Review order</option></select></label>
+    <button type="button" onclick="clearFilters()">Clear filters</button>
+  </section>
+  <section class="export-panel" id="exportPanel" hidden>
+    <label>Decisions JSON
+      <textarea id="exportDecisionsText" spellcheck="false"></textarea>
+    </label>
+    <div class="toolbar">
+      <button type="button" onclick="refreshExportText(true)">Refresh and select JSON</button>
+      <button type="button" onclick="hideExportPanel()">Hide JSON</button>
+    </div>
   </section>
   {warnings}
   <section class="grid" id="clipGrid">
@@ -590,6 +625,10 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
 
     function grid() {{
       return document.getElementById("clipGrid");
+    }}
+
+    function visibleCards() {{
+      return cards().filter((card) => !card.hidden);
     }}
 
     function collectDecisions() {{
@@ -616,6 +655,7 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
     function saveState() {{
       localStorage.setItem(storageKey, JSON.stringify(collectDecisions()));
       updateCounts();
+      refreshExportText(false);
     }}
 
     function restoreState() {{
@@ -650,7 +690,7 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
         .sort()
         .map((key) => key + ": " + counts[key])
         .join("  ");
-      applyFilters();
+      document.getElementById("visibleCount").textContent = visibleCards().length + " visible / " + cards().length + " total";
     }}
 
     function populateFilters() {{
@@ -678,19 +718,29 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
     }}
 
     function applyFilters() {{
+      preserveScroll(() => {{
+        filterCards();
+        applySort();
+        updateCounts();
+      }});
+    }}
+
+    function filterCards() {{
       const query = document.getElementById("searchFilter").value.toLowerCase();
       const action = document.getElementById("actionFilter").value;
+      const decision = document.getElementById("decisionFilter").value;
       const label = document.getElementById("labelFilter").value;
       const calibration = document.getElementById("calibrationFilter").value;
       cards().forEach((card) => {{
         const text = card.textContent.toLowerCase();
+        const labels = (card.dataset.labels || "").split(",").map((value) => value.trim());
         const matches = (!query || text.includes(query))
           && (!action || card.dataset.currentAction === action)
-          && (!label || (card.dataset.labels || "").split(",").map((value) => value.trim()).includes(label))
+          && (!decision || card.querySelector(".decision").value === decision)
+          && (!label || labels.includes(label))
           && (!calibration || card.dataset.calibration === calibration);
         card.hidden = !matches;
       }});
-      applySort();
     }}
 
     function applySort() {{
@@ -703,6 +753,58 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
         return Number(a.querySelector(".order").defaultValue || 0) - Number(b.querySelector(".order").defaultValue || 0);
       }});
       sorted.forEach((card) => grid().appendChild(card));
+    }}
+
+    function preserveScroll(callback) {{
+      const anchor = scrollAnchor();
+      callback();
+      restoreScroll(anchor);
+    }}
+
+    function scrollAnchor() {{
+      const activeCard = document.activeElement ? document.activeElement.closest(".clip") : null;
+      const card = activeCard && !activeCard.hidden
+        ? activeCard
+        : visibleCards().find((item) => item.getBoundingClientRect().bottom > 120);
+      if (!card) return null;
+      return {{ id: card.dataset.id, top: card.getBoundingClientRect().top }};
+    }}
+
+    function restoreScroll(anchor) {{
+      if (!anchor) return;
+      const card = cards().find((item) => item.dataset.id === anchor.id);
+      if (!card || card.hidden) return;
+      window.scrollBy(0, card.getBoundingClientRect().top - anchor.top);
+    }}
+
+    function clearFilters() {{
+      preserveScroll(() => {{
+        document.getElementById("searchFilter").value = "";
+        document.getElementById("actionFilter").value = "";
+        document.getElementById("decisionFilter").value = "";
+        document.getElementById("labelFilter").value = "";
+        document.getElementById("calibrationFilter").value = "";
+        document.getElementById("sortMode").value = "rank";
+        filterCards();
+        applySort();
+        updateCounts();
+      }});
+    }}
+
+    function applyBulkDecision() {{
+      quickBulkDecision(document.getElementById("bulkDecision").value);
+    }}
+
+    function quickBulkDecision(decision) {{
+      preserveScroll(() => {{
+        visibleCards().forEach((card) => {{
+          card.querySelector(".decision").value = decision;
+        }});
+        localStorage.setItem(storageKey, JSON.stringify(collectDecisions()));
+        filterCards();
+        applySort();
+        updateCounts();
+      }});
     }}
 
     function downloadDecisions() {{
@@ -719,10 +821,38 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
       await navigator.clipboard.writeText(JSON.stringify(collectDecisions(), null, 2));
     }}
 
-    document.addEventListener("change", saveState);
-    document.addEventListener("input", saveState);
+    function showExportPanel() {{
+      document.getElementById("exportPanel").hidden = false;
+      refreshExportText(true);
+    }}
+
+    function hideExportPanel() {{
+      document.getElementById("exportPanel").hidden = true;
+    }}
+
+    function refreshExportText(selectText) {{
+      const panel = document.getElementById("exportPanel");
+      if (panel.hidden) return;
+      const textarea = document.getElementById("exportDecisionsText");
+      textarea.value = JSON.stringify(collectDecisions(), null, 2);
+      if (selectText) {{
+        textarea.focus();
+        textarea.select();
+      }}
+    }}
+
+    function bindReviewControls() {{
+      cards().forEach((card) => {{
+        card.querySelectorAll(".decision, .order, .note").forEach((control) => {{
+          control.addEventListener("change", saveState);
+          control.addEventListener("input", saveState);
+        }});
+      }});
+    }}
+
     populateFilters();
-    ["searchFilter", "actionFilter", "labelFilter", "calibrationFilter", "sortMode"].forEach((id) => {{
+    bindReviewControls();
+    ["searchFilter", "actionFilter", "decisionFilter", "labelFilter", "calibrationFilter", "sortMode"].forEach((id) => {{
       document.getElementById(id).addEventListener("input", applyFilters);
       document.getElementById(id).addEventListener("change", applyFilters);
     }});
