@@ -28,6 +28,27 @@ setup(
     extras_require={
         "whisper": ["openai-whisper>=20231117"],
         "cloud": ["elevenlabs", "python-dotenv"],
+        # Shoot-scale local analysis stack (hybrid funnel tier 1)
+        "analyze": [
+            "faster-whisper>=1.0",
+            "silero-vad>=5.0",
+            # scenedetect 0.7 dropped the [opencv] extra; depend on both directly
+            "scenedetect>=0.6.3",
+            "opencv-python>=4.8",
+            "open_clip_torch>=2.24",
+            "torch>=2.2",
+            "Pillow>=10.0",
+            "pillow-heif>=0.15",
+            "numpy",
+            "onnxruntime",
+        ],
+        # DaVinci Resolve interchange fallback
+        "resolve": ["opentimelineio>=0.16"],
+        # Optional analyzers (each degrades gracefully when absent)
+        "audio-events": ["panns-inference"],
+        "faces": ["mediapipe"],
+        "aesthetic": ["pyiqa"],
+        "whisper-mlx": ["mlx-whisper"],
     },
     entry_points={
         "console_scripts": [

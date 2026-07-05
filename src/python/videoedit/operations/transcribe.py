@@ -11,6 +11,18 @@ from typing import Any, Dict
 
 from .base import BaseOperation, OperationResult
 
+_FW_MODELS = {}  # model_size -> loaded WhisperModel (one load per process)
+
+
+def _get_faster_whisper(model_size: str):
+    from faster_whisper import WhisperModel
+    if model_size not in _FW_MODELS:
+        # int8 on CPU is the fast/portable default; CTranslate2 has no MPS
+        # backend, so CPU is correct on Apple Silicon too.
+        _FW_MODELS[model_size] = WhisperModel(model_size, device="cpu",
+                                              compute_type="int8")
+    return _FW_MODELS[model_size]
+
 
 class TranscribeWhisper(BaseOperation):
     """
@@ -32,7 +44,9 @@ class TranscribeWhisper(BaseOperation):
         model: str = "small",
         language: str = "auto",
         task: str = "transcribe",
-        output_format: str = "srt"
+        output_format: str = "srt",
+        word_timestamps: bool = False,
+        vad_filter: bool = True,
     ):
         """
         Initialize transcribe operation.
@@ -42,33 +56,101 @@ class TranscribeWhisper(BaseOperation):
             language: Language code or 'auto' for auto-detect
             task: 'transcribe' or 'translate' (to English)
             output_format: 'srt', 'vtt', 'json', or 'all'
+            word_timestamps: Include per-word timing (faster-whisper backend)
+            vad_filter: Skip silence via built-in VAD (faster-whisper backend)
         """
         super().__init__()
         self.model = model
         self.language = language
         self.task = task
         self.output_format = output_format
+        self.word_timestamps = word_timestamps
+        self.vad_filter = vad_filter
 
     def execute(self, input_path: Path, output_dir: Path, context: Dict[str, Any]) -> OperationResult:
-        """Execute transcription."""
+        """Execute transcription.
+
+        Backend preference: faster-whisper (2-4x faster on CPU, built-in
+        VAD) → openai-whisper package → whisper CLI.
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Try using Whisper Python package first
+        try:
+            return self._transcribe_with_faster_whisper(input_path, output_dir)
+        except ImportError:
+            pass
         try:
             return self._transcribe_with_package(input_path, output_dir)
         except ImportError:
             # Fall back to CLI
             return self._transcribe_with_cli(input_path, output_dir)
 
+    def _transcribe_with_faster_whisper(self, input_path: Path, output_dir: Path) -> OperationResult:
+        """Transcribe using faster-whisper (CTranslate2)."""
+        from faster_whisper import WhisperModel
+
+        model = _get_faster_whisper(self.model)
+        segments_iter, info = model.transcribe(
+            str(input_path),
+            language=None if self.language == "auto" else self.language,
+            task=self.task,
+            word_timestamps=self.word_timestamps,
+            vad_filter=self.vad_filter,
+        )
+
+        segments = []
+        for seg in segments_iter:
+            entry = {"start": round(seg.start, 3), "end": round(seg.end, 3),
+                     "text": seg.text}
+            if self.word_timestamps and seg.words:
+                entry["words"] = [{"start": round(w.start, 3),
+                                   "end": round(w.end, 3), "word": w.word}
+                                  for w in seg.words]
+            segments.append(entry)
+
+        full_text = "".join(s["text"] for s in segments).strip()
+        output_files = {}
+
+        if self.output_format in ("srt", "all"):
+            srt_file = output_dir / f"{input_path.stem}.srt"
+            srt_file.write_text(self._to_srt(segments), encoding="utf-8")
+            output_files["srt"] = str(srt_file)
+
+        if self.output_format in ("vtt", "all"):
+            vtt_file = output_dir / f"{input_path.stem}.vtt"
+            vtt_file.write_text(self._to_vtt(segments), encoding="utf-8")
+            output_files["vtt"] = str(vtt_file)
+
+        if self.output_format in ("json", "all"):
+            json_file = output_dir / f"{input_path.stem}_transcript.json"
+            json_file.write_text(json.dumps(
+                {"language": info.language, "segments": segments,
+                 "text": full_text}, indent=2), encoding="utf-8")
+            output_files["json"] = str(json_file)
+
+        output_path = Path(next(iter(output_files.values()))) if output_files else None
+        return OperationResult(
+            success=True,
+            output_path=output_path,
+            data={
+                **output_files,
+                "backend": "faster-whisper",
+                "language": info.language,
+                "segments": segments,
+                "duration": segments[-1]["end"] if segments else 0,
+                "text": full_text,
+            }
+        )
+
     def _transcribe_with_package(self, input_path: Path, output_dir: Path) -> OperationResult:
         """Transcribe using whisper Python package."""
         import whisper
 
-        click.echo(f"Loading Whisper model: {self.model}")
+        print(f"Loading Whisper model: {self.model}")
         model = whisper.load_model(self.model)
 
-        click.echo(f"Transcribing: {input_path.name}")
+        print(f"Transcribing: {input_path.name}")
         result = model.transcribe(
             str(input_path),
             language=None if self.language == "auto" else self.language,
@@ -168,7 +250,7 @@ class TranscribeWhisper(BaseOperation):
         """Convert segments to WebVTT format."""
         lines = ["WEBVTT\n"]
         for seg in segments:
-            start = self._format_timestamp(seg["end"], vtt=True)
+            start = self._format_timestamp(seg["start"], vtt=True)
             end = self._format_timestamp(seg["end"], vtt=True)
             text = seg["text"].strip()
             lines.append(f"\n{start} --> {end}\n{text}")

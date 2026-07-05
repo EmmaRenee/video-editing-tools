@@ -88,15 +88,36 @@ python3 --version
 ### Required Python Packages
 
 ```bash
-# Core video processing
+# Shoot-scale analysis stack (faster-whisper, Silero VAD, PySceneDetect,
+# OpenCLIP) — powers `videoedit shoot analyze`
+pip install -e "src/python[analyze]"
+
+# OTIO timeline export for DaVinci Resolve
+pip install -e "src/python[resolve]"
+
+# Optional analyzers
+pip install -e "src/python[audio-events]"   # PANNs audio event tags
+pip install -e "src/python[faces]"          # mediapipe face detection
+
+# Legacy/basic whisper only
 pip install openai-whisper
 
 # Cloud API tools (if using)
 pip install elevenlabs python-dotenv requests
 
-# For DaVinci scripting (macOS only - comes with DaVinci)
-# No pip install needed
+# For DaVinci Resolve scripting API — no pip install needed
+# (bundled with Resolve; enable Preferences → System → External scripting: Local)
 ```
+
+**Python version:** use Python 3.13 (`brew install python@3.13`).
+opentimelineio 0.18 does not work on Python 3.14 yet ("bad any cast"
+errors from its C++ bindings).
+
+**NAS tip:** if this repo lives on network storage, create the virtualenv
+on a *local* disk (e.g. `python3.13 -m venv ~/venvs/videoedit`) — installing
+and importing torch from an SMB share is painfully slow. Likewise point
+`videoedit shoot init --workspace` at local scratch so thumbnails and the
+shoot DB stay off the NAS.
 
 ---
 

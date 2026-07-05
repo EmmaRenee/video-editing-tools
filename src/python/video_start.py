@@ -99,6 +99,7 @@ def create_project_structure(project_path: Path, project_type: str) -> Dict:
     """Create standard project folder structure."""
     folders = {
         "raw": "Raw footage",
+        "photos": "Stills from the shoot",
         "audio": "Audio files (music, SFX)",
         "exports": "Final exports",
         "assets": "Graphics, lower thirds, overlays",

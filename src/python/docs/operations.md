@@ -327,3 +327,70 @@ steps:
     operation: detect_highlights_transcript
     input: transcribe  # Uses transcribe output
 ```
+
+---
+
+# Shoot Analysis Operations (v0.3)
+
+These operations power the shoot funnel (`videoedit shoot analyze`) and
+are also usable in single-file pipelines. Install: `pip install -e ".[analyze]"`.
+
+## ProbeMedia (`probe_media`)
+
+Extract metadata (duration, dims, fps, codecs, camera, capture time) via
+ffprobe for AV files or EXIF for photos. No parameters.
+
+## SceneDetect (`scene_detect`)
+
+Shot boundaries via PySceneDetect ContentDetector. Scenes are the candidate
+unit for highlight discovery.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `threshold` | float | 27.0 | Content-change sensitivity (lower = more cuts) |
+| `min_scene_len_s` | float | 1.0 | Discard scenes shorter than this |
+
+## VadSpeech (`vad_speech`)
+
+Silero VAD speech segmentation + RMS energy peaks from the same decoded
+audio. Outputs `speech_ratio` (the A-roll vs B-roll gate), `speech_segments`,
+`rms_peaks`. No parameters.
+
+## EmbedFrames (`embed_frames`)
+
+OpenCLIP frame embeddings + zero-shot tags from the prompt bank
+(`videoedit/shoot/prompts.py`), sampled at scene midpoints plus a regular
+grid. Runs on Apple Silicon GPU (MPS) when available.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `interval_s` | float | 10.0 | Regular sampling interval |
+| `model` | string | ViT-B-32 | OpenCLIP model name |
+| `pretrained` | string | laion2b_s34b_b79k | OpenCLIP weights tag |
+| `thumb_width` | int | 320 | Thumbnail width in px |
+
+## QualityFrames (`quality_frames`)
+
+Laplacian sharpness + exposure clipping percentages for an image.
+Shared by video thumbs and the photo cull. No parameters.
+
+## EventsAudio (`events_audio`)
+
+AudioSet event tagging via PANNs (optional extra `[audio-events]`):
+engine, cheering, applause, speech. Skips gracefully when not installed.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `window_s` | float | 5.0 | Analysis window |
+| `min_prob` | float | 0.3 | Minimum label probability to keep |
+
+## ContactSheet (`contact_sheet`)
+
+Composite frame thumbnails into captioned review grids (~30 tiles/image)
+so Claude can look at footage token-efficiently.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cols` | int | 5 | Grid columns |
+| `rows` | int | 6 | Grid rows |
+| `title` | string | (filename) | Sheet header |

@@ -1,545 +1,274 @@
 ---
 name: video-editing
-description: Use when editing racing footage, social media reels, or documentary content. Helps cut dead air, find highlights, create rough cuts, prepare footage for DaVinci Resolve, and format for Instagram/Facebook/YouTube. Use when overwhelmed by raw footage or needing captions.
+description: Use when facing raw footage from a shoot (racing, interviews, events, documentary) that needs sorting, highlight discovery, or a rough cut in DaVinci Resolve — or when editing clips for social media, removing dead air, or adding captions. Handles shoots of 100s of GB: video, audio, and photos.
 ---
 
-# Video Editing for Racing & Social Media
+# Video Editing: Shoot → Rough Cut → Social
 
 ## Overview
 
-AI-assisted video editing for cutting real footage, not generating from scratch. Focus: organize overwhelming raw footage, create rough cuts, remove dead air, and prepare for final polish in DaVinci Resolve.
+AI-assisted post-production for real footage. The core workflow takes a
+post-shoot dump (video + audio + photos, often 100s of GB) through a
+**hybrid funnel**: cheap local analysis triages everything, Claude reviews
+only the top candidates visually, and the result lands as a rough cut in
+DaVinci Resolve Studio ready for the editor's final polish.
 
-**This skill is portable** — works on Windows, macOS, and Linux with FFmpeg + Claude.
+**Core principle: edit, don't generate.** The value is compression —
+hours of raw footage into minutes of compelling content. Local ML finds
+*candidates*; Claude's eye picks *keepers*; the editor makes the final
+creative call in Resolve.
 
 **📦 Source Repository:** https://github.com/EmmaRenee/video-editing-tools
 
-**📚 Additional Resources:**
-- `SETUP.md` — Cross-platform installation and configuration guide
-- `VideoEditing.psm1` — PowerShell module with 20+ video editing cmdlets
-- `QUICKREF.md` — Cmdlet quick reference and common workflows
+Requirements: `pip install -e "src/python[analyze]"` (adds faster-whisper,
+Silero VAD, PySceneDetect, OpenCLIP), plus `[resolve]` for OTIO export.
+ffmpeg/ffprobe on PATH. DaVinci Resolve Studio for the direct API push.
 
 ---
 
-## When to Use
+## The Shoot Workflow (primary)
 
 ```
-User mentions video editing?
-  ├── Social media reels (Instagram/Facebook)
-  ├── Racing footage or motorsports content
-  ├── YouTube content or documentary series
-  ├── "Too much footage", "overwhelmed", "need rough cut"
-  ├── Caption, subtitle, or dead air removal
-  └── Repetitive cutting tasks
+1 INGEST     videoedit shoot init/scan     → inventory + shoot.db
+2 ANALYZE    videoedit shoot analyze       → scenes, speech, transcripts,
+                                             CLIP tags, photo quality  (hours, unattended)
+3 REVIEW     candidates + contact-sheets   → Claude LOOKS at the footage,
+             review-export/import            emits verdict JSON
+4 COMPOSE    timeline spec → shoot timeline → .otio + Resolve Studio push
+             → shoot resolve-push
+5 POLISH     editor takes over in Resolve; downstream layers below for
+             social formats / captions
 ```
 
-**Use when:**
-- Cutting racing footage into highlights or reels
-- Converting long recordings into social media clips
-- Need to remove dead air, silence, or boring sections
-- Want captions or subtitles automatically
-- Preparing footage for DaVinci Resolve
-- Repetitive format conversions (vertical/horizontal)
+The shoot database (`<root>/.videoedit/shoot.db`) is the contract between
+steps. Everything is resumable: interrupted analysis picks up where it
+stopped, and re-running any step never repeats finished work.
 
-**Don't use for:**
-- Generating video from prompts (this is for editing real footage)
-- Advanced color grading or VFX (use DaVinci directly)
-- Audio mastering (use dedicated audio tools)
+### Step 1 — Ingest
+
+```bash
+videoedit shoot init "/path/to/shoot" --name "Spring GP Weekend"
+videoedit shoot scan                    # parallel probe; idempotent
+videoedit shoot status                  # counts, sizes, phase progress
+videoedit shoot report                  # CSV/MD/JSON inventory
+```
+
+**Claude: after scanning, present the inventory summary, then interview
+the editor** — event type, deliverables, people/subjects to look for,
+anything special ("watch for the #42 red car"). Store the answers:
+
+```bash
+# answers become CLIP prompts and transcript keywords for the funnel
+python3 -c "
+from videoedit.shoot.db import ShootDB
+db = ShootDB.find('.')
+db.update_config(1, {
+    'event_type': 'racing',
+    'deliverables': ['3 reels', 'YouTube recap'],
+    'people': ['Jane Doe'],
+    'extra_prompts': ['a red race car with number 42'],
+})"
+```
+
+NAS tip: point `--workspace` at local scratch so thumbnails and the DB
+don't live over SMB. Keep `--workers` low (4) on network storage.
+
+### Step 2 — Analyze (long-running, unattended)
+
+```bash
+videoedit shoot analyze --whisper-model small    # all phases
+# or selectively:
+videoedit shoot analyze --only scenes,vad
+```
+
+Phases: `scenes` (shot boundaries) → `vad` (speech ratio — the A/B-roll
+signal) → `transcribe` (**only** assets with speech ratio > 0.15 hit
+Whisper) → `embed` (CLIP tags + embeddings per frame) → `quality` (photo
+blur/exposure) → `events` (optional PANNs audio tags) → `photos`
+(grouping + dedupe + rank).
+
+**Claude: run this in the background and poll `videoedit shoot status`.**
+On a big shoot this takes hours — that's expected and fine.
+
+### Step 3 — Review (Claude's judgment)
+
+```bash
+videoedit shoot candidates        # fuse signals → ranked A/B-roll candidates
+videoedit shoot contact-sheets --top 60
+videoedit shoot review-export     # → .videoedit/reviews/review_batch.json
+```
+
+**Claude: you MUST Read the contact-sheet images** (each grid = ~30
+candidate thumbnails captioned `#id kind start-end`) **alongside the
+transcript excerpts in review_batch.json. Never rank from filenames or
+scores alone — the local scores only chose who got in front of you.**
+When in/out points need refinement for a specific clip, request a dense
+strip: `videoedit shoot contact-sheets --candidate 17`.
+
+Then emit verdict JSON and import it:
+
+```json
+{"reviews": [
+  {"candidate_id": 42, "rank": 1, "kind": "aroll",
+   "in_s": 12.5, "out_s": 31.0, "story_beat": "climax",
+   "tags": ["podium celebration"], "notes": "great reaction, clean audio"},
+  {"candidate_id": 17, "kind": "reject", "notes": "out of focus"}
+]}
+```
+
+- `kind`: `aroll` | `broll` | `reject`
+- `story_beat`: `hook` | `context` | `rising` | `climax` | `resolution` | `color`
+- `rank`, `in_s`, `out_s` required unless rejecting
+
+```bash
+videoedit shoot review-import verdicts.json --model claude-fable-5
+```
+
+**Photos:** same loop with `videoedit shoot review-export --photos` —
+group sheets show `id=N rank KEEP?` captions; emit:
+
+```json
+{"groups": [
+  {"group_id": 7, "keepers": [31, 34], "hero": 34, "rejects": [32, 33],
+   "notes": "34 sharpest of the burst"}
+]}
+```
+
+### Step 4 — Compose the rough cut
+
+**Claude: draft a story-beat outline in chat first (hook → context →
+rising → climax → resolution) using the reviewed candidates, and get the
+editor's approval before building the timeline.** Then write the spec:
+
+```json
+{"timeline_name": "spring_gp_rough_v1", "fps": 29.97,
+ "tracks": [
+   {"index": 1, "clips": [
+     {"candidate_id": 42, "asset_id": 3, "in_s": 12.5, "out_s": 31.0,
+      "marker": {"color": "Blue", "note": "trim tail after cheer"}}
+   ]},
+   {"index": 2, "clips": [ ...B-roll overlay track... ]}
+ ]}
+```
+
+Use Claude-refined `claude_in_s`/`claude_out_s` from the review, not the
+original candidate bounds. `in_s`/`out_s` are seconds in the SOURCE clip.
+
+```bash
+videoedit shoot timeline rough_cut.json     # validates + writes .otio (always)
+videoedit shoot resolve-push 1              # builds it inside Resolve Studio
+```
+
+`resolve-push` needs Resolve Studio **running** with external scripting
+enabled (Preferences → System → General → External scripting: Local).
+It creates bins (A-Roll/Interviews, B-Roll/Action…), imports reviewed
+media with clip colors + keywords + Claude's notes as metadata, builds
+the timeline with per-clip-fps frame math, and adds markers. If Resolve
+isn't available, hand the editor the `.otio` path — Resolve 17+ imports
+it natively (File → Import → Timeline). See `python/docs/resolve.md`.
+
+### Claude behavior rules for shoot work
+
+1. Interview the editor at ingest; persist answers to shoot config.
+2. Long analysis runs go in the background; poll status, don't block.
+3. Always look at contact sheets before ranking — signals shortlist,
+   eyes decide.
+4. Feed yourself transcript *excerpts* (already in review_batch.json),
+   never whole transcripts.
+5. Get outline approval in chat before composing a timeline.
+6. The `.otio` is the durable artifact; the Resolve push is convenience.
 
 ---
 
-## Core Principle
+## Per-file pipelines (secondary)
 
-**Edit, don't generate.** The value is compression — turning hours of raw footage into minutes of compelling content. AI helps find the good parts; you make the creative decisions.
+For single files, the YAML pipeline system still applies:
+
+```bash
+videoedit init reel --output my_reel.yaml
+videoedit run my_reel.yaml --input footage.mp4
+videoedit operations          # list available operations
+videoedit tui                 # interactive builder
+```
+
+Presets: `reel` (9:16 audio-driven), `youtube` (16:9), `documentary`
+(transcript-driven), `simple`, `ingest` (probe → scenes → VAD →
+transcribe → embed on one file).
 
 ---
 
-## The Pipeline
-
-```
-Raw footage (hours)
-  → FFmpeg (analyze, cut, normalize)
-  → Claude (identify highlights, transcript, plan structure)
-  → FFmpeg (create rough cut)
-  → DaVinci Resolve (final polish, color, export)
-```
-
----
-
-## Layer 1: Analyze Footage (FFmpeg)
-
-Before editing, understand what you have.
-
-### Get video info
+## Layer: Social Media Formats
 
 ```bash
-# Duration, resolution, codecs, audio info
-ffprobe -i raw_footage.mp4 -show_format -show_streams -v quiet
-
-# Quick duration check
-ffprobe -i raw_footage.mp4 -show_entries format=duration -v quiet -of csv="p=0"
-```
-
-### Detect scenes (automatic cut points)
-
-```bash
-# Find scene changes - gives you timestamps for potential cuts
-# Windows: use findstr instead of grep
-ffmpeg -i raw_footage.mp4 -vf "select='gt(scene,0.4)',showinfo" -vsync vfr -f null - 2>&1 | findstr pts_time
-
-# macOS/Linux:
-ffmpeg -i raw_footage.mp4 -vf "select='gt(scene,0.4)',showinfo" -vsync vfr -f null - 2>&1 | grep pts_time
-```
-
-### Extract audio for transcription
-
-```bash
-# Pull audio for Claude to analyze
-ffmpeg -i raw_footage.mp4 -vn -acodec pcm_s16le -ar 16000 audio.wav
-
-# Or if there's no audio, create a silent reference
-ffmpeg -f lavfi -i anullsrc=cl=mono:r=16000 -t 10 silent.wav
-```
-
-### Detect silence (find dead air to remove)
-
-```bash
-# Find quiet sections for potential cutting
-ffmpeg -i raw_footage.mp4 -af silencedetect=noise=-30dB:d=1 -f null - 2>&1 | findstr silence
-```
-
----
-
-## Layer 2: Identify Highlights (Claude)
-
-Claude helps you find the good parts without watching everything.
-
-### Prompt template for racing footage
-
-```
-I have [X hours] of racing footage. Here's what I know:
-- Track: [track name]
-- Session: [practice, qualifying, race]
-- Driver: [name, car number]
-
-Help me:
-1. Identify the most exciting moments (passes, incidents, fast laps)
-2. Suggest 3-5 clips that would work for Instagram reels
-3. Recommend which sections to cut entirely
-
-I can provide: timestamps, transcript, or description of key events.
-```
-
-### For social media reels
-
-```
-I need to create [30/60/90]-second reels from this footage.
-Target audience: [fans, friends, sponsors]
-
-Suggest:
-- 3-5 reel concepts with themes
-- Rough timestamps for each
-- Hook ideas (first 3 seconds to grab attention)
-- Music suggestions or mood
-```
-
-### For documentary series
-
-```
-This is for a documentary about [specific story/season/driver].
-
-Help me plan a narrative arc:
-- Beginning: setup, context, what's at stake
-- Middle: rising action, challenges, turning points
-- End: resolution, aftermath, what's next
-
-Suggest which footage supports each part of the story.
-```
-
----
-
-## Layer 3: Create Rough Cut (FFmpeg)
-
-Once you know what to keep, let FFmpeg do the cutting.
-
-### Extract specific segments
-
-```bash
-# Cut from 12:30 to 15:45
-ffmpeg -i raw.mp4 -ss 00:12:30 -to 00:15:45 -c copy highlight_01.mp4
-
-# PowerShell batch cutting (Windows)
-Get-Content cuts.txt | ForEach-Object {
-    $parts = $_.Split(',')
-    $start = $parts[0]
-    $end = $parts[1]
-    $label = $parts[2]
-    ffmpeg -i raw.mp4 -ss $start -to $end -c copy "clips/$label.mp4"
-}
-
-# Bash/mksh batch cutting (macOS/Linux)
-while IFS=, read -r start end label; do
-  ffmpeg -i raw.mp4 -ss "$start" -to "$end" -c copy "clips/${label}.mp4"
-done < cuts.txt
-```
-
-### Concatenate clips into rough cut
-
-```bash
-# Create concat file (paths must be escaped on Windows)
-# Windows: use backslashes or forward slashes (both work)
-file clip1.mp4
-file clip2.mp4
-file clip3.mp4
-
-# Stitch together
-ffmpeg -f concat -safe 0 -i concat.txt -c copy rough_cut.mp4
-```
-
-### Remove silence (auto-cut dead air)
-
-```bash
-# Remove anything quieter than -35dB for 0.5+ seconds
-ffmpeg -i input.mp4 -af silenceremove=start_periods=1:start_silence=0.5:start_threshold=-35dB:stop_periods=-1:stop_silence=0:stop_threshold=-35dB output.mp4
-```
-
-### Normalize audio levels
-
-```bash
-# EBU R128 loudness standard (consistent volume)
-ffmpeg -i input.mp4 -af loudnorm=I=-16:TP=-1.5:LRA=11 -c:v copy normalized.mp4
-```
-
----
-
-## Layer 4: Social Media Formats
-
-### Reformat for different platforms
-
-```bash
-# Vertical for Instagram Reels/TikTok (center crop, 9:16)
+# Vertical for Reels/TikTok (center crop, 9:16)
 ffmpeg -i input.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reels_ready.mp4
 
-# Square for Instagram feed (1:1)
+# Square (1:1)
 ffmpeg -i input.mp4 -vf "crop=ih:ih,scale=1080:1080" square.mp4
 
-# Horizontal for YouTube (16:9, ensure 1080p)
+# Horizontal 1080p for YouTube
 ffmpeg -i input.mp4 -vf "scale=-2:1080" youtube_ready.mp4
-```
 
-### Smart reframing with padding
-
-```bash
-# Add blurred sides when going horizontal → vertical
+# Blurred-pad when going horizontal → vertical
 ffmpeg -i input.mp4 -vf "split[s][b];[s]scale=1080:1920[bg];[b]scale=1080:-1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2" vertical_blurred.mp4
 ```
 
-### Create proxy for faster editing
+## Layer: Captions
 
 ```bash
-# Smaller file for editing speed
-ffmpeg -i raw.mp4 -vf "scale=960:-2" -c:v libx264 -preset ultrafast -crf 28 proxy.mp4
+# Transcribe (faster-whisper via pipeline, or CLI):
+videoedit run - <<'EOF' --input clip.mp4
+name: caption
+steps:
+  - {name: transcribe, operation: transcribe_whisper, params: {model: small}}
+EOF
 
-# After editing, replace with full quality
-ffmpeg -i final_edit.mp4 -i raw.mp4 -map 0 -c copy -map 1 -c:v:1 libx264 -preset slow -crf 18 final_high_quality.mp4
-```
-
----
-
-## Layer 5: Captions & Subtitles
-
-### Generate SRT with Whisper
-
-```bash
-# Transcribe audio to SRT format
-whisper video.mp4 --model medium --output_format srt --output_dir transcripts/
-
-# Available models: tiny, base, small, medium, large (faster→slower, less→more accurate)
-```
-
-### Burn captions with FFmpeg
-
-```bash
-# Basic subtitle burn (requires FFmpeg with libass support)
-ffmpeg -i video.mp4 -vf "subtitles=captions.srt" output.mp4
-
-# With custom styling
+# Burn captions
 ffmpeg -i video.mp4 -vf "subtitles=captions.srt:force_style='FontSize=28,BorderStyle=1'" output.mp4
-
-# Note: On Windows, escape colons in force_style: force_style='FontSize=28'
 ```
 
-### Windows subtitle note
-
-Standard FFmpeg builds on Windows may not include libass. Install a full-featured build:
-- Download from: https://www.gyan.dev/ffmpeg/builds/
-- Use `ffmpeg-release-full.7z`
-
----
-
-## Layer 6: DaVinci Resolve Prep
-
-### Generate EDL from Claude highlights
-
-When Claude identifies highlights with timestamps, create an EDL for DaVinci:
-
-**EDL format example:**
-```
-001  001  V     C        00:00:12:00 00:00:15:30 00:00:00:00 00:00:03:30
-* | FROM CLIP NAME: race_raw.mp4
-002  002  V     C        00:00:45:00 00:00:46:30 00:00:03:30 00:00:05:00
-* | FROM CLIP NAME: race_raw.mp4
-```
-
-**Or use a Python script to generate EDL from JSON:**
-```json
-{
-  "source": "race_raw.mp4",
-  "clips": [
-    {"start": "00:12:30", "end": "00:15:45", "label": "overtake"},
-    {"start": "00:45:00", "end": "00:46:30", "label": "incident"}
-  ]
-}
-```
-
-### Export format for DaVinci
+## Layer: Manual FFmpeg reference
 
 ```bash
-# DNxHD/HR (best for DaVinci on Mac/PC)
-ffmpeg -i rough_cut.mp4 -c:v dnxhd -profile:v dqxhr_444 -pix_fmt rgb48le -c:a pcm_s16le for_davinci.mov
-
-# Or ProRes (alternative, works better on Windows)
-ffmpeg -i rough_cut.mp4 -c:v prores_ks -profile:v 3 -c:a pcm_s16le for_davinci.mov
+ffprobe -i video.mp4 -show_format -show_streams          # info
+ffmpeg -i in.mp4 -ss 00:01:00 -to 00:02:00 -c copy out.mp4   # cut (no re-encode)
+ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4      # join
+ffmpeg -i in.mp4 -af loudnorm=I=-16:TP=-1.5:LRA=11 out.mp4   # normalize audio
+ffmpeg -i in.mp4 -af silencedetect=noise=-30dB:d=1 -f null - # find dead air
+ffmpeg -i in.mp4 -vf "scale=960:-2" -c:v libx264 -preset ultrafast -crf 28 proxy.mp4
+ffmpeg -i in.mp4 -c:v prores_ks -profile:v 3 -c:a pcm_s16le for_davinci.mov
 ```
 
 ---
 
 ## Optional: Cloud AI Tools
 
-*If you have these tools set up, they can automate parts of your workflow.*
-
-### Eleven Labs - AI Voiceover
-
-Generate AI narration from text, transcripts, or scripts.
-
-```bash
-# Generate from text (requires tools/elevenlabs/voiceover.py)
-python tools/elevenlabs/voiceover.py --text "Welcome" --output intro.mp3
-```
-
-### HeyGen - AI Avatar Videos
-
-Create AI avatar host segments without filming.
-
-```bash
-# Create avatar intro (requires tools/heygen/avatar.py)
-python tools/heygen/avatar.py --text "Welcome!" --output intro.mp4
-```
-
-### Descript - Text-Based Editing (MCP)
-
-**Requires Claude desktop app** with MCP connector setup.
-
-**Setup:** Customize → Connectors → Add custom → URL: `https://api.descript.com/v2/mcp`
-
-**Example prompts in Claude Chat mode:**
-```
-"Import race_footage.mp4 and transcribe it"
-"Remove all filler words and add Studio Sound"
-"Create a 60-second highlight reel from this footage"
-```
-
----
-
-## Optional: Local Tool Configuration
-
-*If you have wrapper scripts installed, configure their locations here.*
-
-### Format conversion scripts
-
-```bash
-# If you have these scripts, use them. Otherwise, use the FFmpeg commands above.
-# Configure your script paths:
-
-# reels-format input.mp4 output_reel.mp4
-# youtube-format input.mp4 output_youtube.mp4
-# find-silence input.mp4
-# fix-audio input.mp4 output_normalized.mp4
-# make-proxy raw.mp4
-# video-start
-```
-
-### Windows setup
-
-If using Windows, you can create batch files or PowerShell functions as wrappers. Example `reels-format.bat`:
-```batch
-@echo off
-ffmpeg -i %1 -vf "crop=ih*9/16:ih,scale=1080:1920" %2
-```
-
-Or PowerShell function in `$PROFILE`:
-```powershell
-function reels-format {
-    param($input, $output)
-    ffmpeg -i $input -vf "crop=ih*9/16:ih,scale=1080:1920" $output
-}
-```
-
----
-
-## Common Workflows
-
-### From raw racing footage to 3 reels
-
-```bash
-# 1. Analyze - find silence
-ffmpeg -i race_raw.mp4 -af silencedetect=noise=-30dB:d=1 -f null - 2>&1 | findstr silence > silence_log.txt
-
-# 2. Extract highlights (manually pick timestamps or use Claude analysis)
-# Example: overtake at 12:30, incident at 45:20, podium at 1:23:10
-ffmpeg -i race_raw.mp4 -ss 00:12:00 -to 00:13:30 -c copy overtake.mp4
-ffmpeg -i race_raw.mp4 -ss 00:45:00 -to 00:46:45 -c copy incident.mp4
-ffmpeg -i race_raw.mp4 -ss 01:22:30 -to 01:24:00 -c copy podium.mp4
-
-# 3. Format for reels
-ffmpeg -i overtake.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reel_overtake.mp4
-ffmpeg -i incident.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reel_incident.mp4
-ffmpeg -i podium.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" reel_podium.mp4
-```
-
-### Create captioned reel
-
-```bash
-# 1. Vertical format
-ffmpeg -i clip.mp4 -vf "crop=ih*9/16:ih,scale=1080:1920" vertical.mp4
-
-# 2. Generate captions with Whisper
-whisper vertical.mp4 --model medium --output_format srt
-
-# 3. Burn in captions
-ffmpeg -i vertical.mp4 -vf "subtitles=vertical.srt:force_style='FontSize=28,BorderStyle=1'" final_reel.mp4
-```
+- **Eleven Labs** (`python/elevenlabs/voiceover.py`) — AI narration from text.
+- **HeyGen** (`python/heygen/avatar.py`) — AI avatar segments.
+- **Descript MCP** — text-based editing via Claude connectors
+  (`https://api.descript.com/v2/mcp`): "Import race_footage.mp4,
+  remove filler words, add Studio Sound."
 
 ---
 
 ## Tool Comparison
 
-| Tool | Best For | Portability |
-|------|----------|-------------|
-| **FFmpeg** | Boring cuts, batch processing, format conversion | ✅ Cross-platform |
-| **Claude** | Planning, highlights, transcripts, structure | ✅ Cross-platform |
-| **Whisper** | Transcription | ✅ Cross-platform |
-| **DaVinci Resolve** | Color grading, audio mix, final polish | Windows, Mac, Linux |
-| **Descript** | Text-based editing (MCP via Claude) | ✅ Web/cloud |
-| **Eleven Labs** | AI voice from text | ✅ API/Cloud |
-| **HeyGen** | AI avatars | ✅ API/Cloud |
-| **Gling** | AI highlight detection | Web UI only |
-
----
-
-## Quick Reference: Common Commands
-
-### PowerShell Cmdlets (Windows-first, cross-platform)
-
-```powershell
-# Import module first
-Import-Module VideoEditing
-
-# Video info
-Get-VideoInfo video.mp4
-
-# Format conversion
-ConvertTo-Reel video.mp4              # 9:16 vertical
-ConvertTo-YouTube video.mp4           # 16:9 horizontal
-ConvertTo-Square video.mp4             # 1:1 square
-
-# Cutting/joining
-Copy-VideoSegment in.mp4 out.mp4 -Start "00:01:00" -End "00:02:00"
-Join-VideoFiles clip1.mp4,clip2.mp4 output.mp4
-
-# Audio
-Remove-Silence in.mp4 out.mp4
-Set-AudioNormalize in.mp4 out.mp4
-Export-Audio video.mp4 audio.wav
-
-# Captions
-Invoke-WhisperTranscribe video.mp4 -Model small
-Add-Captions video.mp4 subs.srt out.mp4
-
-# Projects
-New-VideoProject "Race Day" -Type Reel -BasePath \\NAS\projects
-```
-
-### FFmpeg Direct Commands
-
-```bash
-# Get video info
-ffprobe -i video.mp4 -show_format -show_streams
-
-# Cut segment
-ffmpeg -i in.mp4 -ss 00:01:00 -to 00:02:00 -c copy out.mp4
-
-# Concatenate
-ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4
-
-# Resize for reels (9:16)
-ffmpeg -i in.mp4 -vf "scale=1080:1920" out.mp4
-
-# Normalize audio
-ffmpeg -i in.mp4 -af loudnorm=I=-16:TP=-1.5:LRA=11 out.mp4
-
-# Create proxy
-ffmpeg -i in.mp4 -vf "scale=960:-2" -c:v libx264 -preset ultrafast -crf 28 proxy.mp4
-
-# Detect silence
-ffmpeg -i in.mp4 -af silencedetect=noise=-30dB:d=1 -f null -
-
-# Export for DaVinci
-ffmpeg -i in.mp4 -c:v prores_ks -profile:v 3 -c:a pcm_s16le out.mov
-
-# Whisper
-whisper video.mp4 --model medium --output_format srt
-```
-
----
-
-## Platform-Specific Notes
-
-### Windows
-- Use `findstr` instead of `grep`
-- Use PowerShell or batch files for wrappers
-- Use forward slashes or escaped backslashes for paths in concat files
-- Download full FFmpeg build for subtitle support
-
-### macOS
-- Install FFmpeg: `brew install ffmpeg`
-- Use `grep` for filtering output
-- Bash/zsh for wrappers in `~/.local/bin/`
-
-### Linux
-- Use distribution package manager or download static build
-- Use `grep` for filtering output
-- Bash for wrappers
-
----
+| Tool | Best For |
+|------|----------|
+| **shoot pipeline** | Whole-shoot triage, highlight discovery, rough cuts |
+| **FFmpeg** | Cuts, batch processing, format conversion |
+| **faster-whisper** | Transcription (2-4× faster than openai-whisper) |
+| **Claude** | Visual review, ranking, story structure, timeline specs |
+| **DaVinci Resolve** | Final polish: color, audio mix, export |
+| **Descript** | Text-based editing (MCP) |
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
-| Re-encoding unnecessarily | Use `-c copy` for simple cuts |
-| Not normalizing audio | Levels vary wildly between clips |
-| Skipping preview | Always watch rough cut before final polish |
-| Starting in DaVinci with raw footage | Use FFmpeg to cut down first |
-| Forgetting aspect ratio | Square video doesn't fit reels |
-
----
-
-## Learning Path
-
-**Start here:** Use FFmpeg to cut one highlight from your next race video.
-
-**Next:** Use Claude to analyze a transcript and suggest 3 reel concepts.
-
-**Then:** Create a rough cut entirely with FFmpeg, export to DaVinci for polish.
-
-**Goal:** Spend 80% of your time on creative decisions in DaVinci, not on boring cutting.
+| Ranking clips without reading the contact sheets | Sheets exist so Claude can *look*; signals only shortlist |
+| Transcribing everything | VAD gate first — most B-roll has no speech |
+| Full-file hashing over NAS | quick_hash covers change detection |
+| Re-encoding for simple cuts | `-c copy` |
+| Building timelines with timeline-fps frame math | source frames use each clip's own fps |
+| Starting in Resolve with raw footage | Funnel first; Resolve gets reviewed material only |

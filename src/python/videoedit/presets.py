@@ -90,6 +90,20 @@ PRESETS = {
             }
         ]
     },
+    "ingest": {
+        "name": "Single File Ingest",
+        "description": "Probe, scenes, speech, transcript, and CLIP tags for one file",
+        "steps": [
+            {"name": "probe", "operation": "probe_media", "params": {}},
+            {"name": "scenes", "operation": "scene_detect",
+             "params": {"threshold": 27.0}},
+            {"name": "speech", "operation": "vad_speech", "params": {}},
+            {"name": "transcribe", "operation": "transcribe_whisper",
+             "params": {"model": "small", "word_timestamps": True}},
+            {"name": "embed", "operation": "embed_frames",
+             "params": {"interval_s": 10.0}},
+        ]
+    },
     "simple": {
         "name": "Simple Clip Extract",
         "description": "Just find audio highlights and extract clips",

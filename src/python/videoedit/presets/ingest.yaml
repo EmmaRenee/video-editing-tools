@@ -1,0 +1,26 @@
+# Single-file analysis pipeline using the shoot funnel's operations.
+# For whole shoots, prefer `videoedit shoot analyze` (batched + resumable).
+name: Single File Ingest
+description: Probe, detect scenes, segment speech, transcribe, and tag one file
+steps:
+  - name: probe
+    operation: probe_media
+
+  - name: scenes
+    operation: scene_detect
+    params:
+      threshold: 27.0
+
+  - name: speech
+    operation: vad_speech
+
+  - name: transcribe
+    operation: transcribe_whisper
+    params:
+      model: small
+      word_timestamps: true
+
+  - name: embed
+    operation: embed_frames
+    params:
+      interval_s: 10.0

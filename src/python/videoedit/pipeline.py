@@ -158,6 +158,16 @@ class Runner:
         except (ImportError, AttributeError):
             pass
 
+        # Fallback: look up the class on the operations package, which
+        # imports everything. Covers operations whose module name doesn't
+        # match the first token of the operation name (e.g.
+        # "detect_highlights_audio" lives in audio_detect.py).
+        ops_pkg = importlib.import_module(".operations", package="videoedit")
+        op_class = getattr(ops_pkg, class_name, None)
+        if op_class and issubclass(op_class, BaseOperation):
+            self._operation_cache[operation_name] = op_class
+            return op_class
+
         raise ValueError(f"Operation not found: {operation_name}")
 
     def run(self, input_path: Union[str, Path], output_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:

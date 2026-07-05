@@ -92,6 +92,13 @@ def operations():
         ("add_crossfades", "Add crossfade transitions between clips"),
         ("simple_crossfade", "Crossfade between two clips"),
         ("normalize_audio", "Normalize audio to target loudness"),
+        ("probe_media", "Extract media metadata (ffprobe/EXIF)"),
+        ("scene_detect", "Detect shot boundaries (PySceneDetect)"),
+        ("vad_speech", "Speech/no-speech segmentation (Silero VAD)"),
+        ("embed_frames", "CLIP frame embeddings + zero-shot tags"),
+        ("quality_frames", "Blur + exposure metrics"),
+        ("events_audio", "Audio event tagging (PANNs, optional)"),
+        ("contact_sheet", "Thumbnail grid for review"),
     ]
 
     click.echo("Available operations:\n")
@@ -126,6 +133,11 @@ def validate(pipeline_file):
     except Exception as e:
         click.echo(f"✗ Invalid pipeline: {e}", err=True)
         sys.exit(1)
+
+
+from .shoot.cli import shoot as shoot_group  # noqa: E402
+
+cli.add_command(shoot_group)
 
 
 def main():

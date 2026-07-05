@@ -12,6 +12,10 @@ __pycache__/
 .env.local
 .env.*.local
 
+# Local MCP configuration (keep .mcp.json in repo for team sharing)
+.mcp.local.json
+.github_token.env
+
 # OS specific
 .DS_Store
 .DS_Store?
@@ -54,3 +58,9 @@ test_*
 
 # Proxy files
 *proxy*
+
+# Python build/venv artifacts
+.venv/
+*.egg-info/
+tests/fixtures/sample_shoot/
+.claude/settings.local.json
