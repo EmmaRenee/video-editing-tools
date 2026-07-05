@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "pattern": "^(Edit|Write).*requirements.*\\.txt$",
+        "blocked": true,
+        "message": "Use pip to modify requirements instead of editing files directly"
+      },
+      {
+        "pattern": "^(Edit|Write).*\\.py$",
+        "command": "Bash(python -m py_compile {file_path})",
+        "message": "Checking Python syntax for {file_path}"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile *)",
+      "Bash(python -c *)",
+      "Bash(videoedit *)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(gh repo *)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)"
+    ]
+  }
+}

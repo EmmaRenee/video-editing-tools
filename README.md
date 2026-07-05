@@ -195,6 +195,33 @@ git submodule add <your-repo-url> tools/video-editing
 
 ---
 
+## Claude Code Automation
+
+This project includes Claude Code automations for enhanced development workflow:
+
+### MCP Servers
+- **GitHub**: Manage issues and PRs from Claude (requires `GITHUB_TOKEN` environment variable)
+- **context7**: Live documentation lookup for Click, Textual, FFmpeg, and other libraries
+
+### Skills
+- **pipeline-validator**: Validate pipeline YAML files before execution
+- **preset-generator**: Generate custom pipeline presets from requirements
+
+### Hooks
+- Pre-commit Python syntax validation via `python -m py_compile`
+- Block direct edits to requirements files (use pip instead)
+
+### Subagents
+- **videoedit-reviewer**: Specialized code review for videoedit package
+
+Configuration files:
+- `.mcp.json` - MCP server configuration
+- `.claude/settings.json` - Global Claude settings and hooks
+- `.claude/skills/` - Custom skills
+- `.claude/agents/` - Subagent definitions
+
+---
+
 ## Documentation
 
 | File | Description |
