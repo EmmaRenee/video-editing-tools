@@ -72,6 +72,8 @@ cd video-editing-tools
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e "./src/python[whisper,advanced]"
+# Optional OpenCLIP frame scoring
+python -m pip install -e "./src/python[ai]"
 
 # Run inventory scanner
 python src/python/inventory.py "footage/"
@@ -83,6 +85,11 @@ python src/python/rate_footage.py "footage/" --output analysis/
 videoedit doctor
 videoedit modules list
 videoedit rate footage/ --output analysis/
+videoedit ai profiles list
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+videoedit rate footage/ --output analysis_ai/ --ai-frame-scores analysis/ai_frame_scores.json
+videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_frame_scores.json --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 videoedit calibrate init --output annotations.json
 videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
@@ -159,8 +166,32 @@ videoedit rate footage/ --output analysis_fused/ \
   --ocr-signage analysis/ocr_signage.json \
   --face-person analysis/face_person_presence.json \
   --motorsports-events analysis/motorsports_events.json \
-  --topic-clusters analysis/topic_clusters.json
+  --topic-clusters analysis/topic_clusters.json \
+  --ai-frame-scores analysis/ai_frame_scores.json
 ```
+
+### Optional AI Frame Scoring And Missed-Moment Discovery
+
+`advanced.ai` adds project-agnostic AI profiles and optional OpenCLIP frame scoring. This is explicit and local-first: `videoedit rate` is unchanged unless you pass `--ai-frame-scores`.
+
+```bash
+videoedit ai profiles list
+videoedit ai profiles show garage_shop
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+
+videoedit rate footage/ --output analysis_ai/ \
+  --ai-frame-scores analysis/ai_frame_scores.json
+
+videoedit ai find-missed analysis/ratings.json \
+  --ai-frame-scores analysis/ai_frame_scores.json \
+  --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
+videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
+  --ratings analysis/ratings.json \
+  --output annotations_from_missed.json
+```
+
+Profiles include `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`. AI missed moments are review-only; they are never inserted into approvals or rough cuts automatically.
 
 ---
 

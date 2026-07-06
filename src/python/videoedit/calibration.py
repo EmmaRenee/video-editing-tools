@@ -564,23 +564,23 @@ def _config_sweep(ratings: dict[str, Any]) -> list[AnalysisConfig]:
         ("base", dict(base.weights)),
         (
             "balanced",
-            {"technical": 20, "visual": 30, "audio": 30, "transcript": 20, "objects": 10, "ocr": 8, "face_person": 6, "motorsports": 12, "topics": 10},
+            {"technical": 20, "visual": 30, "audio": 30, "transcript": 20, "objects": 10, "ocr": 8, "face_person": 6, "motorsports": 12, "topics": 10, "ai": 10},
         ),
         (
             "audio",
-            {"technical": 15, "visual": 25, "audio": 40, "transcript": 20, "objects": 8, "ocr": 6, "face_person": 4, "motorsports": 10, "topics": 8},
+            {"technical": 15, "visual": 25, "audio": 40, "transcript": 20, "objects": 8, "ocr": 6, "face_person": 4, "motorsports": 10, "topics": 8, "ai": 8},
         ),
         (
             "visual",
-            {"technical": 15, "visual": 35, "audio": 30, "transcript": 20, "objects": 12, "ocr": 8, "face_person": 8, "motorsports": 12, "topics": 8},
+            {"technical": 15, "visual": 35, "audio": 30, "transcript": 20, "objects": 12, "ocr": 8, "face_person": 8, "motorsports": 12, "topics": 8, "ai": 14},
         ),
         (
             "transcript",
-            {"technical": 15, "visual": 20, "audio": 25, "transcript": 40, "objects": 8, "ocr": 8, "face_person": 4, "motorsports": 10, "topics": 12},
+            {"technical": 15, "visual": 20, "audio": 25, "transcript": 40, "objects": 8, "ocr": 8, "face_person": 4, "motorsports": 10, "topics": 12, "ai": 8},
         ),
         (
             "motorsports",
-            {"technical": 15, "visual": 25, "audio": 30, "transcript": 20, "objects": 10, "ocr": 8, "face_person": 6, "motorsports": 18, "topics": 12},
+            {"technical": 15, "visual": 25, "audio": 30, "transcript": 20, "objects": 10, "ocr": 8, "face_person": 6, "motorsports": 18, "topics": 12, "ai": 12},
         ),
     ]
     threshold_profiles = [

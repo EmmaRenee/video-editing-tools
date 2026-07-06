@@ -17,6 +17,7 @@ ARTIFACT_KEYS = {
     "face_person",
     "motorsports_events",
     "topic_clusters",
+    "ai_frame_scores",
 }
 
 SIGNAL_SCHEMA_VERSION = "videoedit.signal.v1"
@@ -91,6 +92,9 @@ def signal_artifact_paths(config: Any) -> dict[str, str]:
     visual_objects = getattr(config, "visual_objects_path", None)
     if visual_objects:
         values["visual_objects"] = os.fspath(visual_objects)
+    ai_frame_scores = getattr(config, "ai_frame_scores_path", None)
+    if ai_frame_scores:
+        values["ai_frame_scores"] = os.fspath(ai_frame_scores)
     return values
 
 
@@ -117,6 +121,8 @@ def validate_signal_artifact(path: str) -> dict[str, Any]:
         errors.append("motorsports_events artifact requires events list")
     if kind == "topic_clusters" and not isinstance(data.get("topics", []), list):
         errors.append("topic_clusters artifact requires topics list")
+    if kind == "ai_frame_scores" and not isinstance(data.get("sources", []), list):
+        errors.append("ai_frame_scores artifact requires sources list")
     if "source_summaries" in data and not isinstance(data["source_summaries"], list):
         errors.append("source_summaries must be a list")
     return {
@@ -153,6 +159,10 @@ def _artifact_kind(data: dict[str, Any], path: str) -> str:
     if explicit in ARTIFACT_KEYS or explicit == "face_person_presence":
         return "face_person" if explicit == "face_person_presence" else explicit
     if "sources" in data:
+        if _normalize_key(data.get("artifact_kind", "")) == "ai_frame_scores":
+            return "ai_frame_scores"
+        if data.get("schema_version") == "videoedit.ai_frame_scores.v1":
+            return "ai_frame_scores"
         return "visual_objects"
     if "events" in data:
         return "motorsports_events"
@@ -184,6 +194,8 @@ def _load_advanced_artifact(kind: str, path: str | None) -> dict[str, list[dict[
         return _motorsports_hits(data)
     if kind == "topic_clusters":
         return _topic_hits(data)
+    if kind == "ai_frame_scores":
+        return _ai_frame_hits(data)
     return {}
 
 
@@ -262,6 +274,35 @@ def _topic_hits(data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
                     "topic": topic,
                     "keywords": list(hit.get("keywords", [])),
                     "text": hit.get("text", ""),
+                }
+            )
+    return rows
+
+
+def _ai_frame_hits(data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    rows: dict[str, list[dict[str, Any]]] = {}
+    profile = data.get("profile", {}) if isinstance(data.get("profile"), dict) else {}
+    for source_payload in data.get("sources", []):
+        source = source_payload.get("source")
+        if not source:
+            continue
+        for frame in source_payload.get("frames", []):
+            timestamp = float(frame.get("time_seconds", 0.0) or 0.0)
+            labels = list(frame.get("labels", []))
+            rows.setdefault(os.fspath(source), []).append(
+                {
+                    "kind": "ai_frame_score",
+                    "start": max(0.0, timestamp - 0.5),
+                    "end": timestamp + 0.5,
+                    "time_seconds": timestamp,
+                    "time": frame.get("time"),
+                    "profile": profile.get("id"),
+                    "top_score": float(frame.get("top_score", 0.0) or 0.0),
+                    "top_label": frame.get("top_label"),
+                    "labels": labels,
+                    "prompt_scores": list(frame.get("prompt_scores", [])),
+                    "explanation": frame.get("explanation", ""),
+                    "frame": frame.get("frame"),
                 }
             )
     return rows

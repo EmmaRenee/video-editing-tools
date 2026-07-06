@@ -8,6 +8,7 @@ import json
 import os
 import sys
 
+from .ai import find_missed_moments, generate_missed_review, list_ai_profiles, score_frames, show_ai_profile
 from .advanced import (
     cluster_transcript_topics,
     detect_face_person_presence,
@@ -167,6 +168,40 @@ def build_parser() -> argparse.ArgumentParser:
     signals_validate.add_argument("artifact")
     signals_validate.set_defaults(func=cmd_signals_validate)
 
+    ai = sub.add_parser("ai", help="AI profile, frame scoring, and missed-moment tools")
+    ai_sub = ai.add_subparsers(dest="ai_command", required=True)
+    ai_profiles = ai_sub.add_parser("profiles", help="List or show AI scoring profiles")
+    ai_profiles_sub = ai_profiles.add_subparsers(dest="ai_profiles_command", required=True)
+    ai_profiles_list = ai_profiles_sub.add_parser("list", help="List available AI profiles")
+    ai_profiles_list.set_defaults(func=cmd_ai_profiles_list)
+    ai_profiles_show = ai_profiles_sub.add_parser("show", help="Show an AI profile prompt set")
+    ai_profiles_show.add_argument("profile")
+    ai_profiles_show.set_defaults(func=cmd_ai_profiles_show)
+    ai_score_frames = ai_sub.add_parser("score-frames", help="Score sampled frames against an AI profile")
+    ai_score_frames.add_argument("input")
+    ai_score_frames.add_argument("--profile", default="general_broll")
+    ai_score_frames.add_argument("--output", "-o", required=True)
+    ai_score_frames.add_argument("--sample-interval", type=float, default=10.0)
+    ai_score_frames.add_argument("--max-frames-per-file", type=int, default=8)
+    ai_score_frames.add_argument("--min-score", type=float, default=0.22)
+    ai_score_frames.add_argument("--model", default="ViT-B-32")
+    ai_score_frames.add_argument("--pretrained", default="laion2b_s34b_b79k")
+    ai_score_frames.add_argument("--no-cache", action="store_true")
+    ai_score_frames.set_defaults(func=cmd_ai_score_frames)
+    ai_find_missed = ai_sub.add_parser("find-missed", help="Find likely missed moments from AI frame scores")
+    ai_find_missed.add_argument("ratings")
+    ai_find_missed.add_argument("--ai-frame-scores", required=True)
+    ai_find_missed.add_argument("--output", "-o", required=True)
+    ai_find_missed.add_argument("--min-score", type=float, default=0.35)
+    ai_find_missed.add_argument("--window-pre-roll", type=float, default=2.0)
+    ai_find_missed.add_argument("--window-post-roll", type=float, default=4.0)
+    ai_find_missed.add_argument("--merge-gap", type=float, default=5.0)
+    ai_find_missed.set_defaults(func=cmd_ai_find_missed)
+    ai_review_missed = ai_sub.add_parser("review-missed", help="Generate HTML review for AI missed moments")
+    ai_review_missed.add_argument("missed_moments")
+    ai_review_missed.add_argument("--output", "-o", required=True)
+    ai_review_missed.set_defaults(func=cmd_ai_review_missed)
+
     calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
     calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
     calibrate_init = calibrate_sub.add_parser("init", help="Write a starter annotation JSON file")
@@ -296,6 +331,7 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--face-person", help="face_person_presence.json from detect_face_person_presence")
     parser.add_argument("--motorsports-events", help="motorsports_events.json from detect_motorsports_events")
     parser.add_argument("--topic-clusters", help="topic_clusters.json from cluster_transcript_topics")
+    parser.add_argument("--ai-frame-scores", help="ai_frame_scores.json from videoedit ai score-frames")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -323,6 +359,9 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         config.signal_artifacts["motorsports_events"] = args.motorsports_events
     if args.topic_clusters:
         config.signal_artifacts["topic_clusters"] = args.topic_clusters
+    if args.ai_frame_scores:
+        config.ai_frame_scores_path = args.ai_frame_scores
+        config.signal_artifacts["ai_frame_scores"] = args.ai_frame_scores
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -522,6 +561,63 @@ def cmd_signals_validate(args: argparse.Namespace) -> int:
     result = validate_signal_artifact(args.artifact)
     print(json.dumps(result, indent=2))
     return 0 if result["status"] == "ok" else 1
+
+
+def cmd_ai_profiles_list(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    for profile in list_ai_profiles():
+        labels = ", ".join(profile["labels"])
+        print(f"{profile['id']:16} {profile['name']} ({profile['prompt_count']} prompts) - {labels}")
+    return 0
+
+
+def cmd_ai_profiles_show(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    try:
+        payload = show_ai_profile(args.profile)
+    except KeyError as exc:
+        raise ValueError(str(exc).strip("'")) from exc
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_ai_score_frames(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = score_frames(
+        args.input,
+        args.output,
+        profile_id=args.profile,
+        sample_interval=args.sample_interval,
+        max_frames_per_file=args.max_frames_per_file,
+        min_score=args.min_score,
+        cache=not args.no_cache,
+        model=args.model,
+        pretrained=args.pretrained,
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("status") != "unavailable" else 1
+
+
+def cmd_ai_find_missed(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = find_missed_moments(
+        args.ratings,
+        args.ai_frame_scores,
+        args.output,
+        min_score=args.min_score,
+        window_pre_roll=args.window_pre_roll,
+        window_post_roll=args.window_post_roll,
+        merge_gap=args.merge_gap,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_ai_review_missed(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = generate_missed_review(args.missed_moments, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_calibrate_init(args: argparse.Namespace) -> int:

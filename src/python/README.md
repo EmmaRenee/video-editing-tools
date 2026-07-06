@@ -16,6 +16,8 @@ Local-first video editing analysis package. V1 inventories footage, scores it, a
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e "./src/python[whisper,advanced]"
+# Optional OpenCLIP frame scoring
+python -m pip install -e "./src/python[ai]"
 
 # V1-compatible scanner/rater
 python src/python/rate_footage.py footage/ --output analysis/
@@ -25,6 +27,11 @@ videoedit doctor
 videoedit modules list
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
+videoedit ai profiles list
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+videoedit rate footage/ --output analysis_ai/ --ai-frame-scores analysis/ai_frame_scores.json
+videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_frame_scores.json --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 videoedit calibrate init --output annotations.json
 videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
@@ -82,6 +89,35 @@ for clip in report.candidates[:10]:
 - `selections/*.json`
 
 Scoring is deterministic and explainable. It combines technical metadata, scene-change density, silence/non-silence ratio, audio spike windows, and optional transcript keyword hits. Each candidate carries labels, signal scores, and human-readable reasons.
+
+### Optional AI Frame Scoring
+
+AI frame scoring is an explicit optional layer. It uses project-agnostic profiles to score sampled frames against prompt sets, writes a JSON artifact, and lets `videoedit rate` fuse that artifact only when supplied.
+
+```bash
+videoedit ai profiles list
+videoedit ai profiles show garage_shop
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+
+videoedit rate footage/ --output analysis_ai/ \
+  --ai-frame-scores analysis/ai_frame_scores.json
+```
+
+Built-in profiles are `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`. The frame-score artifact includes schema version, provider metadata, source paths, frame times, prompt scores, labels, and explanations. Missing OpenCLIP/Torch dependencies produce install guidance instead of breaking core rating.
+
+AI frame scores can also scan rejected or low-ranked footage for likely missed usable moments:
+
+```bash
+videoedit ai find-missed analysis/ratings.json \
+  --ai-frame-scores analysis/ai_frame_scores.json \
+  --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
+videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
+  --ratings analysis/ratings.json \
+  --output annotations_from_missed.json
+```
+
+Missed moments are review-only. They are not auto-approved and are not inserted into rough cuts unless a human promotes them through the review/calibration loop.
 
 ### Calibration and Scoring Evaluation
 
@@ -193,9 +229,12 @@ videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp
 | `concatenate_videos` | Combine multiple video clips |
 | `detect_ocr_signage` | Optional OCR/signage detection from sampled frames |
 | `detect_visual_objects` | Optional external object detector handoff |
+| `score_ai_frames` | Optional OpenCLIP frame scoring against AI profiles |
 | `detect_face_person_presence` | Optional face/person presence detection from sampled frames |
 | `detect_motorsports_events` | Infer passes, incidents, starts, finishes, and pace moments |
 | `cluster_transcript_topics` | Group transcript hits into editing topics |
+| `find_ai_missed_moments` | Find likely missed moments from AI frame scores |
+| `generate_missed_review` | Generate review HTML and decisions for missed moments |
 | `plan_content_series` | Generate content-series plan, captions, and selection JSON |
 | `generate_content_map` | Generate ranked editorial content-map artifacts |
 | `quote_mining` | Generate transcript-forward quote-mining report |
@@ -231,6 +270,12 @@ videoedit signals face-person footage/ --output analysis/face_person_presence.js
 videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
 videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
 videoedit signals validate analysis/visual_objects.json
+
+videoedit ai profiles list
+videoedit ai profiles show motorsports
+videoedit ai score-frames footage/ --profile motorsports --output analysis/ai_frame_scores.json
+videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_frame_scores.json --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 
 videoedit captions styles
 videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
@@ -327,6 +372,7 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 - `detect_ocr_signage` writes `ocr_signage.json`; it runs only when FFmpeg and Tesseract are installed.
 - `detect_visual_objects` writes `visual_objects.json`; it runs only when an object detector command such as `yolo` is available. YOLO labels are parsed into bounded `detections`, `class_counts`, and time-based `segments`.
 - `detect_face_person_presence` writes `face_person_presence.json`; it runs only when FFmpeg and OpenCV are installed.
+- `score_ai_frames` writes `ai_frame_scores.json`; it runs only when OpenCLIP, Torch, Pillow, and FFmpeg are installed.
 
 These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
 
@@ -365,13 +411,15 @@ videoedit rate footage/ --output analysis_fused/ \
   --ocr-signage analysis/ocr_signage.json \
   --face-person analysis/face_person_presence.json \
   --motorsports-events analysis/motorsports_events.json \
-  --topic-clusters analysis/topic_clusters.json
+  --topic-clusters analysis/topic_clusters.json \
+  --ai-frame-scores analysis/ai_frame_scores.json
 ```
 
 Optional advanced dependencies can be installed separately:
 
 ```bash
 python -m pip install -e "./src/python[whisper,advanced]"
+python -m pip install -e "./src/python[ai]"
 ```
 
 The `detect_highlights_audio` and `detect_highlights_transcript` operations also write per-source selection JSON directories, so a pipeline can feed `audio_step.selections` or `transcript_step.selections` directly into `generate_edl`.

@@ -26,6 +26,7 @@ setup(
     extras_require={
         "whisper": ["openai-whisper>=20231117"],
         "advanced": ["opencv-python>=4.8.0", "ultralytics>=8.0.0"],
+        "ai": ["open_clip_torch>=2.24.0", "torch>=2.2.0", "Pillow>=10.0"],
         "cloud": ["elevenlabs", "python-dotenv"],
         "ui": ["textual>=0.50.0", "rich>=13.0.0"],
     },

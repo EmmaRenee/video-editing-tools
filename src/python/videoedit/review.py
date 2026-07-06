@@ -905,6 +905,7 @@ def _signal_summary_items(signals: dict) -> str:
         "face_person_score",
         "motorsports_event_score",
         "topic_cluster_score",
+        "ai_frame_score",
     ]
     parts = []
     for key in keys:
@@ -932,7 +933,18 @@ def _advanced_summary_items(hits: list[dict]) -> str:
     for hit in hits:
         kind = str(hit.get("kind") or "advanced")
         kinds[kind] = kinds.get(kind, 0) + 1
+    ai_labels = sorted(
+        {
+            str(label)
+            for hit in hits
+            if hit.get("kind") == "ai_frame_score"
+            for label in hit.get("labels", [])
+            if label
+        }
+    )
     text = ", ".join(f"{kind} x{count}" for kind, count in sorted(kinds.items())[:6])
+    if ai_labels:
+        text = f"{text}; AI labels: {', '.join(ai_labels[:6])}"
     return f"Advanced: {text}"
 
 

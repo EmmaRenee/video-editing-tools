@@ -13,10 +13,11 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | Tesseract | Optional | OCR/signage detection |
 | YOLO / Ultralytics | Optional | Visual object detection through `detect_visual_objects` |
 | OpenCV | Optional | Face/person presence detection |
+| OpenCLIP + Torch | Optional | AI profile frame scoring and missed-moment discovery |
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
-The deterministic pipeline works with only Python, FFmpeg, and ffprobe. The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library; install extras only when you need Whisper, YOLO/OpenCV, UI, or cloud providers.
+The deterministic pipeline works with only Python, FFmpeg, and ffprobe. The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library; install extras only when you need Whisper, YOLO/OpenCV, OpenCLIP/Torch, UI, or cloud providers.
 
 `videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for this repository's full local setup. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
@@ -51,6 +52,7 @@ python -m pip install -e "./src/python[whisper,advanced]"
 Optional extras:
 
 ```bash
+python -m pip install -e "./src/python[ai]"
 python -m pip install -e "./src/python[ui]"
 python -m pip install -e "./src/python[cloud]"
 ```
@@ -79,6 +81,7 @@ py -3.12 -m venv .venv
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e .\src\python
 python -m pip install -e ".\src\python[whisper,advanced]"
+python -m pip install -e ".\src\python[ai]"
 ```
 
 If PowerShell blocks activation scripts:
@@ -113,6 +116,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ./src/python
 python -m pip install -e "./src/python[whisper,advanced]"
+python -m pip install -e "./src/python[ai]"
 ```
 
 If Python 3.12 is not available from your distribution packages, install Python 3.12 with `pyenv`, your distribution backports, or the official Python installer before creating `.venv`.
@@ -123,7 +127,7 @@ From the repository root with the virtual environment active:
 
 ```bash
 python --version
-python -m pip show videoedit ultralytics opencv-python openai-whisper
+python -m pip show videoedit ultralytics opencv-python openai-whisper open-clip-torch torch Pillow
 command -v videoedit
 command -v yolo
 videoedit doctor
@@ -137,6 +141,7 @@ Expected `videoedit doctor` result:
 
 - Required `ffmpeg` and `ffprobe` are `ok`.
 - Optional `whisper`, `tesseract`, `yolo`, and `cv2` are `ok` when full extras are installed.
+- Optional `open_clip`, `torch`, and `PIL` are reported by `videoedit modules doctor` for the `advanced.ai` module when AI extras are installed.
 
 Optional YOLO smoke test outside the repository:
 
@@ -156,6 +161,19 @@ Inventory and rate footage:
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 ```
+
+Optional AI frame scoring and missed-moment review:
+
+```bash
+videoedit ai profiles list
+videoedit ai profiles show garage_shop
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+videoedit rate footage/ --output analysis_ai/ --ai-frame-scores analysis/ai_frame_scores.json
+videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_frame_scores.json --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
+```
+
+AI frame scoring is optional. Missing OpenCLIP/Torch dependencies write an unavailable artifact with install guidance; core inventory, rating, review, and rough-cut commands still work.
 
 Calibrate scoring after marking human-approved moments:
 
@@ -233,7 +251,8 @@ videoedit rate footage/ --output analysis_fused/ \
   --ocr-signage analysis/ocr_signage.json \
   --face-person analysis/face_person_presence.json \
   --motorsports-events analysis/motorsports_events.json \
-  --topic-clusters analysis/topic_clusters.json
+  --topic-clusters analysis/topic_clusters.json \
+  --ai-frame-scores analysis/ai_frame_scores.json
 ```
 
 ## Optional Feature Modules
@@ -248,7 +267,7 @@ videoedit modules doctor
 videoedit modules scaffold my_feature --output videoedit-my-feature/
 ```
 
-Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group.
+Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, AI frame scoring, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group.
 
 ## Content, Captions, And Projects
 
