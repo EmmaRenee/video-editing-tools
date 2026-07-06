@@ -11,7 +11,7 @@ Cross-platform setup for the video-editing skill. Works on Windows, macOS, and L
 | Tool | Windows | macOS | Linux | Purpose |
 |------|---------|-------|-------|---------|
 | **FFmpeg** | Required | Required | Required | Video processing |
-| **Python 3.9+** | Required | Required | Required | Scripting |
+| **Python 3.10+** | Required | Required | Required | Scripting |
 | **Whisper** | Optional | Optional | Optional | Transcription |
 | **DaVinci Resolve** | Optional | Optional | Optional | Final editing |
 | **Cloud APIs** | Optional | Optional | Optional | AI tools |

@@ -67,10 +67,11 @@ Raw footage (hours)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
   → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
   → ratings.json + candidates.csv + review assets
-  → videoedit calibrate evaluate/tune when human annotations exist
+  → videoedit calibrate from-decisions/evaluate/tune/compare/apply when human feedback exists
   → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
   → approved.json
+  → videoedit roughcut plan + assemble --plan
   → rough_cut.mp4 + captioned clips + EDL/XML/M3U + extracted clips
   → DaVinci Resolve (final polish, color, export)
 ```
@@ -145,6 +146,13 @@ videoedit run vision_reel.yaml --input footage/ --output output/
 For explicit fused rating:
 
 ```bash
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
+
 videoedit rate footage/ --output analysis_fused/ \
   --visual-objects analysis/visual_objects.json \
   --ocr-signage analysis/ocr_signage.json \
@@ -161,8 +169,11 @@ Use calibration when the user has reviewed footage or wants to tune the scorer b
 
 ```bash
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
@@ -182,7 +193,8 @@ Open the static review UI at `review/contact_sheet.html` or use `videoedit revie
 ### 4. Assemble, extract, and export
 
 ```bash
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence diversified --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl approved.json --output edl/
 ```
@@ -251,6 +263,7 @@ evaluate_ratings
 calibrate_scoring
 generate_review_assets
 approve_candidates
+plan_roughcut
 assemble_rough_cut
 extract_segments
 generate_edl
@@ -796,7 +809,8 @@ videoedit review-assets analysis/ratings.json --output review/
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 
 # Assemble and hand off
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence diversified --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit export-edl approved.json --output edl/
 videoedit extract-segments approved.json --output clips/
 

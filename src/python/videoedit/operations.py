@@ -27,6 +27,7 @@ from .inventory import build_inventory, write_inventory_outputs
 from .modules import all_modules, is_module_enabled, load_module_config, module_for_operation, operation_enabled
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
+from .roughcut import plan_roughcut
 from .scaffold import scaffold_project
 from .selections import load_selection
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
@@ -95,6 +96,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
     _register(registry, enabled_only, cwd, "approve_candidates", "Create approved.json from rating candidates", op_approve_candidates)
+    _register(registry, enabled_only, cwd, "plan_roughcut", "Plan a deterministic rough cut from approved selections", op_plan_roughcut)
     _register(registry, enabled_only, cwd, "assemble_rough_cut", "Assemble a rough cut from approved selections", op_assemble)
     _register(registry, enabled_only, cwd, "format_video", "Format a video with an FFmpeg video filter", op_format_video)
     _register(registry, enabled_only, cwd, "burn_captions", "Burn subtitles into a video with FFmpeg", op_burn_captions)
@@ -304,7 +306,26 @@ def op_approve_candidates(context: dict[str, Any], params: dict[str, Any]) -> di
 def op_assemble(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     selection = os.fspath(params.get("input") or params.get("selection") or context.get("approved"))
     output = os.fspath(params.get("output") or os.path.join(context["output"], "rough_cut.mp4"))
-    return {"output": assemble(selection, output)}
+    return {"output": assemble(selection, output, plan_json=params.get("plan") or context.get("roughcut_plan"))}
+
+
+def op_plan_roughcut(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    selection = os.fspath(params.get("input") or params.get("selection") or context.get("approved"))
+    output = os.fspath(params.get("output") or os.path.join(context["output"], "roughcut_plan.json"))
+    result = plan_roughcut(
+        selection,
+        output,
+        preset=params.get("preset", "reel"),
+        sequence=params.get("sequence", "review_order"),
+        target_duration=params.get("target_duration"),
+        format_type=params.get("format", params.get("format_type", "original")),
+        handles=float(params.get("handles", 0.0)),
+        max_clips=params.get("max_clips"),
+        render_mode=params.get("render_mode", "copy"),
+        report_output=params.get("report_output"),
+    )
+    context["roughcut_plan"] = result["plan"]
+    return result
 
 
 def op_extract_segments(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:

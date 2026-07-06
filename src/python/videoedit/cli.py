@@ -8,7 +8,21 @@ import json
 import os
 import sys
 
-from .calibration import evaluate_ratings, init_annotation_file, tune_scoring
+from .advanced import (
+    cluster_transcript_topics,
+    detect_face_person_presence,
+    detect_motorsports_events,
+    detect_ocr_signage,
+    detect_visual_objects,
+)
+from .calibration import (
+    annotations_from_review_decisions,
+    apply_scoring_config,
+    compare_calibration_runs,
+    evaluate_ratings,
+    init_annotation_file,
+    tune_scoring,
+)
 from .captions import burn_captions, list_caption_styles
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
@@ -27,7 +41,9 @@ from .operations import default_registry, op_extract_segments
 from .pipeline import available_presets, load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
+from .roughcut import FORMAT_PRESETS, RENDER_MODES, SEQUENCING_MODES, plan_roughcut
 from .scaffold import PROJECT_TYPES, scaffold_project
+from .signals import validate_signal_artifact
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,6 +132,41 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="Print machine-readable diagnostics")
     doctor.set_defaults(func=cmd_doctor)
 
+    signals = sub.add_parser("signals", help="Run or validate optional signal providers")
+    signals_sub = signals.add_subparsers(dest="signals_command", required=True)
+    signals_objects = signals_sub.add_parser("objects", help="Run visual object detection")
+    signals_objects.add_argument("input")
+    signals_objects.add_argument("--output", "-o", required=True)
+    signals_objects.add_argument("--model")
+    signals_objects.add_argument("--command")
+    signals_objects.add_argument("--confidence", type=float)
+    signals_objects.add_argument("--max-detections", type=int, default=5000)
+    signals_objects.set_defaults(func=cmd_signals_objects)
+    signals_ocr = signals_sub.add_parser("ocr", help="Run OCR/signage detection")
+    signals_ocr.add_argument("input")
+    signals_ocr.add_argument("--output", "-o", required=True)
+    signals_ocr.add_argument("--sample-interval", type=float, default=10.0)
+    signals_ocr.add_argument("--max-frames-per-file", type=int, default=6)
+    signals_ocr.set_defaults(func=cmd_signals_ocr)
+    signals_face = signals_sub.add_parser("face-person", help="Run face/person presence detection")
+    signals_face.add_argument("input")
+    signals_face.add_argument("--output", "-o", required=True)
+    signals_face.add_argument("--sample-interval", type=float, default=10.0)
+    signals_face.add_argument("--max-frames-per-file", type=int, default=6)
+    signals_face.set_defaults(func=cmd_signals_face_person)
+    signals_motorsports = signals_sub.add_parser("motorsports", help="Infer motorsports events from ratings")
+    signals_motorsports.add_argument("ratings")
+    signals_motorsports.add_argument("--output", "-o", required=True)
+    signals_motorsports.add_argument("--min-confidence", type=float, default=0.2)
+    signals_motorsports.set_defaults(func=cmd_signals_motorsports)
+    signals_topics = signals_sub.add_parser("topics", help="Cluster transcript topics from ratings")
+    signals_topics.add_argument("ratings")
+    signals_topics.add_argument("--output", "-o", required=True)
+    signals_topics.set_defaults(func=cmd_signals_topics)
+    signals_validate = signals_sub.add_parser("validate", help="Validate a signal artifact JSON file")
+    signals_validate.add_argument("artifact")
+    signals_validate.set_defaults(func=cmd_signals_validate)
+
     calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
     calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
     calibrate_init = calibrate_sub.add_parser("init", help="Write a starter annotation JSON file")
@@ -133,11 +184,46 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_tune.add_argument("--annotations", required=True)
     calibrate_tune.add_argument("--output", "-o", required=True)
     calibrate_tune.set_defaults(func=cmd_calibrate_tune)
+    calibrate_from_decisions = calibrate_sub.add_parser(
+        "from-decisions",
+        help="Convert review_decisions.json into calibration annotation JSON",
+    )
+    calibrate_from_decisions.add_argument("decisions")
+    calibrate_from_decisions.add_argument("--ratings", required=True)
+    calibrate_from_decisions.add_argument("--output", "-o", required=True)
+    calibrate_from_decisions.add_argument("--project", default="Videoedit Calibration")
+    calibrate_from_decisions.add_argument("--source-root")
+    calibrate_from_decisions.set_defaults(func=cmd_calibrate_from_decisions)
+    calibrate_compare = calibrate_sub.add_parser("compare", help="Compare calibration report folders or JSON files")
+    calibrate_compare.add_argument("runs", nargs="+")
+    calibrate_compare.add_argument("--output", "-o", required=True)
+    calibrate_compare.set_defaults(func=cmd_calibrate_compare)
+    calibrate_apply = calibrate_sub.add_parser("apply", help="Copy proposed scoring config to a chosen output path")
+    calibrate_apply.add_argument("config")
+    calibrate_apply.add_argument("--output", "-o", required=True)
+    calibrate_apply.add_argument("--force", action="store_true")
+    calibrate_apply.set_defaults(func=cmd_calibrate_apply)
 
     assemble_cmd = sub.add_parser("assemble", help="Assemble a rough cut from selection or approved JSON")
     assemble_cmd.add_argument("selection")
     assemble_cmd.add_argument("--output", "-o", required=True)
+    assemble_cmd.add_argument("--plan", help="Optional roughcut_plan.json to control ordering and render settings")
     assemble_cmd.set_defaults(func=cmd_assemble)
+
+    roughcut = sub.add_parser("roughcut", help="Plan deterministic rough cuts before assembly")
+    roughcut_sub = roughcut.add_subparsers(dest="roughcut_command", required=True)
+    roughcut_plan = roughcut_sub.add_parser("plan", help="Create roughcut_plan.json from approved selections")
+    roughcut_plan.add_argument("selection")
+    roughcut_plan.add_argument("--output", "-o", required=True)
+    roughcut_plan.add_argument("--preset", default="reel")
+    roughcut_plan.add_argument("--sequence", choices=sorted(SEQUENCING_MODES), default="review_order")
+    roughcut_plan.add_argument("--target-duration", type=float)
+    roughcut_plan.add_argument("--format", choices=sorted(FORMAT_PRESETS), default="original")
+    roughcut_plan.add_argument("--handles", type=float, default=0.0)
+    roughcut_plan.add_argument("--max-clips", type=int)
+    roughcut_plan.add_argument("--render-mode", choices=sorted(RENDER_MODES), default="copy")
+    roughcut_plan.add_argument("--report-output")
+    roughcut_plan.set_defaults(func=cmd_roughcut_plan)
 
     captions = sub.add_parser("captions", help="Caption utilities")
     captions_sub = captions.add_subparsers(dest="caption_command", required=True)
@@ -380,6 +466,64 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if report["status"] == "ok" else 1
 
 
+def cmd_signals_objects(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.vision")
+    result = detect_visual_objects(
+        args.input,
+        args.output,
+        command=args.command,
+        model=args.model,
+        confidence=args.confidence,
+        max_detections=args.max_detections,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_signals_ocr(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.vision")
+    result = detect_ocr_signage(
+        args.input,
+        args.output,
+        sample_interval=args.sample_interval,
+        max_frames_per_file=args.max_frames_per_file,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_signals_face_person(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.vision")
+    result = detect_face_person_presence(
+        args.input,
+        args.output,
+        sample_interval=args.sample_interval,
+        max_frames_per_file=args.max_frames_per_file,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_signals_motorsports(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.motorsports")
+    result = detect_motorsports_events(args.ratings, args.output, min_confidence=args.min_confidence)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_signals_topics(args: argparse.Namespace) -> int:
+    require_module_enabled("content.reports")
+    result = cluster_transcript_topics(args.ratings, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_signals_validate(args: argparse.Namespace) -> int:
+    result = validate_signal_artifact(args.artifact)
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] == "ok" else 1
+
+
 def cmd_calibrate_init(args: argparse.Namespace) -> int:
     require_module_enabled("core.calibration")
     output = init_annotation_file(args.output, project=args.project, source_root=args.source_root)
@@ -401,10 +545,55 @@ def cmd_calibrate_tune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate_from_decisions(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = annotations_from_review_decisions(
+        args.ratings,
+        args.decisions,
+        args.output,
+        project=args.project,
+        source_root=args.source_root,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_calibrate_compare(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = compare_calibration_runs(args.runs, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_calibrate_apply(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = apply_scoring_config(args.config, args.output, force=args.force)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_assemble(args: argparse.Namespace) -> int:
     require_module_enabled("core.review")
-    output = assemble(args.selection, args.output)
+    output = assemble(args.selection, args.output, plan_json=args.plan)
     print(f"Rough cut written to {output}")
+    return 0
+
+
+def cmd_roughcut_plan(args: argparse.Namespace) -> int:
+    require_module_enabled("core.review")
+    result = plan_roughcut(
+        args.selection,
+        args.output,
+        preset=args.preset,
+        sequence=args.sequence,
+        target_duration=args.target_duration,
+        format_type=args.format,
+        handles=args.handles,
+        max_clips=args.max_clips,
+        render_mode=args.render_mode,
+        report_output=args.report_output,
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 

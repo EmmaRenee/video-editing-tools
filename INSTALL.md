@@ -16,7 +16,9 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
-The deterministic pipeline works with only Python, FFmpeg, and ffprobe. Install YOLO and other advanced providers only when you need those signal artifacts.
+The deterministic pipeline works with only Python, FFmpeg, and ffprobe. The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library; install extras only when you need Whisper, YOLO/OpenCV, UI, or cloud providers.
+
+`videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for this repository's full local setup. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
 ## macOS Setup
 
@@ -159,8 +161,11 @@ Calibrate scoring after marking human-approved moments:
 
 ```bash
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
@@ -177,7 +182,8 @@ videoedit approve analysis/ratings.json --output approved.json --decisions revie
 Assemble and export handoff files:
 
 ```bash
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence diversified --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl approved.json --output edl/
 ```
@@ -214,6 +220,13 @@ steps:
 Use those parsed object signals during rating:
 
 ```bash
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
+
 videoedit run vision_reel.yaml --input footage/ --output analysis/vision
 videoedit rate footage/ --output analysis_fused/ \
   --visual-objects analysis/visual_objects.json \

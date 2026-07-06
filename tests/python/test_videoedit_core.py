@@ -13,6 +13,7 @@ PYTHON_SRC = os.path.join(ROOT, "src", "python")
 sys.path.insert(0, PYTHON_SRC)
 
 from videoedit.config import AnalysisConfig
+import videoedit.inventory as inventory_module
 from videoedit.advanced import (
     cluster_transcript_topics,
     detect_face_person_presence,
@@ -20,13 +21,19 @@ from videoedit.advanced import (
     detect_visual_objects,
 )
 import videoedit.advanced as advanced_module
-from videoedit.calibration import evaluate_ratings, load_annotations
+from videoedit.calibration import (
+    annotations_from_review_decisions,
+    apply_scoring_config,
+    compare_calibration_runs,
+    evaluate_ratings,
+    load_annotations,
+)
 from videoedit.captions import srt_to_ass
 from videoedit.cli import main
 import videoedit.cli as cli_module
 from videoedit.content import generate_content_map, generate_quote_mining, plan_content_series
 from videoedit.diagnostics import format_diagnostics, run_diagnostics
-from videoedit.edl import export_selection_file
+from videoedit.edl import export_selection_file, generate_extract_script
 from videoedit.ffmpeg import CommandResult, parse_audio_metadata_output, parse_scene_output, parse_silence_output, run_command_check
 from videoedit.models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, SignalReport
 from videoedit.modules import disable_module, enable_module, module_rows, operation_enabled
@@ -34,7 +41,9 @@ from videoedit.operations import default_registry
 import videoedit.operations as operations_module
 from videoedit.pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from videoedit.rating import generate_candidates, score_signal
+import videoedit.review as review_module
 from videoedit.review import create_approval_file, generate_review_assets
+from videoedit.roughcut import plan_roughcut
 from videoedit.review_tui import (
     _interactive_loop,
     filter_review_clips,
@@ -44,7 +53,7 @@ from videoedit.review_tui import (
 )
 from videoedit.scaffold import scaffold_project
 from videoedit.selections import load_selection
-from videoedit.signals import load_signal_artifacts
+from videoedit.signals import load_signal_artifacts, validate_signal_artifact
 from videoedit.simple_yaml import load_mapping
 
 
@@ -74,6 +83,33 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(levels), 2)
         self.assertEqual(levels[1].time, 1)
         self.assertEqual(levels[1].rms_db, -12.25)
+
+
+class InventoryTests(unittest.TestCase):
+    def test_build_inventory_skips_probe_failures(self):
+        original_scan = inventory_module.scan_video_files
+        original_probe = inventory_module.probe_media
+
+        def fake_scan(_directory):
+            return ["/tmp/bad.mp4", "/tmp/good.mp4"]
+
+        def fake_probe(path, timeout=60):
+            if path.endswith("bad.mp4"):
+                raise RuntimeError("probe failed")
+            return MediaAsset(filename=os.path.basename(path), filepath=path, duration=1.0)
+
+        inventory_module.scan_video_files = fake_scan
+        inventory_module.probe_media = fake_probe
+        try:
+            with self.assertLogs("videoedit.inventory", level="WARNING") as logs:
+                items = inventory_module.build_inventory("/tmp")
+        finally:
+            inventory_module.scan_video_files = original_scan
+            inventory_module.probe_media = original_probe
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].filename, "good.mp4")
+        self.assertIn("probe failed", logs.output[0])
 
 
 class ScoringTests(unittest.TestCase):
@@ -224,10 +260,12 @@ class PipelineTests(unittest.TestCase):
                     "generate_review_assets",
                     "approve_candidates",
                     "generate_edl",
+                    "plan_roughcut",
                     "assemble_rough_cut",
                 ],
             )
             self.assertEqual(data["steps"][2]["params"]["decisions"], "review.decisions")
+            self.assertEqual(data["steps"][4]["input"], "approve.approved")
 
     def test_motorsports_preset_includes_advanced_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -358,6 +396,8 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(plan["steps"][1]["params"]["input"], os.path.join(output, "rate", "ratings.json"))
             self.assertEqual(plan["steps"][2]["params"]["decisions"], os.path.join(output, "review", "review_decisions.json"))
             self.assertEqual(plan["steps"][4]["params"]["input"], os.path.join(output, "approved.json"))
+            self.assertEqual(plan["steps"][4]["planned_result"]["plan"], os.path.join(output, "roughcut_plan.json"))
+            self.assertEqual(plan["steps"][5]["params"]["input"], os.path.join(output, "approved.json"))
 
     def test_pipeline_plan_treats_filter_step_output_as_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -565,6 +605,71 @@ class CalibrationTests(unittest.TestCase):
             self.assertIn("weights", proposed)
             self.assertIn("min_review_score", proposed)
 
+    def test_calibration_from_decisions_compare_and_apply_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            footage = os.path.join(tmp, "footage")
+            interview = os.path.join(footage, "race_day", "interview.mp4")
+            broll = os.path.join(footage, "cars", "broll.mp4")
+            shop = os.path.join(footage, "shop.mp4")
+            ratings = os.path.join(tmp, "ratings.json")
+            annotations = os.path.join(tmp, "annotations.json")
+            decisions = os.path.join(tmp, "review_decisions.json")
+            calibration_a = os.path.join(tmp, "calibration_a")
+            calibration_b = os.path.join(tmp, "calibration_b")
+            comparison = os.path.join(tmp, "compare")
+            _write_calibration_ratings(ratings, footage, interview, broll, shop)
+            _write_calibration_annotations(annotations, footage)
+            with open(decisions, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "decisions": [
+                                {
+                                    "id": "clip_0001",
+                                    "decision": "approve",
+                                    "source": interview,
+                                    "start": "00:00:30",
+                                    "end": "00:00:45",
+                                    "note": "keeper",
+                                    "labels": ["quote"],
+                                },
+                                {
+                                    "id": "clip_0002",
+                                    "decision": "reject",
+                                    "source": interview,
+                                    "start": "00:01:10",
+                                    "end": "00:01:20",
+                                },
+                            ]
+                        }
+                    )
+                )
+
+            converted = annotations_from_review_decisions(ratings, decisions, os.path.join(tmp, "from_decisions.json"))
+            self.assertEqual(converted["clips"], 2)
+            with open(converted["annotations"], encoding="utf-8") as handle:
+                data = json.loads(handle.read())
+            self.assertEqual(data["clips"][0]["rating"], "select")
+            self.assertEqual(data["clips"][1]["rating"], "reject")
+
+            evaluate_ratings(ratings, annotations, calibration_a)
+            evaluate_ratings(ratings, converted["annotations"], calibration_b)
+            compare = compare_calibration_runs([calibration_a, calibration_b], comparison)
+            self.assertTrue(os.path.exists(compare["json"]))
+            self.assertTrue(os.path.exists(compare["markdown"]))
+            self.assertEqual(compare["runs"], 2)
+
+            proposed = os.path.join(tmp, "proposed_config.json")
+            with open(proposed, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"max_candidates": 12, "weights": {"audio": 40}}))
+            applied = apply_scoring_config(proposed, os.path.join(tmp, "scoring_config.json"))
+            with open(applied["config"], encoding="utf-8") as handle:
+                config = json.loads(handle.read())
+            self.assertEqual(config["max_candidates"], 12)
+            self.assertEqual(config["weights"]["audio"], 40)
+            with self.assertRaises(FileExistsError):
+                apply_scoring_config(proposed, applied["config"])
+
     def test_cli_calibrate_commands_and_registry(self):
         with tempfile.TemporaryDirectory() as tmp:
             annotations = os.path.join(tmp, "annotations.json")
@@ -691,13 +796,26 @@ class OperationTests(unittest.TestCase):
             self.assertEqual(event_result["count"], 2)
             self.assertEqual(topic_result["count"], 2)
             with open(events, encoding="utf-8") as handle:
-                event_types = [item["event_type"] for item in json.loads(handle.read())["events"]]
+                event_data = json.loads(handle.read())
+                event_types = [item["event_type"] for item in event_data["events"]]
             with open(topics, encoding="utf-8") as handle:
-                topic_names = [item["topic"] for item in json.loads(handle.read())["topics"]]
+                topic_data = json.loads(handle.read())
+                topic_names = [item["topic"] for item in topic_data["topics"]]
+            self.assertEqual(event_data["schema_version"], "videoedit.signal.v1")
+            self.assertEqual(event_data["artifact_kind"], "motorsports_events")
+            self.assertEqual(event_data["source_count"], 1)
             self.assertIn("pass", event_types)
             self.assertIn("incident", event_types)
             self.assertIn("racecraft", topic_names)
             self.assertIn("incidents", topic_names)
+            validation = validate_signal_artifact(events)
+            self.assertEqual(validation["status"], "ok")
+            self.assertEqual(validation["kind"], "motorsports_events")
+
+            cli_output = os.path.join(tmp, "cli_events.json")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["signals", "motorsports", ratings, "--output", cli_output]), 0)
+            self.assertEqual(validate_signal_artifact(cli_output)["status"], "ok")
 
     def test_optional_object_provider_writes_unavailable_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -707,6 +825,8 @@ class OperationTests(unittest.TestCase):
             with open(output, encoding="utf-8") as handle:
                 data = json.loads(handle.read())
             self.assertEqual(data["provider"], "visual_objects")
+            self.assertEqual(data["schema_version"], "videoedit.signal.v1")
+            self.assertEqual(data["status"], "unavailable")
             self.assertEqual(data["count"], 0)
 
     def test_object_provider_uses_diagnostics_resolver_for_venv_yolo(self):
@@ -787,12 +907,15 @@ class OperationTests(unittest.TestCase):
             self.assertEqual(result["detection_count"], 3)
             with open(output, encoding="utf-8") as handle:
                 data = json.loads(handle.read())
+            self.assertEqual(data["schema_version"], "videoedit.signal.v1")
+            self.assertEqual(data["artifact_kind"], "visual_objects")
             source_summary = data["sources"][0]
             counts = {item["class_name"]: item["count"] for item in source_summary["class_counts"]}
             self.assertEqual(counts["person"], 2)
             self.assertEqual(counts["car"], 1)
             self.assertEqual(source_summary["detections"][0]["confidence"], 0.91)
             self.assertTrue(any(item["class_name"] == "person" for item in source_summary["segments"]))
+            self.assertEqual(data["source_summaries"][0]["detection_count"], 3)
 
     def test_optional_face_person_provider_writes_unavailable_manifest_without_opencv(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -813,6 +936,7 @@ class OperationTests(unittest.TestCase):
             with open(output, encoding="utf-8") as handle:
                 data = json.loads(handle.read())
             self.assertEqual(data["provider"], "face_person_presence")
+            self.assertEqual(data["schema_version"], "videoedit.signal.v1")
             self.assertEqual(data["count"], 0)
 
     def test_extract_segments_uses_per_clip_sources_for_mixed_selection(self):
@@ -858,6 +982,32 @@ class OperationTests(unittest.TestCase):
             self.assertEqual(calls[1][2], "/tmp/b.mp4")
             self.assertTrue(result["files"][0].endswith("a_cam_clip_a.mp4"))
             self.assertTrue(result["files"][1].endswith("b_clip_b.mp4"))
+
+    def test_extract_script_quotes_shell_arguments_and_validates_times(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = generate_extract_script(
+                [
+                    {
+                        "source": "/tmp/source; touch pwned.mp4",
+                        "start": "00:00:01",
+                        "end": "00:00:02.5",
+                        "label": "clip; name",
+                    }
+                ],
+                "/tmp/fallback.mp4",
+                tmp,
+            )
+            self.assertIn("'/tmp/source; touch pwned.mp4'", script)
+            self.assertIn("-ss 00:00:01", script)
+            self.assertIn("-to 00:00:02.5", script)
+            self.assertIn("clip_name.mp4", script)
+            self.assertNotIn("clip; name.mp4", script)
+            with self.assertRaises(ValueError):
+                generate_extract_script(
+                    [{"source": "/tmp/a.mp4", "start": "00:00:02", "end": "00:00:01", "label": "bad"}],
+                    "/tmp/fallback.mp4",
+                    tmp,
+                )
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -962,6 +1112,98 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(data["clips"][0]["label"], "clip_0002")
             self.assertEqual(data["clips"][0]["review_note"], "story beat")
 
+    def test_roughcut_plan_sequences_limits_and_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            approved = os.path.join(tmp, "approved.json")
+            plan = os.path.join(tmp, "roughcut_plan.json")
+            with open(approved, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "source": "mixed",
+                            "clips": [
+                                {
+                                    "source": "/tmp/a.mp4",
+                                    "start": "00:00:10",
+                                    "end": "00:00:20",
+                                    "label": "first",
+                                    "score": 70,
+                                    "review_order": 2,
+                                },
+                                {
+                                    "source": "/tmp/b.mp4",
+                                    "start": "00:00:05",
+                                    "end": "00:00:15",
+                                    "label": "best",
+                                    "score": 95,
+                                    "review_order": 1,
+                                },
+                            ],
+                        }
+                    )
+                )
+            result = plan_roughcut(
+                approved,
+                plan,
+                sequence="score",
+                target_duration=12,
+                format_type="reel",
+                handles=1,
+                render_mode="render",
+            )
+            self.assertTrue(os.path.exists(result["plan"]))
+            self.assertTrue(os.path.exists(result["report"]))
+            with open(plan, encoding="utf-8") as handle:
+                data = json.loads(handle.read())
+            self.assertEqual(data["clips"][0]["label"], "best")
+            self.assertEqual(data["format"], "reel")
+            self.assertEqual(data["render_mode"], "render")
+            self.assertLessEqual(data["summary"]["duration"], 12)
+
+    def test_assemble_uses_roughcut_plan_render_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            selection = os.path.join(tmp, "approved.json")
+            plan = os.path.join(tmp, "roughcut_plan.json")
+            output = os.path.join(tmp, "rough_cut.mp4")
+            with open(selection, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "source": "/tmp/a.mp4",
+                            "clips": [
+                                {
+                                    "source": "/tmp/a.mp4",
+                                    "start": "00:00:01",
+                                    "end": "00:00:04",
+                                    "label": "clip",
+                                }
+                            ],
+                        }
+                    )
+                )
+            plan_roughcut(selection, plan, format_type="youtube", render_mode="render")
+            calls = []
+            original = review_module.run_command_check
+
+            def fake_run_command_check(args, timeout=180):
+                calls.append(args)
+                if args[-2].endswith(".mp4"):
+                    os.makedirs(os.path.dirname(args[-2]), exist_ok=True)
+                    with open(args[-2], "w", encoding="utf-8") as handle:
+                        handle.write("")
+                return None
+
+            review_module.run_command_check = fake_run_command_check
+            try:
+                assembled = review_module.assemble(selection, output, plan_json=plan)
+            finally:
+                review_module.run_command_check = original
+
+            self.assertEqual(assembled, output)
+            self.assertIn("-vf", calls[0])
+            self.assertIn("libx264", calls[0])
+            self.assertEqual(calls[-1][0], "ffmpeg")
+
     def test_generate_review_assets_writes_manifest_without_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             ratings = os.path.join(tmp, "ratings.json")
@@ -995,6 +1237,14 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("downloadDecisions", html)
             self.assertIn('class="decision"', html)
             self.assertIn('value="approve"', html)
+            self.assertIn("decisionFilter", html)
+            self.assertIn("bulkDecision", html)
+            self.assertIn("applyBulkDecision", html)
+            self.assertIn("clearFilters", html)
+            self.assertIn("preserveScroll", html)
+            self.assertIn("visibleCount", html)
+            self.assertIn("showExportPanel", html)
+            self.assertIn("exportDecisionsText", html)
 
     def test_generate_review_assets_includes_signal_and_calibration_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1084,6 +1334,9 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("searchFilter", html)
             self.assertIn("Calibration: matched", html)
             self.assertIn("Objects: person", html)
+            self.assertIn("Approve visible", html)
+            self.assertIn("B-roll visible", html)
+            self.assertIn("Refresh and select JSON", html)
 
     def test_review_tui_data_layer_filters_updates_and_saves_decisions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1346,6 +1599,12 @@ class CaptionContentScaffoldTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(os.path.join(project, "raw")))
             self.assertTrue(os.path.exists(os.path.join(project, ".videoedit", "config.json")))
             self.assertTrue(os.path.exists(os.path.join(project, "README.md")))
+
+    def test_project_scaffold_rejects_path_traversal_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = scaffold_project("../..", tmp, project_type="reel")
+            self.assertEqual(os.path.basename(result["project"]), "video_project")
+            self.assertTrue(os.path.realpath(result["project"]).startswith(os.path.realpath(tmp)))
 
 
 def _write_sample_ratings(path: str) -> None:

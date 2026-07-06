@@ -21,6 +21,7 @@ setup(
     author="Emma Werner",
     packages=find_packages(),
     include_package_data=True,
+    # Core package is standard-library-only; optional providers live in extras below.
     install_requires=[],
     extras_require={
         "whisper": ["openai-whisper>=20231117"],
@@ -41,5 +42,6 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
 )

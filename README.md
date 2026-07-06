@@ -84,12 +84,16 @@ videoedit doctor
 videoedit modules list
 videoedit rate footage/ --output analysis/
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
 videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence score --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit init reel --output reel.yaml
 videoedit run reel.yaml --input footage/ --output output/
 videoedit init roughcut --output roughcut.yaml
@@ -115,8 +119,11 @@ Use calibration after the first `videoedit rate` pass to compare machine-selecte
 ```bash
 videoedit rate footage/ --output analysis/
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
@@ -139,6 +146,13 @@ steps:
 ```
 
 ```bash
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
+
 videoedit run vision_reel.yaml --input footage/ --output analysis/vision
 videoedit rate footage/ --output analysis_fused/ \
   --visual-objects analysis/visual_objects.json \
@@ -207,6 +221,10 @@ video-editing-tools/
 | Whisper | Optional | Latest |
 | YOLO/Ultralytics | Optional | Latest compatible |
 | PowerShell | Optional | 5.1+ / 7+ |
+
+`videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for the full local toolchain. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
+
+The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library. Install optional provider groups only when needed: `./src/python[whisper]`, `./src/python[advanced]`, `./src/python[ui]`, or `./src/python[cloud]`.
 
 ---
 

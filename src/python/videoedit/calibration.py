@@ -166,6 +166,118 @@ def tune_scoring(ratings_json: str, annotations_json: str, output_dir: str) -> d
     }
 
 
+def annotations_from_review_decisions(
+    ratings_json: str,
+    decisions_json: str,
+    output: str,
+    project: str = "Videoedit Calibration",
+    source_root: str | None = None,
+) -> dict[str, Any]:
+    ratings = _read_json(ratings_json)
+    decisions = _read_json(decisions_json)
+    candidates = _candidate_map(ratings)
+    rows = []
+    for index, decision in enumerate(_decision_rows(decisions), 1):
+        clip_id = str(decision.get("id") or "").strip()
+        candidate = candidates.get(clip_id, {})
+        source = decision.get("source") or candidate.get("source")
+        if not source:
+            raise ValueError(f"review decision {index} is missing source")
+        start = _clip_seconds({**candidate, **decision}, "start", "start_seconds")
+        end = _clip_seconds({**candidate, **decision}, "end", "end_seconds")
+        if end <= start:
+            raise ValueError(f"review decision {clip_id or index} end must be after start")
+        rows.append(
+            {
+                "id": clip_id or f"annotation_{index:04d}",
+                "source": os.fspath(source),
+                "start": seconds_to_hhmmss(start),
+                "end": seconds_to_hhmmss(end),
+                "start_seconds": start,
+                "end_seconds": end,
+                "rating": _annotation_rating(decision, candidate),
+                "tags": _annotation_tags(decision, candidate),
+                "notes": str(decision.get("note") or decision.get("notes") or ""),
+                "candidate_id": clip_id or candidate.get("id"),
+                "score": decision.get("score", candidate.get("score")),
+                "original_action": decision.get("current_action", candidate.get("action")),
+            }
+        )
+
+    payload = {
+        "project": project,
+        "source_root": source_root if source_root is not None else ratings.get("root"),
+        "ratings": os.fspath(ratings_json),
+        "review_decisions": os.fspath(decisions_json),
+        "clips": rows,
+    }
+    _write_json(output, payload)
+    return {"annotations": os.fspath(output), "clips": len(rows)}
+
+
+def compare_calibration_runs(inputs: list[str], output_dir: str) -> dict[str, Any]:
+    if len(inputs) < 2:
+        raise ValueError("at least two calibration runs are required")
+    runs = [_calibration_run(input_path) for input_path in inputs]
+    baseline = runs[0]
+    comparisons = []
+    for run in runs:
+        metrics = run["metrics"]
+        baseline_metrics = baseline["metrics"]
+        comparisons.append(
+            {
+                "name": run["name"],
+                "path": run["path"],
+                "metrics": metrics,
+                "delta": {
+                    key: round(float(metrics.get(key, 0.0)) - float(baseline_metrics.get(key, 0.0)), 4)
+                    for key in ["precision", "recall", "f1"]
+                },
+                "missed_delta": int(metrics.get("missed", 0)) - int(baseline_metrics.get("missed", 0)),
+                "false_positive_delta": int(metrics.get("false_positives", 0))
+                - int(baseline_metrics.get("false_positives", 0)),
+            }
+        )
+    comparisons.sort(
+        key=lambda item: (
+            -float(item["metrics"].get("f1", 0.0)),
+            -float(item["metrics"].get("recall", 0.0)),
+            -float(item["metrics"].get("precision", 0.0)),
+            int(item["metrics"].get("missed", 0)),
+            int(item["metrics"].get("false_positives", 0)),
+        )
+    )
+    for index, item in enumerate(comparisons, 1):
+        item["rank"] = index
+    payload = {
+        "generated": datetime.now().isoformat(),
+        "baseline": baseline["name"],
+        "runs": comparisons,
+    }
+    output_dir = os.fspath(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    json_path = os.path.join(output_dir, "calibration_compare.json")
+    markdown_path = os.path.join(output_dir, "calibration_compare.md")
+    _write_json(json_path, payload)
+    _write_compare_markdown(payload, markdown_path)
+    return {"json": json_path, "markdown": markdown_path, "runs": len(runs), "best": comparisons[0]}
+
+
+def apply_scoring_config(config_json: str, output: str, force: bool = False) -> dict[str, Any]:
+    output = os.fspath(output)
+    if os.path.exists(output) and not force:
+        raise FileExistsError(f"output already exists: {output}")
+    data = _read_json(config_json)
+    config_obj = AnalysisConfig.from_mapping(data)
+    if isinstance(data.get("weights"), dict):
+        merged_weights = AnalysisConfig().weights
+        merged_weights.update(data["weights"])
+        config_obj.weights = merged_weights
+    config = config_obj.to_dict()
+    _write_json(output, config)
+    return {"config": output}
+
+
 def load_annotations(path: str, ratings: dict[str, Any] | None = None) -> AnnotationSet:
     data = _read_json(path)
     source_index = _SourceIndex(ratings or {}, annotation_path=path, source_root=data.get("source_root"))
@@ -293,6 +405,106 @@ def write_calibration_outputs(report: dict[str, Any], output_dir: str) -> dict[s
     _write_missed_csv(report.get("missed_moments", []), paths["missed"])
     _write_false_positive_csv(report.get("false_positives", []), paths["false_positives"])
     return paths
+
+
+def _candidate_map(ratings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = {}
+    for candidate in ratings.get("candidates", []):
+        clip_id = candidate.get("id") or candidate.get("label")
+        if clip_id:
+            rows[str(clip_id)] = candidate
+    return rows
+
+
+def _decision_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    decisions = data.get("decisions", data)
+    if isinstance(decisions, dict):
+        return [
+            {"id": str(key), **(value if isinstance(value, dict) else {"decision": value})}
+            for key, value in decisions.items()
+        ]
+    if isinstance(decisions, list):
+        return [item for item in decisions if isinstance(item, dict)]
+    raise ValueError("review decisions must be a list or mapping")
+
+
+def _annotation_rating(decision: dict[str, Any], candidate: dict[str, Any]) -> str:
+    value = str(decision.get("decision") or decision.get("rating") or candidate.get("action") or "review").lower()
+    if value in {"approve", "approved", "promote", "select", "yes", "y"}:
+        return "select"
+    if value in {"review"}:
+        return "review"
+    if value in {"broll", "b-roll", "b_roll"}:
+        return "broll"
+    if value in {"reject", "rejected", "no", "n"}:
+        return "reject"
+    if value in {"cut", "demote", "skip"}:
+        return "cut"
+    if value == "ignore":
+        return "ignore"
+    raise ValueError(f"unsupported review decision: {value}")
+
+
+def _annotation_tags(decision: dict[str, Any], candidate: dict[str, Any]) -> list[str]:
+    values = decision.get("tags", candidate.get("labels", []))
+    if isinstance(values, str):
+        return [item.strip() for item in values.split(",") if item.strip()]
+    return [str(item) for item in values or []]
+
+
+def _calibration_run(path: str) -> dict[str, Any]:
+    path = os.fspath(path)
+    report_path = os.path.join(path, "calibration_report.json") if os.path.isdir(path) else path
+    data = _read_json(report_path)
+    return {
+        "name": os.path.basename(os.path.dirname(report_path)) or os.path.basename(report_path),
+        "path": report_path,
+        "metrics": data.get("metrics", {}),
+        "summary": data.get("summary", {}),
+    }
+
+
+def _write_compare_markdown(payload: dict[str, Any], output: str) -> None:
+    lines = [
+        "# Calibration Compare",
+        "",
+        f"**Generated:** {payload['generated']}",
+        f"**Baseline:** {payload['baseline']}",
+        "",
+        "| Rank | Run | F1 | Recall | Precision | Missed | False positives | Delta F1 |",
+        "|------|-----|----|--------|-----------|--------|-----------------|----------|",
+    ]
+    for run in payload.get("runs", []):
+        metrics = run.get("metrics", {})
+        lines.append(
+            f"| {run['rank']} | {run['name']} | {metrics.get('f1', 0)} | {metrics.get('recall', 0)} | "
+            f"{metrics.get('precision', 0)} | {metrics.get('missed', 0)} | "
+            f"{metrics.get('false_positives', 0)} | {run['delta'].get('f1', 0)} |"
+        )
+    with open(os.fspath(output), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+
+
+def _signal_breakdown(candidate: dict[str, Any] | None) -> dict[str, Any]:
+    if not candidate:
+        return {}
+    signals = dict(candidate.get("signals", {}))
+    score_items = [
+        (key, value)
+        for key, value in signals.items()
+        if key.endswith("_score") and isinstance(value, (int, float)) and value
+    ]
+    score_items.sort(key=lambda item: (-float(item[1]), item[0]))
+    return {
+        "labels": list(candidate.get("labels", [])),
+        "top_scores": [{"name": key, "value": value} for key, value in score_items[:6]],
+        "counts": {
+            key: value
+            for key, value in signals.items()
+            if not key.endswith("_score") and isinstance(value, (int, float)) and value
+        },
+        "reasons": list(candidate.get("reasons", []))[:6],
+    }
 
 
 def _metrics(
@@ -539,6 +751,7 @@ def _miss_payload(annotation: AnnotationClip, nearest: dict[str, Any] | None) ->
     return {
         "annotation": annotation.to_dict(),
         "nearest_candidate": _candidate_payload(nearest) if nearest else None,
+        "signal_breakdown": _signal_breakdown(nearest),
         "nearest_gap_seconds": round(_time_gap(annotation.start, annotation.end, nearest["start"], nearest["end"]), 3)
         if nearest
         else None,
@@ -548,6 +761,7 @@ def _miss_payload(annotation: AnnotationClip, nearest: dict[str, Any] | None) ->
 def _false_positive_payload(candidate: dict[str, Any], nearest: AnnotationClip | None) -> dict[str, Any]:
     payload = {
         "candidate": _candidate_payload(candidate),
+        "signal_breakdown": _signal_breakdown(candidate),
         "nearest_annotation": nearest.to_dict() if nearest else None,
         "nearest_gap_seconds": round(_time_gap(nearest.start, nearest.end, candidate["start"], candidate["end"]), 3)
         if nearest
@@ -577,6 +791,7 @@ def _candidate_payload(candidate: dict[str, Any] | None) -> dict[str, Any] | Non
         "labels": candidate["labels"],
         "reasons": candidate["reasons"],
         "signals": candidate["signals"],
+        "signal_breakdown": _signal_breakdown(candidate),
     }
 
 

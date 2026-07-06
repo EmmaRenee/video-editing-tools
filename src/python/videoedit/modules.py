@@ -7,6 +7,7 @@ from datetime import datetime
 import importlib.metadata
 import importlib.util
 import json
+import logging
 import os
 import re
 from typing import Any, Callable
@@ -17,6 +18,7 @@ from .diagnostics import resolve_command
 CONFIG_DIR = ".videoedit"
 CONFIG_FILE = "config.json"
 ENTRY_POINT_GROUP = "videoedit.modules"
+logger = logging.getLogger(__name__)
 
 DiagnosticFunc = Callable[[], dict[str, Any]]
 
@@ -133,6 +135,7 @@ OPERATION_MODULES = {
     "generate_edl": "core.handoff",
     "generate_review_assets": "core.review",
     "approve_candidates": "core.review",
+    "plan_roughcut": "core.review",
     "assemble_rough_cut": "core.review",
     "format_video": "delivery.captions",
     "burn_captions": "delivery.captions",
@@ -453,7 +456,8 @@ def discover_external_modules() -> dict[str, FeatureModule]:
             value = loaded() if callable(loaded) else loaded
             module = _coerce_module(value, source=f"entry_point:{entry_point.name}")
             modules[module.id] = module
-        except Exception:
+        except (ImportError, SyntaxError, AttributeError, TypeError, ValueError) as exc:
+            logger.warning("Skipping videoedit module entry point %s: %s", entry_point.name, exc)
             continue
     return modules
 

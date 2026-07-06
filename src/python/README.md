@@ -26,8 +26,11 @@ videoedit modules list
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 
 # Pipeline preset
 videoedit init reel --output reel.yaml
@@ -42,7 +45,8 @@ videoedit run roughcut.yaml --input footage/ --output output/
 videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
 videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --sequence diversified --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl analysis/selections/*.json --output edl/
 
@@ -86,8 +90,11 @@ Calibration measures whether `videoedit rate` found the moments a human editor m
 ```bash
 videoedit rate footage/ --output analysis/
 videoedit calibrate init --output annotations.json
+videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
+videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
+videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit rate footage/ --output analysis_tuned/ --config calibration/proposed_config.json
 ```
 
@@ -157,8 +164,9 @@ videoedit approve analysis/ratings.json --output approved.json --actions select,
 # Manually approve specific IDs from candidates.csv/review.html
 videoedit approve analysis/ratings.json --output approved.json --ids clip_0001,clip_0004
 
-# Assemble the approved JSON into a rough cut
-videoedit assemble approved.json --output rough_cut.mp4
+# Plan and assemble the approved JSON into a rough cut
+videoedit roughcut plan approved.json --output roughcut_plan.json --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 ```
 
 ### Available Operations
@@ -177,6 +185,7 @@ videoedit assemble approved.json --output rough_cut.mp4
 | `generate_edl` | Create EDL/XML/M3U and FFmpeg extraction scripts |
 | `generate_review_assets` | Generate thumbnails and an HTML contact sheet |
 | `approve_candidates` | Create approved.json from rating candidates |
+| `plan_roughcut` | Plan clip order, target duration, handles, format, and render settings |
 | `assemble_rough_cut` | Assemble a rough cut from approved selections |
 | `format_video` | Apply an FFmpeg video filter |
 | `burn_captions` | Burn subtitles into video |
@@ -199,7 +208,8 @@ videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 videoedit review-assets analysis/ratings.json --output review/
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
-videoedit assemble approved.json --output rough_cut.mp4
+videoedit roughcut plan approved.json --output roughcut_plan.json --target-duration 90 --format reel --render-mode render
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl analysis/selections/*.json --output edl/
 
@@ -214,6 +224,13 @@ videoedit modules list
 videoedit modules doctor
 videoedit doctor
 videoedit doctor --json
+
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
 
 videoedit captions styles
 videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
@@ -313,6 +330,17 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 
 These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
 
+The direct signal CLI writes schema-versioned artifacts with provider metadata, source summaries, and validation diagnostics:
+
+```bash
+videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
+videoedit signals ocr footage/ --output analysis/ocr_signage.json
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+videoedit signals motorsports analysis/ratings.json --output analysis/motorsports_events.json
+videoedit signals topics analysis/ratings.json --output analysis/topic_clusters.json
+videoedit signals validate analysis/visual_objects.json
+```
+
 Use parsed signal artifacts as explicit rating inputs when people, vehicles, signage, racing events, or topics should affect B-roll selection. The `vision_reel` preset runs object/OCR/face providers first, then rates with the generated artifacts:
 
 ```yaml
@@ -348,6 +376,24 @@ python -m pip install -e "./src/python[whisper,advanced]"
 
 The `detect_highlights_audio` and `detect_highlights_transcript` operations also write per-source selection JSON directories, so a pipeline can feed `audio_step.selections` or `transcript_step.selections` directly into `generate_edl`.
 
+### Rough-Cut Planning
+
+Use a plan when approved clips need deterministic ordering, target duration, format intent, handles, or render settings before assembly:
+
+```bash
+videoedit roughcut plan approved.json --output roughcut_plan.json \
+  --sequence diversified \
+  --target-duration 90 \
+  --format reel \
+  --handles 0.5 \
+  --max-clips 12 \
+  --render-mode render
+
+videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
+```
+
+Supported sequencing modes are `review_order`, `score`, `source_order`, and `diversified`. The planner writes `roughcut_plan.json` and `roughcut_report.md`.
+
 ---
 
 ## Installation
@@ -363,6 +409,10 @@ python --version
 # Windows: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z
 # Linux: sudo apt install ffmpeg
 ```
+
+`videoedit` 0.5.0 supports Python 3.10+. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
+
+The base package has no mandatory Python runtime dependencies beyond the standard library. Optional provider dependencies stay in extras: `whisper`, `advanced`, `ui`, and `cloud`.
 
 ---
 

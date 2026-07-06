@@ -39,6 +39,7 @@ OPERATION_OUTPUTS = {
     "generate_edl": {"output", "files"},
     "generate_review_assets": {"manifest", "contact_sheet", "decisions", "clips", "thumbnails", "proxies", "warnings"},
     "approve_candidates": {"approved"},
+    "plan_roughcut": {"plan", "report", "clips", "duration"},
     "assemble_rough_cut": {"output"},
     "format_video": {"output"},
     "burn_captions": {"output"},
@@ -73,6 +74,7 @@ OPERATION_CONTEXT_OUTPUTS = {
     "calibrate_scoring": {"calibration_report", "proposed_config"},
     "generate_review_assets": {"review_assets", "review_decisions"},
     "approve_candidates": {"approved"},
+    "plan_roughcut": {"roughcut_plan"},
     "detect_ocr_signage": {"ocr_signage"},
     "detect_visual_objects": {"visual_objects"},
     "detect_face_person_presence": {"face_person_presence"},
@@ -350,6 +352,9 @@ def _planned_result(
         }
     if operation_name == "approve_candidates":
         return {"approved": output}
+    if operation_name == "plan_roughcut":
+        root, _ext = os.path.splitext(output)
+        return {"plan": output, "report": f"{root}_report.md", "clips": "unknown", "duration": "unknown"}
     if operation_name in {"generate_edl", "extract_segments"}:
         return {"output": output, "files": []}
     if operation_name == "transcribe_whisper":
@@ -426,6 +431,8 @@ def _planned_implicit_input(operation_name: str, params: dict[str, Any], context
         return context["ratings"]
     if operation_name in {"plan_content_series", "generate_content_map", "quote_mining"} and context.get("ratings"):
         return context["ratings"]
+    if operation_name == "plan_roughcut" and context.get("approved"):
+        return context["approved"]
     if operation_name == "assemble_rough_cut" and context.get("approved"):
         return context["approved"]
     return None
@@ -451,6 +458,8 @@ def _apply_planned_context(operation_name: str, result: dict[str, Any], context:
         context["review_decisions"] = result.get("decisions")
     elif operation_name == "approve_candidates":
         context["approved"] = result.get("approved")
+    elif operation_name == "plan_roughcut":
+        context["roughcut_plan"] = result.get("plan")
     elif operation_name == "detect_ocr_signage":
         context["ocr_signage"] = result.get("output")
     elif operation_name == "detect_visual_objects":

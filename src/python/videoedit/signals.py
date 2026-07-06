@@ -19,6 +19,8 @@ ARTIFACT_KEYS = {
     "topic_clusters",
 }
 
+SIGNAL_SCHEMA_VERSION = "videoedit.signal.v1"
+
 
 @dataclass
 class SignalArtifactBundle:
@@ -92,6 +94,44 @@ def signal_artifact_paths(config: Any) -> dict[str, str]:
     return values
 
 
+def validate_signal_artifact(path: str) -> dict[str, Any]:
+    path = os.fspath(path)
+    data = _read_optional_json(path)
+    errors = []
+    warnings = []
+    if not data:
+        return {"path": path, "status": "error", "errors": ["artifact is missing or not valid JSON"], "warnings": []}
+    kind = _artifact_kind(data, path)
+    if kind == "unknown":
+        errors.append("could not infer signal artifact kind")
+    schema_version = data.get("schema_version")
+    if schema_version and schema_version != SIGNAL_SCHEMA_VERSION:
+        warnings.append(f"unexpected schema_version: {schema_version}")
+    if not data.get("provider"):
+        warnings.append("provider is missing")
+    if kind == "visual_objects" and not isinstance(data.get("sources", []), list):
+        errors.append("visual_objects artifact requires sources list")
+    if kind in {"ocr_signage", "face_person"} and not isinstance(data.get("hits", []), list):
+        errors.append(f"{kind} artifact requires hits list")
+    if kind == "motorsports_events" and not isinstance(data.get("events", []), list):
+        errors.append("motorsports_events artifact requires events list")
+    if kind == "topic_clusters" and not isinstance(data.get("topics", []), list):
+        errors.append("topic_clusters artifact requires topics list")
+    if "source_summaries" in data and not isinstance(data["source_summaries"], list):
+        errors.append("source_summaries must be a list")
+    return {
+        "path": path,
+        "status": "error" if errors else "ok",
+        "kind": kind,
+        "schema_version": schema_version,
+        "provider": data.get("provider"),
+        "source_count": data.get("source_count", len(data.get("source_summaries", []))),
+        "count": data.get("count"),
+        "errors": errors,
+        "warnings": warnings + list(data.get("warnings", [])),
+    }
+
+
 def _load_visual_objects(path: str | None) -> dict[str, list[ObjectHit]]:
     data = _read_optional_json(path)
     if not data:
@@ -106,6 +146,30 @@ def _load_visual_objects(path: str | None) -> dict[str, list[ObjectHit]]:
         if hits:
             by_source.setdefault(os.fspath(source), []).extend(hits)
     return by_source
+
+
+def _artifact_kind(data: dict[str, Any], path: str) -> str:
+    explicit = _normalize_key(data.get("artifact_kind", ""))
+    if explicit in ARTIFACT_KEYS or explicit == "face_person_presence":
+        return "face_person" if explicit == "face_person_presence" else explicit
+    if "sources" in data:
+        return "visual_objects"
+    if "events" in data:
+        return "motorsports_events"
+    if "topics" in data:
+        return "topic_clusters"
+    provider = _normalize_key(data.get("provider", ""))
+    if provider in {"ocr_signage", "tesseract_ocr"}:
+        return "ocr_signage"
+    if provider in {"face_person_presence", "opencv_face_person"}:
+        return "face_person"
+    filename = _normalize_key(os.path.basename(path))
+    for key in ARTIFACT_KEYS:
+        if key in filename:
+            return key
+    if "face_person" in filename:
+        return "face_person"
+    return "unknown"
 
 
 def _load_advanced_artifact(kind: str, path: str | None) -> dict[str, list[dict[str, Any]]]:
