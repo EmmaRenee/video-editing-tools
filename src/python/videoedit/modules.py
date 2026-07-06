@@ -107,6 +107,11 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
         description="Optional OCR, object, face, and person detection providers",
         category="advanced",
     ),
+    "advanced.ai": FeatureModule(
+        id="advanced.ai",
+        description="Optional AI profiles, frame scoring, and missed-moment discovery",
+        category="advanced",
+    ),
     "advanced.motorsports": FeatureModule(
         id="advanced.motorsports",
         description="Motorsports event inference from rated footage",
@@ -143,9 +148,12 @@ OPERATION_MODULES = {
     "concatenate_videos": "delivery.captions",
     "detect_ocr_signage": "advanced.vision",
     "detect_visual_objects": "advanced.vision",
+    "score_ai_frames": "advanced.ai",
     "detect_face_person_presence": "advanced.vision",
     "detect_motorsports_events": "advanced.motorsports",
     "cluster_transcript_topics": "content.reports",
+    "find_ai_missed_moments": "advanced.ai",
+    "generate_missed_review": "advanced.ai",
     "plan_content_series": "content.series",
     "generate_content_map": "content.reports",
     "quote_mining": "content.reports",
@@ -503,6 +511,15 @@ def _module_dependency_check(module_id: str) -> dict[str, Any]:
                 _command_status("tesseract"),
                 _command_status("yolo"),
                 _python_module_status("cv2"),
+            ],
+        }
+    if module_id == "advanced.ai":
+        return {
+            "module": module_id,
+            "checks": [
+                _python_module_status("open_clip"),
+                _python_module_status("torch"),
+                _python_module_status("PIL"),
             ],
         }
     if module_id == "core.rating":

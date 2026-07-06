@@ -13,6 +13,15 @@ PYTHON_SRC = os.path.join(ROOT, "src", "python")
 sys.path.insert(0, PYTHON_SRC)
 
 from videoedit.config import AnalysisConfig
+from videoedit.ai import (
+    find_missed_moments,
+    generate_missed_review,
+    get_ai_profile,
+    list_ai_profiles,
+    score_frames,
+    show_ai_profile,
+)
+import videoedit.ai as ai_module
 import videoedit.inventory as inventory_module
 from videoedit.advanced import (
     cluster_transcript_topics,
@@ -235,6 +244,280 @@ class ScoringTests(unittest.TestCase):
             bundle = load_signal_artifacts(config)
             self.assertEqual(len(bundle.objects_for(os.path.join(tmp, "other", "source.mp4"))), 1)
             self.assertEqual(bundle.advanced_for(os.path.join(tmp, "other", "source.mp4"))[0]["kind"], "ocr_signage")
+
+    def test_ai_frame_hits_seed_labels_and_scores(self):
+        config = AnalysisConfig(max_candidates=10)
+        asset = MediaAsset(
+            filename="shop.mp4",
+            filepath="/tmp/shop.mp4",
+            duration=30,
+            width=1920,
+            height=1080,
+            codec="h264",
+            fps=30,
+            has_audio=False,
+        )
+        report = SignalReport(
+            asset=asset,
+            scores={"technical_score": 17},
+            advanced_hits=[
+                {
+                    "kind": "ai_frame_score",
+                    "start": 8,
+                    "end": 9,
+                    "top_score": 0.86,
+                    "top_label": "ai_garage_work",
+                    "labels": ["ai_garage_work", "ai_broll_candidate"],
+                    "explanation": "AI frame match",
+                }
+            ],
+        )
+        candidates = generate_candidates([report], config)
+        self.assertEqual(len(candidates), 1)
+        self.assertIn("ai_garage_work", candidates[0].labels)
+        self.assertIn("ai_broll_candidate", candidates[0].labels)
+        self.assertGreater(candidates[0].signals["ai_frame_score"], 0)
+
+
+class AITests(unittest.TestCase):
+    def test_profiles_are_project_agnostic_and_distinct(self):
+        profile_ids = {profile["id"] for profile in list_ai_profiles()}
+        self.assertTrue(
+            {
+                "general_broll",
+                "garage_shop",
+                "motorsports",
+                "interview",
+                "event_recap",
+                "social_reel",
+                "documentary",
+            }.issubset(profile_ids)
+        )
+        garage_prompts = {prompt["text"] for prompt in show_ai_profile("garage_shop")["prompts"]}
+        interview_prompts = {prompt["text"] for prompt in show_ai_profile("interview")["prompts"]}
+        self.assertNotEqual(garage_prompts, interview_prompts)
+        serialized = json.dumps(show_ai_profile("garage_shop")).lower()
+        self.assertNotIn("drive auto sports", serialized)
+        self.assertNotIn("garage 19", serialized)
+
+    def test_unknown_profile_has_clear_error(self):
+        with self.assertRaisesRegex(KeyError, "unknown AI profile"):
+            get_ai_profile("not_real")
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            exit_code = main(["ai", "profiles", "show", "not_real"])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("unknown AI profile", stderr.getvalue())
+
+    def test_score_frames_with_mock_encoder_and_cache(self):
+        class FakeEncoder:
+            provider_name = "fake_openclip"
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.calls = 0
+
+            def score_images(self, image_paths, prompts):
+                self.calls += 1
+                return [[0.8 if index == 0 else 0.05 for index, _prompt in enumerate(prompts)] for _ in image_paths]
+
+        def fake_probe(path, timeout=60):
+            return MediaAsset(filename=os.path.basename(path), filepath=path, duration=22.0)
+
+        def fake_sampler(source, timestamp, output, timeout=180):
+            with open(output, "w", encoding="utf-8") as handle:
+                handle.write(f"{source} {timestamp}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "shop.mp4")
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write("video")
+            output = os.path.join(tmp, "ai_frame_scores.json")
+            encoder = FakeEncoder()
+            result = score_frames(
+                source,
+                output,
+                profile_id="garage_shop",
+                sample_interval=10,
+                max_frames_per_file=2,
+                encoder=encoder,
+                frame_sampler=fake_sampler,
+                media_probe=fake_probe,
+            )
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(encoder.calls, 1)
+            data = _read_json(output)
+            self.assertEqual(data["schema_version"], "videoedit.ai_frame_scores.v1")
+            self.assertEqual(data["profile"]["id"], "garage_shop")
+            self.assertEqual(len(data["sources"][0]["frames"]), 2)
+            frame = data["sources"][0]["frames"][0]
+            self.assertIn("prompt_scores", frame)
+            self.assertIn("labels", frame)
+            self.assertIn("explanation", frame)
+
+            cached_encoder = FakeEncoder()
+            cached = score_frames(
+                source,
+                output,
+                profile_id="garage_shop",
+                sample_interval=10,
+                max_frames_per_file=2,
+                encoder=cached_encoder,
+                frame_sampler=fake_sampler,
+                media_probe=fake_probe,
+            )
+            self.assertEqual(cached["frames"], 2)
+            self.assertEqual(cached_encoder.calls, 0)
+
+    def test_score_frames_missing_dependencies_writes_unavailable_artifact(self):
+        original = ai_module.OpenCLIPEncoder
+
+        class FailingEncoder:
+            def __init__(self, model, pretrained):
+                raise ImportError("Install with: python -m pip install -e './src/python[ai]'")
+
+        ai_module.OpenCLIPEncoder = FailingEncoder
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                source = os.path.join(tmp, "source.mp4")
+                with open(source, "w", encoding="utf-8") as handle:
+                    handle.write("video")
+                output = os.path.join(tmp, "scores.json")
+                result = score_frames(source, output, profile_id="general_broll")
+                self.assertEqual(result["status"], "unavailable")
+                data = _read_json(output)
+                self.assertIn("Install with", data["error"])
+        finally:
+            ai_module.OpenCLIPEncoder = original
+
+    def test_ai_signal_artifact_loader_matches_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = os.path.join(tmp, "ai_frame_scores.json")
+            with open(artifact, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.ai_frame_scores.v1",
+                            "artifact_kind": "ai_frame_scores",
+                            "provider": "fake_openclip",
+                            "profile": {"id": "garage_shop"},
+                            "sources": [
+                                {
+                                    "source": "clips/shop.mp4",
+                                    "frames": [
+                                        {
+                                            "time_seconds": 5,
+                                            "time": "00:00:05",
+                                            "top_score": 0.9,
+                                            "top_label": "ai_garage_work",
+                                            "labels": ["ai_garage_work"],
+                                            "prompt_scores": [{"id": "hands_tools", "label": "ai_garage_work", "score": 0.9}],
+                                            "explanation": "mock",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    )
+                )
+            config = AnalysisConfig(ai_frame_scores_path=artifact)
+            bundle = load_signal_artifacts(config)
+            hits = bundle.advanced_for(os.path.join(tmp, "other", "shop.mp4"))
+            self.assertEqual(hits[0]["kind"], "ai_frame_score")
+            self.assertEqual(hits[0]["labels"], ["ai_garage_work"])
+
+    def test_find_missed_moments_merges_adjacent_low_ranked_windows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "shop.mp4")
+            ratings = os.path.join(tmp, "ratings.json")
+            scores = os.path.join(tmp, "ai_frame_scores.json")
+            output = os.path.join(tmp, "ai_missed_moments.json")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "root": tmp,
+                            "candidates": [
+                                {"id": "clip_0001", "source": source, "start": "00:00:10", "end": "00:00:20", "score": 90, "action": "select"},
+                                {"id": "clip_0002", "source": source, "start": "00:00:30", "end": "00:00:35", "score": 30, "action": "cut"},
+                            ],
+                        }
+                    )
+                )
+            with open(scores, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.ai_frame_scores.v1",
+                            "artifact_kind": "ai_frame_scores",
+                            "profile": {"id": "garage_shop"},
+                            "sources": [
+                                {
+                                    "source": source,
+                                    "frames": [
+                                        {"time_seconds": 12, "top_score": 0.99, "labels": ["ai_garage_work"], "prompt_scores": []},
+                                        {"time_seconds": 31, "top_score": 0.91, "labels": ["ai_garage_work"], "prompt_scores": [{"id": "hands", "label": "ai_garage_work", "score": 0.91}]},
+                                        {"time_seconds": 33, "top_score": 0.88, "labels": ["ai_broll_candidate"], "prompt_scores": [{"id": "detail", "label": "ai_broll_candidate", "score": 0.88}]},
+                                        {"time_seconds": 60, "top_score": 0.1, "labels": ["ai_garage_work"], "prompt_scores": []},
+                                    ],
+                                }
+                            ],
+                        }
+                    )
+                )
+            result = find_missed_moments(ratings, scores, output, min_score=0.35, merge_gap=5)
+            self.assertEqual(result["count"], 1)
+            data = _read_json(output)
+            moment = data["moments"][0]
+            self.assertEqual(moment["id"], "missed_0001")
+            self.assertIn("ai_garage_work", moment["labels"])
+            self.assertIn("ai_broll_candidate", moment["labels"])
+            self.assertEqual(moment["existing_candidate"]["id"], "clip_0002")
+
+    def test_missed_review_decisions_are_annotation_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            missed = os.path.join(tmp, "ai_missed_moments.json")
+            review_dir = os.path.join(tmp, "review")
+            annotations = os.path.join(tmp, "annotations.json")
+            source = os.path.join(tmp, "shop.mp4")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"root": tmp, "candidates": []}))
+            with open(missed, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.ai_missed_moments.v1",
+                            "ratings": ratings,
+                            "ai_frame_scores": os.path.join(tmp, "scores.json"),
+                            "moments": [
+                                {
+                                    "id": "missed_0001",
+                                    "source": source,
+                                    "start": "00:00:30",
+                                    "end": "00:00:40",
+                                    "start_seconds": 30,
+                                    "end_seconds": 40,
+                                    "confidence": 0.8,
+                                    "labels": ["ai_garage_work"],
+                                    "prompt_matches": [],
+                                    "reason": "AI frame match",
+                                }
+                            ],
+                        }
+                    )
+            )
+            result = generate_missed_review(missed, review_dir)
+            with open(result["html"], encoding="utf-8") as handle:
+                html = handle.read()
+            self.assertIn("Missed Moment Review", html)
+            self.assertIn('value="ignore"', html)
+            self.assertIn("preserveScroll", html)
+            self.assertIn("applyBulkDecision", html)
+            converted = annotations_from_review_decisions(ratings, result["decisions"], annotations)
+            self.assertEqual(converted["clips"], 1)
+            data = _read_json(annotations)
+            self.assertEqual(data["clips"][0]["rating"], "review")
 
 
 class PipelineTests(unittest.TestCase):

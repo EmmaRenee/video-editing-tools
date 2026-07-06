@@ -16,6 +16,7 @@ from .advanced import (
     detect_ocr_signage,
     detect_visual_objects,
 )
+from .ai import find_missed_moments, generate_missed_review, score_frames
 from .calibration import evaluate_ratings, tune_scoring
 from .captions import burn_captions
 from .config import AnalysisConfig
@@ -43,6 +44,8 @@ SIGNAL_ARTIFACT_ALIASES = {
     "face_person_presence": "face_person",
     "motorsports_events": "motorsports_events",
     "topic_clusters": "topic_clusters",
+    "ai_frame_scores": "ai_frame_scores",
+    "ai_frame_scores_path": "ai_frame_scores",
 }
 
 
@@ -104,9 +107,12 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "concatenate_videos", "Concatenate extracted clips with FFmpeg", op_concatenate_videos)
     _register(registry, enabled_only, cwd, "detect_ocr_signage", "Optionally detect OCR/signage text from sampled frames", op_detect_ocr)
     _register(registry, enabled_only, cwd, "detect_visual_objects", "Optionally run an external object detector", op_detect_objects)
+    _register(registry, enabled_only, cwd, "score_ai_frames", "Score sampled frames against AI profile prompts", op_score_ai_frames)
     _register(registry, enabled_only, cwd, "detect_face_person_presence", "Optionally detect face/person presence from sampled frames", op_face_person)
     _register(registry, enabled_only, cwd, "detect_motorsports_events", "Infer motorsports event moments from ratings", op_motorsports_events)
     _register(registry, enabled_only, cwd, "cluster_transcript_topics", "Cluster transcript hits into editing topics", op_transcript_topics)
+    _register(registry, enabled_only, cwd, "find_ai_missed_moments", "Find AI-scored missed moment candidates", op_find_ai_missed_moments)
+    _register(registry, enabled_only, cwd, "generate_missed_review", "Generate review HTML for AI missed moments", op_generate_missed_review)
     _register(registry, enabled_only, cwd, "plan_content_series", "Plan reusable content-series clips from ratings", op_plan_content_series)
     _register(registry, enabled_only, cwd, "generate_content_map", "Generate a ranked editorial content map", op_generate_content_map)
     _register(registry, enabled_only, cwd, "quote_mining", "Generate transcript-forward quote-mining report", op_quote_mining)
@@ -178,6 +184,8 @@ def _merge_signal_artifact_aliases(config_data: dict[str, Any]) -> None:
         config_data["signal_artifacts"] = artifacts
         if artifacts.get("visual_objects"):
             config_data["visual_objects_path"] = artifacts["visual_objects"]
+        if artifacts.get("ai_frame_scores"):
+            config_data["ai_frame_scores_path"] = artifacts["ai_frame_scores"]
 
 
 def op_filter_candidates(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -462,6 +470,25 @@ def op_detect_objects(context: dict[str, Any], params: dict[str, Any]) -> dict[s
     return result
 
 
+def op_score_ai_frames(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    input_path = os.fspath(params.get("input") or context["input"])
+    output = _json_output(params.get("output") or context["output"], "ai_frame_scores.json")
+    result = score_frames(
+        input_path,
+        output,
+        profile_id=params.get("profile", "general_broll"),
+        sample_interval=float(params.get("sample_interval", 10.0)),
+        max_frames_per_file=int(params.get("max_frames_per_file", 8)),
+        min_score=float(params.get("min_score", 0.22)),
+        cache=bool(params.get("cache", True)),
+        model=params.get("model", "ViT-B-32"),
+        pretrained=params.get("pretrained", "laion2b_s34b_b79k"),
+        timeout=int(params.get("timeout", 180)),
+    )
+    context["ai_frame_scores"] = output
+    return result
+
+
 def op_face_person(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     input_path = os.fspath(params.get("input") or context["input"])
     output = _json_output(params.get("output") or context["output"], "face_person_presence.json")
@@ -493,6 +520,34 @@ def op_transcript_topics(context: dict[str, Any], params: dict[str, Any]) -> dic
     output = _json_output(params.get("output") or context["output"], "topic_clusters.json")
     result = cluster_transcript_topics(ratings_path, output)
     context["topic_clusters"] = output
+    return result
+
+
+def op_find_ai_missed_moments(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    ratings_path = os.fspath(params.get("input") or params.get("ratings") or context.get("ratings", "ratings.json"))
+    ai_scores_value = params.get("ai_frame_scores") or context.get("ai_frame_scores")
+    if not ai_scores_value:
+        raise ValueError("find_ai_missed_moments requires ai_frame_scores artifact")
+    ai_scores = os.fspath(ai_scores_value)
+    output = _json_output(params.get("output") or context["output"], "ai_missed_moments.json")
+    result = find_missed_moments(
+        ratings_path,
+        ai_scores,
+        output,
+        min_score=float(params.get("min_score", 0.35)),
+        window_pre_roll=float(params.get("window_pre_roll", 2.0)),
+        window_post_roll=float(params.get("window_post_roll", 4.0)),
+        merge_gap=float(params.get("merge_gap", 5.0)),
+    )
+    context["ai_missed_moments"] = output
+    return result
+
+
+def op_generate_missed_review(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    missed_path = os.fspath(params.get("input") or params.get("missed_moments") or context.get("ai_missed_moments"))
+    output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "missed_review"))
+    result = generate_missed_review(missed_path, output_dir)
+    context["missed_review_decisions"] = result["decisions"]
     return result
 
 

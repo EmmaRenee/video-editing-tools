@@ -66,6 +66,7 @@ Raw footage (hours)
   → videoedit modules/doctor (confirm enabled feature surface)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
   → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
+  → optional videoedit ai score-frames + rate --ai-frame-scores for profile-based AI scoring
   → ratings.json + candidates.csv + review assets
   → videoedit calibrate from-decisions/evaluate/tune/compare/apply when human feedback exists
   → content-map / quote-mining / series planning when editorial direction is needed
@@ -91,7 +92,7 @@ videoedit modules list
 videoedit modules doctor
 ```
 
-Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, and YOLO are optional providers.
+Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, OpenCLIP, and Torch are optional providers.
 
 ### 1a. Check or configure feature modules
 
@@ -119,6 +120,7 @@ Available built-in modules:
 | `content.reports` | Content maps and quote mining |
 | `project.scaffold` | Project folder scaffolding |
 | `advanced.vision` | OCR, object, face/person providers |
+| `advanced.ai` | AI profiles, OpenCLIP frame scoring, missed-moment discovery |
 | `advanced.motorsports` | Motorsports event/topic artifacts |
 | `cloud.adapters` | Future maintained cloud adapters |
 
@@ -158,12 +160,38 @@ videoedit rate footage/ --output analysis_fused/ \
   --ocr-signage analysis/ocr_signage.json \
   --face-person analysis/face_person_presence.json \
   --motorsports-events analysis/motorsports_events.json \
-  --topic-clusters analysis/topic_clusters.json
+  --topic-clusters analysis/topic_clusters.json \
+  --ai-frame-scores analysis/ai_frame_scores.json
 ```
 
-Fused ratings add labels and scores such as `object_*`, `ocr_signage`, `face_presence`, `person_presence`, `motorsports_event`, `topic_cluster`, `object_presence_score`, and provider-specific advanced scores.
+Fused ratings add labels and scores such as `object_*`, `ocr_signage`, `face_presence`, `person_presence`, `motorsports_event`, `topic_cluster`, `ai_garage_work`, `ai_vehicle_action`, `ai_interview_moment`, `object_presence_score`, `ai_frame_score`, and provider-specific advanced scores.
 
-### 2b. Calibrate scoring with human annotations
+### 2b. Optional AI profile scoring and missed moments
+
+Use this when deterministic signals need help finding visual context, garage work, motorsports action, interviews, event recap moments, social reel openers, or documentary context. It is explicit: base ratings do not change unless `--ai-frame-scores` is supplied.
+
+```bash
+videoedit ai profiles list
+videoedit ai profiles show garage_shop
+videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
+
+videoedit rate footage/ --output analysis_ai/ \
+  --ai-frame-scores analysis/ai_frame_scores.json
+
+videoedit ai find-missed analysis/ratings.json \
+  --ai-frame-scores analysis/ai_frame_scores.json \
+  --output analysis/ai_missed_moments.json
+videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
+videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
+  --ratings analysis/ratings.json \
+  --output annotations_from_missed.json
+```
+
+Built-in AI profiles: `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`.
+
+AI missed moments are review-only. Never insert them into `approved.json` or a rough cut automatically; route them through `missed_review.html`, decisions, and calibration annotations first.
+
+### 2c. Calibrate scoring with human annotations
 
 Use calibration when the user has reviewed footage or wants to tune the scorer before rough cuts:
 
@@ -277,9 +305,12 @@ quote_mining
 scaffold_project
 detect_ocr_signage
 detect_visual_objects
+score_ai_frames
 detect_face_person_presence
 detect_motorsports_events
 cluster_transcript_topics
+find_ai_missed_moments
+generate_missed_review
 ```
 
 Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants.
@@ -301,6 +332,9 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `calibration_report.json`, `calibration_report.md` | Scoring precision/recall against annotations |
 | `missed_moments.csv`, `false_positives.csv` | Calibration review queues |
 | `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
+| `ai_frame_scores.json` | Optional OpenCLIP/profile frame-score artifact |
+| `ai_missed_moments.json` | Optional review-only AI-discovered missed moments |
+| `missed_review.html`, `missed_review_decisions.json` | Review and annotation-compatible decisions for missed moments |
 
 Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
 

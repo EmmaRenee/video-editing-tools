@@ -296,7 +296,7 @@ def _seed_windows(report: SignalReport, config: AnalysisConfig) -> list[dict[str
         if hit.get("source_wide"):
             continue
         kind = str(hit.get("kind") or "")
-        if kind not in {"motorsports_event", "topic_cluster"}:
+        if kind not in {"motorsports_event", "topic_cluster", "ai_frame_score"}:
             continue
         start = max(0.0, float(hit.get("start", 0.0)) - config.window_pre_roll)
         end = float(hit.get("end", start)) + config.window_post_roll
@@ -515,9 +515,11 @@ def _advanced_signal_scores(hits: list[dict[str, Any]], config: AnalysisConfig) 
     face = [hit for hit in hits if hit.get("kind") == "face_person"]
     motorsports = [hit for hit in hits if hit.get("kind") == "motorsports_event"]
     topics = [hit for hit in hits if hit.get("kind") == "topic_cluster"]
+    ai_frames = [hit for hit in hits if hit.get("kind") == "ai_frame_score"]
     face_count = sum(int(hit.get("face_count", 0) or 0) for hit in face)
     person_count = sum(int(hit.get("person_count", 0) or 0) for hit in face)
     motorsports_confidence = sum(float(hit.get("confidence") or 0.0) for hit in motorsports)
+    ai_confidence = sum(float(hit.get("top_score") or 0.0) for hit in ai_frames)
     return {
         "ocr_signage_score": min(float(config.weights.get("ocr", 8)), len(ocr) * 4.0),
         "face_person_score": min(float(config.weights.get("face_person", 6)), face_count * 1.5 + person_count * 0.75),
@@ -526,6 +528,7 @@ def _advanced_signal_scores(hits: list[dict[str, Any]], config: AnalysisConfig) 
             len(motorsports) * 5.0 + motorsports_confidence * 4.0,
         ),
         "topic_cluster_score": min(float(config.weights.get("topics", 10)), len(topics) * 5.0),
+        "ai_frame_score": min(float(config.weights.get("ai", 10)), len(ai_frames) * 2.0 + ai_confidence * 6.0),
     }
 
 
@@ -535,6 +538,7 @@ def _advanced_signal_counts(hits: list[dict[str, Any]]) -> dict[str, int]:
         "face_person_hits": sum(1 for hit in hits if hit.get("kind") == "face_person"),
         "motorsports_events": sum(1 for hit in hits if hit.get("kind") == "motorsports_event"),
         "topic_hits": sum(1 for hit in hits if hit.get("kind") == "topic_cluster"),
+        "ai_frame_scores": sum(1 for hit in hits if hit.get("kind") == "ai_frame_score"),
     }
 
 
@@ -550,6 +554,8 @@ def _advanced_labels(hit: dict[str, Any]) -> set[str]:
         labels.add(f"motorsports_{_slug(str(hit['event_type']))}")
     elif kind == "topic_cluster" and hit.get("topic"):
         labels.add(f"topic_{_slug(str(hit['topic']))}")
+    elif kind == "ai_frame_score":
+        labels.update(str(label) for label in hit.get("labels", []) if label)
     return labels
 
 
@@ -563,6 +569,9 @@ def _advanced_label(hit: dict[str, Any]) -> str:
         return "motorsports_event"
     if kind == "topic_cluster":
         return "topic_cluster"
+    if kind == "ai_frame_score":
+        label = hit.get("top_label")
+        return str(label) if label else "ai_frame_score"
     return _slug(kind)
 
 
@@ -580,6 +589,10 @@ def _advanced_reasons(hits: list[dict[str, Any]]) -> list[str]:
     topics = sorted({str(hit.get("topic")) for hit in hits if hit.get("kind") == "topic_cluster" and hit.get("topic")})
     if topics:
         reasons.append(f"transcript topics: {', '.join(topics[:6])}")
+    ai_hits = [hit for hit in hits if hit.get("kind") == "ai_frame_score"]
+    if ai_hits:
+        labels = sorted({str(label) for hit in ai_hits for label in hit.get("labels", []) if label})
+        reasons.append(f"AI frame matches: {', '.join(labels[:6])}")
     return reasons
 
 

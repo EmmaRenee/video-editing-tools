@@ -25,6 +25,7 @@ class AnalysisConfig:
     transcript_mode: str = "auto"
     transcript_dir: str | None = None
     visual_objects_path: str | None = None
+    ai_frame_scores_path: str | None = None
     signal_artifacts: dict[str, str] = field(default_factory=dict)
     object_window_pre_roll: float = 1.0
     object_window_post_roll: float = 2.0
@@ -74,6 +75,7 @@ class AnalysisConfig:
             "face_person": 6,
             "motorsports": 12,
             "topics": 10,
+            "ai": 10,
         }
     )
 
