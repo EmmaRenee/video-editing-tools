@@ -309,6 +309,10 @@ class AITests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("unknown AI profile", stderr.getvalue())
 
+    def test_generate_missed_review_operation_requires_input(self):
+        with self.assertRaisesRegex(ValueError, "requires ai_missed_moments"):
+            operations_module.op_generate_missed_review({"output": "/tmp/out"}, {})
+
     def test_score_frames_with_mock_encoder_and_cache(self):
         class FakeEncoder:
             provider_name = "fake_openclip"
@@ -368,6 +372,43 @@ class AITests(unittest.TestCase):
             )
             self.assertEqual(cached["frames"], 2)
             self.assertEqual(cached_encoder.calls, 0)
+
+    def test_score_frames_uses_unique_names_for_matching_basenames(self):
+        class FakeEncoder:
+            provider_name = "fake_openclip"
+            model_name = "fake-model"
+
+            def score_images(self, image_paths, prompts):
+                return [[0.8 if index == 0 else 0.05 for index, _prompt in enumerate(prompts)] for _ in image_paths]
+
+        def fake_probe(path, timeout=60):
+            return MediaAsset(filename=os.path.basename(path), filepath=path, duration=10.0)
+
+        def fake_sampler(source, timestamp, output, timeout=180):
+            with open(output, "w", encoding="utf-8") as handle:
+                handle.write(f"{source} {timestamp}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for folder in ("camera_a", "camera_b"):
+                os.makedirs(os.path.join(tmp, folder), exist_ok=True)
+                with open(os.path.join(tmp, folder, "clip.mp4"), "w", encoding="utf-8") as handle:
+                    handle.write("video")
+            output = os.path.join(tmp, "ai_frame_scores.json")
+            score_frames(
+                tmp,
+                output,
+                profile_id="general_broll",
+                sample_interval=10,
+                max_frames_per_file=1,
+                encoder=FakeEncoder(),
+                frame_sampler=fake_sampler,
+                media_probe=fake_probe,
+            )
+            data = _read_json(output)
+            frames = [source["frames"][0]["frame"] for source in data["sources"]]
+            self.assertEqual(len(frames), 2)
+            self.assertEqual(len(set(frames)), 2)
+            self.assertTrue(all(os.path.basename(frame).startswith("clip_") for frame in frames))
 
     def test_score_frames_missing_dependencies_writes_unavailable_artifact(self):
         original = ai_module.OpenCLIPEncoder

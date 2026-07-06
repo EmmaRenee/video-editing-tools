@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import html
 import json
 import os
@@ -235,7 +236,8 @@ def score_frames(
         timestamps = sample_timestamps(duration, sample_interval, max_frames_per_file)
         frame_paths = []
         frame_rows = []
-        source_stem = _safe_slug(os.path.splitext(os.path.basename(source))[0])
+        source_hash = hashlib.sha1(os.fspath(source).encode("utf-8")).hexdigest()[:8]
+        source_stem = f"{_safe_slug(os.path.splitext(os.path.basename(source))[0])}_{source_hash}"
         for timestamp in timestamps:
             frame_name = f"{source_stem}_{int(round(timestamp * 1000)):010d}.jpg"
             frame_path = os.path.join(frames_dir, frame_name)

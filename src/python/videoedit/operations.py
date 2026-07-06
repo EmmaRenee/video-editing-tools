@@ -544,7 +544,10 @@ def op_find_ai_missed_moments(context: dict[str, Any], params: dict[str, Any]) -
 
 
 def op_generate_missed_review(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    missed_path = os.fspath(params.get("input") or params.get("missed_moments") or context.get("ai_missed_moments"))
+    missed_value = params.get("input") or params.get("missed_moments") or context.get("ai_missed_moments")
+    if not missed_value:
+        raise ValueError("generate_missed_review requires ai_missed_moments artifact")
+    missed_path = os.fspath(missed_value)
     output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "missed_review"))
     result = generate_missed_review(missed_path, output_dir)
     context["missed_review_decisions"] = result["decisions"]
