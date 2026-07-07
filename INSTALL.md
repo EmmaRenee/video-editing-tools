@@ -14,6 +14,7 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | YOLO / Ultralytics | Optional | Visual object detection through `detect_visual_objects` |
 | OpenCV | Optional | Face/person presence detection |
 | OpenCLIP + Torch | Optional | AI profile frame scoring and missed-moment discovery |
+| Local VLM judge command | Optional | Heavier review-clip judging through `videoedit ai judge` |
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
@@ -174,6 +175,17 @@ videoedit ai review-missed analysis/ai_missed_moments.json --output review_misse
 ```
 
 AI frame scoring is optional. Missing OpenCLIP/Torch dependencies write an unavailable artifact with install guidance; core inventory, rating, review, and rough-cut commands still work.
+
+Optional AI clip judging runs after `review-assets` and requires a configured local provider command. The provider command must read request JSON on stdin and write judgment JSON on stdout.
+
+```bash
+export VIDEOEDIT_AI_JUDGE_COMMAND="/path/to/local-vlm-judge"
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
+```
+
+If no provider is configured, `videoedit ai judge` writes an unavailable `ai_clip_judgments.json` artifact with setup guidance and returns a non-zero CLI status.
 
 Calibrate scoring after marking human-approved moments:
 

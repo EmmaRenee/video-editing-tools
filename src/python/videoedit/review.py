@@ -8,6 +8,7 @@ import json
 import os
 import re
 
+from .ai import load_clip_judgment_explanations
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
 from .roughcut import clips_from_plan
@@ -105,6 +106,7 @@ def generate_review_assets(
     proxies: bool = False,
     thumbnail_width: int = 360,
     calibration_json: str | None = None,
+    ai_clip_judgments_json: str | None = None,
 ) -> dict:
     ratings_json = os.fspath(ratings_json)
     output_dir = os.fspath(output_dir)
@@ -112,6 +114,7 @@ def generate_review_assets(
     signal_context = _signal_context(data)
     source_context = _source_context(data)
     calibration_context = _calibration_context(calibration_json)
+    ai_judgments = load_clip_judgment_explanations(ai_clip_judgments_json)
     os.makedirs(output_dir, exist_ok=True)
     thumbs_dir = os.path.join(output_dir, "thumbnails")
     proxies_dir = os.path.join(output_dir, "proxies")
@@ -122,7 +125,7 @@ def generate_review_assets(
     warnings: list[str] = []
     rows: list[dict] = []
     for clip in data.get("candidates", [])[: max(0, max_items)]:
-        row = _review_row(clip, signal_context, source_context, calibration_context["by_candidate"])
+        row = _review_row(clip, signal_context, source_context, calibration_context["by_candidate"], ai_judgments)
         source = row.get("source")
         if not source or not os.path.exists(source):
             warnings.append(f"missing source for {row['id']}: {source}")
@@ -194,6 +197,7 @@ def generate_review_assets(
             "summary": calibration_context.get("summary", {}),
             "missed_moments": calibration_context.get("missed_moments", []),
         },
+        "ai_clip_judgments": os.fspath(ai_clip_judgments_json) if ai_clip_judgments_json else None,
         "count": len(rows),
         "clips": rows,
         "warnings": warnings,
@@ -247,6 +251,7 @@ def _review_row(
     signal_context: dict[str, dict],
     source_context: dict[str, dict],
     calibration_by_candidate: dict[str, dict],
+    ai_judgments: dict[str, list[dict]],
 ) -> dict:
     start_seconds = _clip_seconds(clip, "start", "start_seconds")
     end_seconds = _clip_seconds(clip, "end", "end_seconds")
@@ -254,7 +259,7 @@ def _review_row(
     signal = signal_context.get(source or "", {})
     source_meta = source_context.get(source or "", {})
     clip_id = clip.get("id") or clip.get("label") or "clip"
-    return {
+    row = {
         "id": clip_id,
         "source": source,
         "source_name": os.path.basename(source or ""),
@@ -276,6 +281,11 @@ def _review_row(
         "thumbnail": None,
         "proxy": None,
     }
+    explanations = [dict(item) for item in clip.get("ai_explanations", []) if isinstance(item, dict)]
+    explanations.extend(ai_judgments.get(clip_id, []))
+    if explanations:
+        row["ai_explanations"] = explanations
+    return row
 
 
 def _signal_context(data: dict) -> dict[str, dict]:
@@ -459,6 +469,12 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
         calibration_status = calibration.get("status", "unreviewed")
         object_items = _object_summary_items(clip.get("object_hits", []))
         advanced_items = _advanced_summary_items(clip.get("advanced_hits", []))
+        ai_items = _ai_explanation_items(clip.get("ai_explanations", []))
+        ai_reasons = (
+            f'<p class="ai-reasons"><strong>AI reasons</strong>: {html.escape(ai_items)}</p>'
+            if ai_items
+            else ""
+        )
         source_meta = clip.get("source_metadata", {})
         thumbnail = clip.get("thumbnail")
         image = (
@@ -490,7 +506,8 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
             f'<p class="source">{html.escape(clip["source_name"])}<br>{clip["start"]} - {clip["end"]}</p>'
             f'<p class="meta-line">{html.escape(_source_meta_line(source_meta))}</p>'
             f'<p class="labels">{html.escape(labels_text)}</p>'
-            f'<p class="reasons">{html.escape("; ".join(clip.get("reasons", [])))}</p>'
+            f'<p class="reasons"><strong>Deterministic reasons</strong>: {html.escape("; ".join(clip.get("reasons", [])))}</p>'
+            f"{ai_reasons}"
             f'<p class="signals">{html.escape(signal_items)}</p>'
             f'<p class="objects">{html.escape(object_items)}</p>'
             f'<p class="advanced">{html.escape(advanced_items)}</p>'
@@ -548,7 +565,8 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
     p {{ font-size: 12px; line-height: 1.35; margin: 6px 0; }}
     .source {{ color: #52606d; }}
     .labels {{ color: #334e68; font-weight: 600; }}
-    .reasons, .signals, .objects, .advanced, .meta-line {{ color: #334e68; }}
+    .reasons, .ai-reasons, .signals, .objects, .advanced, .meta-line {{ color: #334e68; }}
+    .ai-reasons {{ border-left: 3px solid #805ad5; padding-left: 8px; }}
     .calibration {{ font-weight: 600; }}
     .calibration-matched {{ color: #276749; }}
     .calibration-false_positive {{ color: #9b2c2c; }}
@@ -946,6 +964,27 @@ def _advanced_summary_items(hits: list[dict]) -> str:
     if ai_labels:
         text = f"{text}; AI labels: {', '.join(ai_labels[:6])}"
     return f"Advanced: {text}"
+
+
+def _ai_explanation_items(explanations: list[dict]) -> str:
+    rows = []
+    for item in explanations:
+        reason = str(item.get("reason") or "").strip()
+        if not reason:
+            continue
+        score = item.get("score")
+        action = item.get("suggested_action")
+        labels = ", ".join(str(label) for label in item.get("labels", [])[:4])
+        prefix_parts = []
+        if score not in {None, ""}:
+            prefix_parts.append(f"score {score}")
+        if action:
+            prefix_parts.append(f"suggested {action}")
+        if labels:
+            prefix_parts.append(labels)
+        prefix = f" ({'; '.join(prefix_parts)})" if prefix_parts else ""
+        rows.append(f"{reason}{prefix}")
+    return " | ".join(rows[:3])
 
 
 def _calibration_line(calibration: dict) -> str:

@@ -109,7 +109,7 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
     ),
     "advanced.ai": FeatureModule(
         id="advanced.ai",
-        description="Optional AI profiles, frame scoring, and missed-moment discovery",
+        description="Optional AI profiles, frame scoring, clip judging, and missed-moment discovery",
         category="advanced",
     ),
     "advanced.motorsports": FeatureModule(
@@ -154,6 +154,7 @@ OPERATION_MODULES = {
     "cluster_transcript_topics": "content.reports",
     "find_ai_missed_moments": "advanced.ai",
     "generate_missed_review": "advanced.ai",
+    "judge_ai_clips": "advanced.ai",
     "plan_content_series": "content.series",
     "generate_content_map": "content.reports",
     "quote_mining": "content.reports",

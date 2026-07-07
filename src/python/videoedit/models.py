@@ -195,13 +195,14 @@ class CandidateClip:
     labels: list[str]
     reasons: list[str]
     signals: dict[str, float | int | None]
+    ai_explanations: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "id": self.id,
             "source": self.source,
             "start": seconds_to_hhmmss(self.start),
@@ -215,6 +216,9 @@ class CandidateClip:
             "reasons": self.reasons,
             "signals": self.signals,
         }
+        if self.ai_explanations:
+            data["ai_explanations"] = self.ai_explanations
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CandidateClip":
@@ -228,6 +232,7 @@ class CandidateClip:
             labels=list(data.get("labels", [])),
             reasons=list(data.get("reasons", [])),
             signals=dict(data.get("signals", {})),
+            ai_explanations=[dict(item) for item in data.get("ai_explanations", []) if isinstance(item, dict)],
         )
 
 

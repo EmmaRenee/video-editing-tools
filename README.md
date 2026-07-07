@@ -97,6 +97,8 @@ videoedit calibrate tune analysis/ratings.json --annotations annotations.json --
 videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
 videoedit calibrate apply calibration/proposed_config.json --output configs/scoring.json
 videoedit review-assets analysis/ratings.json --output review/ --calibration calibration/calibration_report.json
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
 videoedit review-tui review/review_assets.json --decisions review/review_decisions.json
 videoedit approve analysis/ratings.json --output approved.json --decisions review/review_decisions.json
 videoedit roughcut plan approved.json --output roughcut_plan.json --sequence score --target-duration 90 --format reel --render-mode render
@@ -192,6 +194,19 @@ videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
 ```
 
 Profiles include `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`. AI missed moments are review-only; they are never inserted into approvals or rough cuts automatically.
+
+Optional clip judging uses a configured local provider command after review assets exist. The command reads request JSON on stdin and writes judgment JSON on stdout; set `VIDEOEDIT_AI_JUDGE_COMMAND` or pass `--provider-command`.
+
+```bash
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+videoedit rate footage/ --output analysis_with_ai_explanations/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+```
+
+`ai_clip_judgments.json` keeps VLM-style reasons separate from deterministic scoring reasons. Missing providers write an unavailable artifact with setup guidance; base rating and review still work.
 
 ---
 
