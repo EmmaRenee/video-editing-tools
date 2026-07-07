@@ -8,7 +8,14 @@ import json
 import os
 import sys
 
-from .ai import find_missed_moments, generate_missed_review, list_ai_profiles, score_frames, show_ai_profile
+from .ai import (
+    find_missed_moments,
+    generate_missed_review,
+    judge_review_clips,
+    list_ai_profiles,
+    score_frames,
+    show_ai_profile,
+)
 from .advanced import (
     cluster_transcript_topics,
     detect_face_person_presence,
@@ -88,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_assets.add_argument("--max-items", type=int, default=100)
     review_assets.add_argument("--proxy", action="store_true", help="Also render low-resolution proxy clips")
     review_assets.add_argument("--thumb-width", type=int, default=360)
+    review_assets.add_argument("--ai-clip-judgments", help="Optional ai_clip_judgments.json for AI explanation context")
     review_assets.set_defaults(func=cmd_review_assets)
 
     review_tui = sub.add_parser("review-tui", help="Review clips from a review_assets.json manifest in the terminal")
@@ -201,6 +209,15 @@ def build_parser() -> argparse.ArgumentParser:
     ai_review_missed.add_argument("missed_moments")
     ai_review_missed.add_argument("--output", "-o", required=True)
     ai_review_missed.set_defaults(func=cmd_ai_review_missed)
+    ai_judge = ai_sub.add_parser("judge", help="Judge review clips with an optional local VLM provider")
+    ai_judge.add_argument("review_assets")
+    ai_judge.add_argument("--profile", default="general_broll")
+    ai_judge.add_argument("--output", "-o", required=True)
+    ai_judge.add_argument("--provider-command", help="Local command that reads request JSON on stdin and writes judgment JSON")
+    ai_judge.add_argument("--max-clips", type=int)
+    ai_judge.add_argument("--retries", type=int, default=1)
+    ai_judge.add_argument("--timeout", type=int, default=180)
+    ai_judge.set_defaults(func=cmd_ai_judge)
 
     calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
     calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
@@ -332,6 +349,7 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--motorsports-events", help="motorsports_events.json from detect_motorsports_events")
     parser.add_argument("--topic-clusters", help="topic_clusters.json from cluster_transcript_topics")
     parser.add_argument("--ai-frame-scores", help="ai_frame_scores.json from videoedit ai score-frames")
+    parser.add_argument("--ai-clip-judgments", help="ai_clip_judgments.json from videoedit ai judge")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -362,6 +380,8 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
     if args.ai_frame_scores:
         config.ai_frame_scores_path = args.ai_frame_scores
         config.signal_artifacts["ai_frame_scores"] = args.ai_frame_scores
+    if args.ai_clip_judgments:
+        config.ai_clip_judgments_path = args.ai_clip_judgments
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -427,6 +447,7 @@ def cmd_review_assets(args: argparse.Namespace) -> int:
         proxies=args.proxy,
         thumbnail_width=args.thumb_width,
         calibration_json=args.calibration,
+        ai_clip_judgments_json=args.ai_clip_judgments,
     )
     print(json.dumps(result, indent=2))
     return 0
@@ -618,6 +639,21 @@ def cmd_ai_review_missed(args: argparse.Namespace) -> int:
     result = generate_missed_review(args.missed_moments, args.output)
     print(json.dumps(result, indent=2))
     return 0
+
+
+def cmd_ai_judge(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = judge_review_clips(
+        args.review_assets,
+        args.output,
+        profile_id=args.profile,
+        provider_command=args.provider_command,
+        max_clips=args.max_clips,
+        retries=args.retries,
+        timeout=args.timeout,
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("status") != "unavailable" else 1
 
 
 def cmd_calibrate_init(args: argparse.Namespace) -> int:

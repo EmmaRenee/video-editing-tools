@@ -16,7 +16,7 @@ from .advanced import (
     detect_ocr_signage,
     detect_visual_objects,
 )
-from .ai import find_missed_moments, generate_missed_review, score_frames
+from .ai import find_missed_moments, generate_missed_review, judge_review_clips, score_frames
 from .calibration import evaluate_ratings, tune_scoring
 from .captions import burn_captions
 from .config import AnalysisConfig
@@ -46,6 +46,8 @@ SIGNAL_ARTIFACT_ALIASES = {
     "topic_clusters": "topic_clusters",
     "ai_frame_scores": "ai_frame_scores",
     "ai_frame_scores_path": "ai_frame_scores",
+    "ai_clip_judgments": "ai_clip_judgments",
+    "ai_clip_judgments_path": "ai_clip_judgments",
 }
 
 
@@ -113,6 +115,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "cluster_transcript_topics", "Cluster transcript hits into editing topics", op_transcript_topics)
     _register(registry, enabled_only, cwd, "find_ai_missed_moments", "Find AI-scored missed moment candidates", op_find_ai_missed_moments)
     _register(registry, enabled_only, cwd, "generate_missed_review", "Generate review HTML for AI missed moments", op_generate_missed_review)
+    _register(registry, enabled_only, cwd, "judge_ai_clips", "Judge review clips with an optional local VLM provider", op_judge_ai_clips)
     _register(registry, enabled_only, cwd, "plan_content_series", "Plan reusable content-series clips from ratings", op_plan_content_series)
     _register(registry, enabled_only, cwd, "generate_content_map", "Generate a ranked editorial content map", op_generate_content_map)
     _register(registry, enabled_only, cwd, "quote_mining", "Generate transcript-forward quote-mining report", op_quote_mining)
@@ -551,6 +554,25 @@ def op_generate_missed_review(context: dict[str, Any], params: dict[str, Any]) -
     output_dir = os.fspath(params.get("output") or os.path.join(context["output"], "missed_review"))
     result = generate_missed_review(missed_path, output_dir)
     context["missed_review_decisions"] = result["decisions"]
+    return result
+
+
+def op_judge_ai_clips(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    review_assets_value = params.get("input") or params.get("review_assets") or context.get("review_assets")
+    if not review_assets_value:
+        raise ValueError("judge_ai_clips requires review_assets artifact")
+    review_assets_path = os.fspath(review_assets_value)
+    output = _json_output(params.get("output") or context["output"], "ai_clip_judgments.json")
+    result = judge_review_clips(
+        review_assets_path,
+        output,
+        profile_id=params.get("profile", "general_broll"),
+        provider_command=params.get("provider_command"),
+        max_clips=int(params["max_clips"]) if params.get("max_clips") is not None else None,
+        retries=int(params.get("retries", 1)),
+        timeout=int(params.get("timeout", 180)),
+    )
+    context["ai_clip_judgments"] = output
     return result
 
 

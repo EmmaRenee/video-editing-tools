@@ -68,6 +68,7 @@ Raw footage (hours)
   → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
   → optional videoedit ai score-frames + rate --ai-frame-scores for profile-based AI scoring
   → ratings.json + candidates.csv + review assets
+  → optional videoedit ai judge after review-assets when a local VLM provider is configured
   → videoedit calibrate from-decisions/evaluate/tune/compare/apply when human feedback exists
   → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
@@ -120,7 +121,7 @@ Available built-in modules:
 | `content.reports` | Content maps and quote mining |
 | `project.scaffold` | Project folder scaffolding |
 | `advanced.vision` | OCR, object, face/person providers |
-| `advanced.ai` | AI profiles, OpenCLIP frame scoring, missed-moment discovery |
+| `advanced.ai` | AI profiles, OpenCLIP frame scoring, clip judging, missed-moment discovery |
 | `advanced.motorsports` | Motorsports event/topic artifacts |
 | `cloud.adapters` | Future maintained cloud adapters |
 
@@ -191,7 +192,23 @@ Built-in AI profiles: `general_broll`, `garage_shop`, `motorsports`, `interview`
 
 AI missed moments are review-only. Never insert them into `approved.json` or a rough cut automatically; route them through `missed_review.html`, decisions, and calibration annotations first.
 
-### 2c. Calibrate scoring with human annotations
+### 2c. Optional AI clip judging
+
+Use this only after `review-assets` exists and only when a local VLM-style provider is configured. The provider command reads request JSON on stdin and writes judgment JSON on stdout. Keep these reasons separate from deterministic scoring reasons.
+
+```bash
+export VIDEOEDIT_AI_JUDGE_COMMAND="/path/to/local-vlm-judge"
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+videoedit rate footage/ --output analysis_with_ai_explanations/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+```
+
+If no provider is configured, `videoedit ai judge` writes an unavailable artifact and returns non-zero. Do not treat AI clip-judge suggestions as approvals; show them in review as `ai_explanations` and let the human decide.
+
+### 2d. Calibrate scoring with human annotations
 
 Use calibration when the user has reviewed footage or wants to tune the scorer before rough cuts:
 
@@ -311,6 +328,7 @@ detect_motorsports_events
 cluster_transcript_topics
 find_ai_missed_moments
 generate_missed_review
+judge_ai_clips
 ```
 
 Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants.
@@ -333,6 +351,7 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `missed_moments.csv`, `false_positives.csv` | Calibration review queues |
 | `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
 | `ai_frame_scores.json` | Optional OpenCLIP/profile frame-score artifact |
+| `ai_clip_judgments.json` | Optional local VLM clip-judge artifact with separate AI reasons |
 | `ai_missed_moments.json` | Optional review-only AI-discovered missed moments |
 | `missed_review.html`, `missed_review_decisions.json` | Review and annotation-compatible decisions for missed moments |
 

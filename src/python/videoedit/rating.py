@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+from .ai import load_clip_judgment_explanations
 from .config import AnalysisConfig
 from .ffmpeg import analyze_audio_levels, detect_scene_changes, detect_silence, probe_media, scan_video_files
 from .inventory import write_inventory_outputs
@@ -72,6 +73,10 @@ def run_rating(
         )
         for index, clip in enumerate(candidates, 1)
     ]
+    clip_judgments = load_clip_judgment_explanations(config.ai_clip_judgments_path)
+    if clip_judgments:
+        for clip in candidates:
+            clip.ai_explanations = clip_judgments.get(clip.id, [])
 
     inventory = [report.asset for report in signals]
     summary = {

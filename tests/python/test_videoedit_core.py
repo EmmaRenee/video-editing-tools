@@ -431,6 +431,174 @@ class AITests(unittest.TestCase):
         finally:
             ai_module.OpenCLIPEncoder = original
 
+    def test_judge_review_clips_with_mock_provider_writes_artifact(self):
+        class FakeProvider:
+            provider_name = "fake_vlm"
+            model_name = "fake-clip-judge"
+
+            def judge_clip(self, request):
+                self.request = request
+                return {
+                    "score_dimensions": {"visual_interest": 0.82, "story_value": 0.67, "social_hook": 0.91},
+                    "suggested_action": "select",
+                    "labels": ["ai_clip_judge", "ai_social_hook"],
+                    "reason": "Strong hook frame and visible action.",
+                }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = os.path.join(tmp, "review_assets.json")
+            output = os.path.join(tmp, "ai_clip_judgments.json")
+            with open(manifest, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "ratings": os.path.join(tmp, "ratings.json"),
+                            "clips": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": os.path.join(tmp, "source.mp4"),
+                                    "source_name": "source.mp4",
+                                    "start": "00:00:05",
+                                    "end": "00:00:09",
+                                    "start_seconds": 5,
+                                    "end_seconds": 9,
+                                    "score": 72,
+                                    "action": "review",
+                                    "labels": ["ai_broll_candidate"],
+                                    "reasons": ["deterministic reason"],
+                                    "signals": {"audio_interest_score": 12},
+                                    "thumbnail": "thumbnails/clip_0001.jpg",
+                                    "proxy": "proxies/clip_0001.mp4",
+                                }
+                            ],
+                        }
+                    )
+                )
+            provider = FakeProvider()
+            result = ai_module.judge_review_clips(manifest, output, profile_id="social_reel", provider=provider)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(provider.request["profile"]["id"], "social_reel")
+            self.assertEqual(provider.request["clip"]["id"], "clip_0001")
+            data = _read_json(output)
+            self.assertEqual(data["schema_version"], "videoedit.ai_clip_judgments.v1")
+            self.assertEqual(data["provider"]["name"], "fake_vlm")
+            judgment = data["clips"][0]
+            self.assertEqual(judgment["clip_id"], "clip_0001")
+            self.assertEqual(judgment["suggested_action"], "select")
+            self.assertIn("ai_social_hook", judgment["labels"])
+            self.assertIn("Strong hook", judgment["reason"])
+            self.assertGreater(judgment["score"], 0)
+
+    def test_judge_review_clips_retries_invalid_model_json(self):
+        class FlakyProvider:
+            provider_name = "fake_vlm"
+            model_name = "fake-clip-judge"
+
+            def __init__(self):
+                self.calls = 0
+
+            def judge_clip(self, request):
+                self.calls += 1
+                if self.calls == 1:
+                    return "not json"
+                return json.dumps(
+                    {
+                        "score_dimensions": {"visual_interest": 0.5},
+                        "suggested_action": "review",
+                        "labels": ["ai_clip_judge"],
+                        "reason": "Usable but not a top pick.",
+                    }
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = os.path.join(tmp, "review_assets.json")
+            output = os.path.join(tmp, "ai_clip_judgments.json")
+            with open(manifest, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"clips": [{"id": "clip_0001", "source": "source.mp4", "score": 50}]}))
+            provider = FlakyProvider()
+            result = ai_module.judge_review_clips(manifest, output, provider=provider, retries=1)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(provider.calls, 2)
+            self.assertEqual(_read_json(output)["clips"][0]["suggested_action"], "review")
+
+    def test_judge_review_clips_missing_provider_writes_unavailable_artifact(self):
+        original = os.environ.pop("VIDEOEDIT_AI_JUDGE_COMMAND", None)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                manifest = os.path.join(tmp, "review_assets.json")
+                output = os.path.join(tmp, "ai_clip_judgments.json")
+                with open(manifest, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"clips": [{"id": "clip_0001", "source": "source.mp4"}]}))
+                result = ai_module.judge_review_clips(manifest, output)
+                self.assertEqual(result["status"], "unavailable")
+                data = _read_json(output)
+                self.assertIn("VIDEOEDIT_AI_JUDGE_COMMAND", data["error"])
+        finally:
+            if original is not None:
+                os.environ["VIDEOEDIT_AI_JUDGE_COMMAND"] = original
+
+    def test_ai_judge_cli_uses_local_provider_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = os.path.join(tmp, "review_assets.json")
+            output = os.path.join(tmp, "ai_clip_judgments.json")
+            provider_script = os.path.join(tmp, "judge_provider.py")
+            with open(manifest, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"clips": [{"id": "clip_0001", "source": "source.mp4", "score": 50}]}))
+            with open(provider_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import json, sys\n"
+                    "json.loads(sys.stdin.read())\n"
+                    "print(json.dumps({"
+                    "'score_dimensions': {'visual_interest': 0.7}, "
+                    "'suggested_action': 'review', "
+                    "'labels': ['ai_clip_judge'], "
+                    "'reason': 'Local provider accepted the clip.'"
+                    "}))\n"
+                )
+            exit_code = main(
+                [
+                    "ai",
+                    "judge",
+                    manifest,
+                    "--profile",
+                    "social_reel",
+                    "--output",
+                    output,
+                    "--provider-command",
+                    f'"{sys.executable}" "{provider_script}"',
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(_read_json(output)["clips"][0]["reason"], "Local provider accepted the clip.")
+
+    def test_candidate_clip_serializes_ai_explanations_only_when_present(self):
+        base = CandidateClip(
+            id="clip_0001",
+            source="source.mp4",
+            start=0,
+            end=5,
+            score=70,
+            action="review",
+            labels=[],
+            reasons=[],
+            signals={},
+        )
+        self.assertNotIn("ai_explanations", base.to_dict())
+        with_ai = CandidateClip.from_dict(
+            {
+                **base.to_dict(),
+                "ai_explanations": [
+                    {
+                        "kind": "ai_clip_judge",
+                        "score": 80,
+                        "suggested_action": "select",
+                        "reason": "AI reason",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(with_ai.to_dict()["ai_explanations"][0]["reason"], "AI reason")
+
     def test_ai_signal_artifact_loader_matches_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = os.path.join(tmp, "ai_frame_scores.json")
@@ -1569,6 +1737,9 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("visibleCount", html)
             self.assertIn("showExportPanel", html)
             self.assertIn("exportDecisionsText", html)
+            with open(result["manifest"], encoding="utf-8") as handle:
+                manifest = json.loads(handle.read())
+            self.assertNotIn("ai_explanations", manifest["clips"][0])
 
     def test_generate_review_assets_includes_signal_and_calibration_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1661,6 +1832,62 @@ class ReviewTests(unittest.TestCase):
             self.assertIn("Approve visible", html)
             self.assertIn("B-roll visible", html)
             self.assertIn("Refresh and select JSON", html)
+
+    def test_generate_review_assets_keeps_ai_explanations_distinct(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            judgments = os.path.join(tmp, "ai_clip_judgments.json")
+            output = os.path.join(tmp, "review")
+            source = os.path.join(tmp, "source.mp4")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "candidates": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": source,
+                                    "start_seconds": 0,
+                                    "end_seconds": 5,
+                                    "score": 70,
+                                    "action": "review",
+                                    "labels": ["audio_spike"],
+                                    "reasons": ["1 audio spikes detected"],
+                                }
+                            ]
+                        }
+                    )
+                )
+            with open(judgments, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.ai_clip_judgments.v1",
+                            "artifact_kind": "ai_clip_judgments",
+                            "clips": [
+                                {
+                                    "clip_id": "clip_0001",
+                                    "score": 84.0,
+                                    "score_dimensions": {"visual_interest": 0.84},
+                                    "suggested_action": "select",
+                                    "labels": ["ai_clip_judge"],
+                                    "reason": "AI sees a strong visual hook.",
+                                }
+                            ],
+                        }
+                    )
+                )
+            result = generate_review_assets(ratings, output, max_items=1, ai_clip_judgments_json=judgments)
+            with open(result["manifest"], encoding="utf-8") as handle:
+                manifest = json.loads(handle.read())
+            clip = manifest["clips"][0]
+            self.assertEqual(clip["reasons"], ["1 audio spikes detected"])
+            self.assertEqual(clip["ai_explanations"][0]["reason"], "AI sees a strong visual hook.")
+            with open(result["contact_sheet"], encoding="utf-8") as handle:
+                html = handle.read()
+            self.assertIn("Deterministic reasons", html)
+            self.assertIn("AI reasons", html)
+            self.assertIn("AI sees a strong visual hook.", html)
 
     def test_review_tui_data_layer_filters_updates_and_saves_decisions(self):
         with tempfile.TemporaryDirectory() as tmp:

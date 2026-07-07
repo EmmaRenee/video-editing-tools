@@ -32,6 +32,8 @@ videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_fr
 videoedit rate footage/ --output analysis_ai/ --ai-frame-scores analysis/ai_frame_scores.json
 videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_frame_scores.json --output analysis/ai_missed_moments.json
 videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
 videoedit calibrate init --output annotations.json
 videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
@@ -118,6 +120,20 @@ videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
 ```
 
 Missed moments are review-only. They are not auto-approved and are not inserted into rough cuts unless a human promotes them through the review/calibration loop.
+
+Optional clip judging can add heavier local VLM-style feedback to shortlisted review clips:
+
+```bash
+export VIDEOEDIT_AI_JUDGE_COMMAND="/path/to/local-vlm-judge"
+videoedit review-assets analysis/ratings.json --output review/ --proxy
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+videoedit rate footage/ --output analysis_with_ai_explanations/ \
+  --ai-clip-judgments analysis/ai_clip_judgments.json
+```
+
+The provider command reads request JSON on stdin and writes a judgment JSON object with `score_dimensions`, `suggested_action`, `labels`, and `reason`. These AI reasons are carried in `ai_explanations` and displayed separately from deterministic score explanations.
 
 ### Calibration and Scoring Evaluation
 
@@ -235,6 +251,7 @@ videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp
 | `cluster_transcript_topics` | Group transcript hits into editing topics |
 | `find_ai_missed_moments` | Find likely missed moments from AI frame scores |
 | `generate_missed_review` | Generate review HTML and decisions for missed moments |
+| `judge_ai_clips` | Judge review clips with an optional local VLM provider |
 | `plan_content_series` | Generate content-series plan, captions, and selection JSON |
 | `generate_content_map` | Generate ranked editorial content-map artifacts |
 | `quote_mining` | Generate transcript-forward quote-mining report |
@@ -251,6 +268,8 @@ videoedit roughcut plan approved.json --output roughcut_plan.json --target-durat
 videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 videoedit extract-segments approved.json --output clips/
 videoedit export-edl analysis/selections/*.json --output edl/
+videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
+videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
 
 videoedit init reel --output pipeline.yaml
 videoedit validate pipeline.yaml

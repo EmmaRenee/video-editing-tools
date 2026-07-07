@@ -13,6 +13,8 @@ import html
 import json
 import os
 import re
+import shlex
+import subprocess
 from typing import Any, Protocol
 
 from .ffmpeg import has_command, probe_media, run_command_check, scan_video_files
@@ -22,6 +24,9 @@ from .timecode import seconds_to_hhmmss, timecode_to_seconds
 AI_FRAME_SCHEMA_VERSION = "videoedit.ai_frame_scores.v1"
 AI_MISSED_SCHEMA_VERSION = "videoedit.ai_missed_moments.v1"
 AI_REVIEW_SCHEMA_VERSION = "videoedit.missed_review.v1"
+AI_CLIP_JUDGE_SCHEMA_VERSION = "videoedit.ai_clip_judgments.v1"
+AI_CLIP_JUDGE_ENV = "VIDEOEDIT_AI_JUDGE_COMMAND"
+AI_CLIP_JUDGE_ACTIONS = {"select", "review", "broll", "reject", "ignore", "cut"}
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,14 @@ class FrameScoreEncoder(Protocol):
 
     def score_images(self, image_paths: list[str], prompts: list[str]) -> list[list[float]]:
         """Return scores as rows of image x prompt floats."""
+
+
+class ClipJudgeProvider(Protocol):
+    provider_name: str
+    model_name: str
+
+    def judge_clip(self, request: dict[str, Any]) -> dict[str, Any] | str:
+        """Return one clip judgment as a dict or JSON string."""
 
 
 PROFILES: dict[str, AIProfile] = {
@@ -397,6 +410,111 @@ def generate_missed_review(missed_json: str, output_dir: str) -> dict[str, Any]:
     return {"html": html_path, "decisions": decisions_path, "count": len(decisions["decisions"])}
 
 
+def judge_review_clips(
+    review_assets_json: str,
+    output: str,
+    profile_id: str = "general_broll",
+    provider: ClipJudgeProvider | None = None,
+    provider_command: str | None = None,
+    max_clips: int | None = None,
+    retries: int = 1,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Judge review clips with an optional local VLM provider."""
+
+    profile = get_ai_profile(profile_id)
+    review_assets_json = os.fspath(review_assets_json)
+    output = os.fspath(output)
+    review_assets = _read_json(review_assets_json)
+    clips = list(review_assets.get("clips", []))
+    if max_clips is not None:
+        clips = clips[: max(0, int(max_clips))]
+
+    if provider is None:
+        command = provider_command or os.environ.get(AI_CLIP_JUDGE_ENV)
+        if not command:
+            error = (
+                "AI clip judging requires a configured local provider command. "
+                f"Set {AI_CLIP_JUDGE_ENV} or pass --provider-command. "
+                "The command must read request JSON on stdin and write judgment JSON on stdout."
+            )
+            payload = _clip_judge_unavailable_payload(review_assets_json, profile, error)
+            _write_json(output, payload)
+            return {"output": output, "status": "unavailable", "count": 0, "error": error}
+        provider = CommandClipJudgeProvider(command, timeout=timeout)
+
+    provider_meta = {
+        "name": getattr(provider, "provider_name", provider.__class__.__name__),
+        "model": getattr(provider, "model_name", "unknown"),
+    }
+    judgments = []
+    warnings: list[str] = []
+    for clip in clips:
+        request = _clip_judge_request(review_assets_json, review_assets, clip, profile)
+        try:
+            judgments.append(_judge_clip_with_retries(provider, request, retries=max(0, int(retries))))
+        except Exception as exc:
+            raise ValueError(f"invalid AI judge response for {clip.get('id') or 'clip'}: {exc}") from exc
+
+    payload = {
+        "schema_version": AI_CLIP_JUDGE_SCHEMA_VERSION,
+        "artifact_kind": "ai_clip_judgments",
+        "generated": datetime.now().isoformat(),
+        "review_assets": review_assets_json,
+        "profile": profile.to_dict(),
+        "provider": provider_meta,
+        "status": "ok",
+        "count": len(judgments),
+        "clips": judgments,
+        "warnings": warnings,
+    }
+    _write_json(output, payload)
+    return {"output": output, "status": "ok", "count": len(judgments), "warnings": warnings}
+
+
+def load_clip_judgment_explanations(path: str | None) -> dict[str, list[dict[str, Any]]]:
+    if not path:
+        return {}
+    data = _read_optional_json(os.fspath(path))
+    if not data:
+        return {}
+    provider = data.get("provider") if isinstance(data.get("provider"), dict) else {}
+    rows: dict[str, list[dict[str, Any]]] = {}
+    for clip in data.get("clips", []):
+        if not isinstance(clip, dict):
+            continue
+        clip_id = str(clip.get("clip_id") or clip.get("id") or "").strip()
+        if not clip_id:
+            continue
+        rows.setdefault(clip_id, []).append(_clip_judgment_explanation(clip, provider))
+    return rows
+
+
+class CommandClipJudgeProvider:
+    provider_name = "command"
+
+    def __init__(self, command: str, timeout: int = 180) -> None:
+        self.command = shlex.split(os.fspath(command))
+        if not self.command:
+            raise ValueError("AI judge provider command is empty")
+        self.timeout = timeout
+        self.model_name = " ".join(self.command)
+
+    def judge_clip(self, request: dict[str, Any]) -> str:
+        completed = subprocess.run(
+            self.command,
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            timeout=self.timeout,
+            check=False,
+        )
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(f"AI judge command failed with exit code {completed.returncode}: {message}")
+        return completed.stdout
+
+
 class OpenCLIPEncoder:
     provider_name = "openclip"
 
@@ -431,6 +549,175 @@ class OpenCLIPEncoder:
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             probabilities = (100.0 * image_features @ text_features.T).softmax(dim=-1)
         return probabilities.cpu().tolist()
+
+
+def _clip_judge_request(
+    review_assets_json: str,
+    review_assets: dict[str, Any],
+    clip: dict[str, Any],
+    profile: AIProfile,
+) -> dict[str, Any]:
+    review_dir = os.path.dirname(os.path.abspath(review_assets_json))
+    media_paths = {}
+    for key in ("thumbnail", "proxy"):
+        value = clip.get(key)
+        if value:
+            media_paths[key] = value if os.path.isabs(os.fspath(value)) else os.path.join(review_dir, os.fspath(value))
+    return {
+        "task": "videoedit_ai_clip_judge",
+        "schema_version": AI_CLIP_JUDGE_SCHEMA_VERSION,
+        "profile": profile.to_dict(),
+        "review_assets": os.fspath(review_assets_json),
+        "ratings": review_assets.get("ratings"),
+        "clip": {
+            "id": clip.get("id"),
+            "source": clip.get("source"),
+            "source_name": clip.get("source_name"),
+            "start": clip.get("start"),
+            "end": clip.get("end"),
+            "start_seconds": clip.get("start_seconds"),
+            "end_seconds": clip.get("end_seconds"),
+            "duration": clip.get("duration"),
+            "score": clip.get("score"),
+            "action": clip.get("action"),
+            "labels": list(clip.get("labels", [])),
+            "deterministic_reasons": list(clip.get("reasons", [])),
+            "signals": dict(clip.get("signals", {})),
+            "file_scores": dict(clip.get("file_scores", {})),
+            "source_metadata": dict(clip.get("source_metadata", {})),
+            "media": media_paths,
+        },
+        "response_contract": {
+            "format": "json",
+            "required": ["score_dimensions", "suggested_action", "labels", "reason"],
+            "actions": sorted(AI_CLIP_JUDGE_ACTIONS),
+            "score_dimensions": "object of 0-1 numeric dimension scores",
+        },
+    }
+
+
+def _judge_clip_with_retries(
+    provider: ClipJudgeProvider,
+    request: dict[str, Any],
+    retries: int,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for _attempt in range(retries + 1):
+        response = provider.judge_clip(request)
+        try:
+            return _normalize_clip_judgment(response, request["clip"])
+        except ValueError as exc:
+            last_error = exc
+    raise ValueError(str(last_error or "invalid response"))
+
+
+def _normalize_clip_judgment(response: dict[str, Any] | str, clip: dict[str, Any]) -> dict[str, Any]:
+    data = _parse_judge_response(response)
+    score_dimensions = data.get("score_dimensions") or data.get("scores")
+    if not isinstance(score_dimensions, dict) or not score_dimensions:
+        raise ValueError("response requires non-empty score_dimensions object")
+    dimensions = {
+        _safe_slug(key): _normalize_dimension_score(value)
+        for key, value in score_dimensions.items()
+        if _is_number(value)
+    }
+    if not dimensions:
+        raise ValueError("score_dimensions must contain numeric values")
+    suggested_action = str(data.get("suggested_action") or data.get("action") or "").strip().lower()
+    if suggested_action not in AI_CLIP_JUDGE_ACTIONS:
+        raise ValueError(f"suggested_action must be one of {', '.join(sorted(AI_CLIP_JUDGE_ACTIONS))}")
+    labels = [str(label).strip() for label in data.get("labels", []) if str(label).strip()]
+    if not labels:
+        labels = ["ai_clip_judge"]
+    reason = str(data.get("reason") or data.get("explanation") or "").strip()
+    if not reason:
+        raise ValueError("response requires reason")
+    score = data.get("score")
+    if _is_number(score):
+        normalized_score = _normalize_total_score(float(score))
+    else:
+        normalized_score = round(sum(dimensions.values()) / len(dimensions) * 100.0, 2)
+    clip_id = str(clip.get("id") or "").strip()
+    if not clip_id:
+        raise ValueError("clip id is required")
+    return {
+        "clip_id": clip_id,
+        "source": clip.get("source"),
+        "start": clip.get("start"),
+        "end": clip.get("end"),
+        "start_seconds": clip.get("start_seconds"),
+        "end_seconds": clip.get("end_seconds"),
+        "score": normalized_score,
+        "score_dimensions": dimensions,
+        "suggested_action": suggested_action,
+        "labels": labels,
+        "reason": reason,
+    }
+
+
+def _parse_judge_response(response: dict[str, Any] | str) -> dict[str, Any]:
+    if isinstance(response, dict):
+        data = response
+    elif isinstance(response, str):
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"response is not valid JSON: {exc}") from exc
+    else:
+        raise ValueError("response must be a JSON object or JSON string")
+    if not isinstance(data, dict):
+        raise ValueError("response must be a JSON object")
+    if isinstance(data.get("judgment"), dict):
+        data = data["judgment"]
+    return data
+
+
+def _clip_judgment_explanation(clip: dict[str, Any], provider: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "ai_clip_judge",
+        "provider": dict(provider),
+        "score": clip.get("score"),
+        "score_dimensions": dict(clip.get("score_dimensions", {})),
+        "suggested_action": clip.get("suggested_action"),
+        "labels": list(clip.get("labels", [])),
+        "reason": clip.get("reason", ""),
+    }
+
+
+def _clip_judge_unavailable_payload(review_assets_json: str, profile: AIProfile, error: str) -> dict[str, Any]:
+    return {
+        "schema_version": AI_CLIP_JUDGE_SCHEMA_VERSION,
+        "artifact_kind": "ai_clip_judgments",
+        "generated": datetime.now().isoformat(),
+        "review_assets": os.fspath(review_assets_json),
+        "profile": profile.to_dict(),
+        "provider": {"name": "unconfigured", "model": None},
+        "status": "unavailable",
+        "error": error,
+        "clips": [],
+        "warnings": [error],
+    }
+
+
+def _normalize_dimension_score(value: Any) -> float:
+    number = float(value)
+    if number > 1.0:
+        number = number / 100.0
+    return round(max(0.0, min(1.0, number)), 4)
+
+
+def _normalize_total_score(value: float) -> float:
+    if value <= 1.0:
+        value *= 100.0
+    return round(max(0.0, min(100.0, value)), 2)
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def sample_timestamps(duration: float, sample_interval: float, max_frames: int) -> list[float]:
