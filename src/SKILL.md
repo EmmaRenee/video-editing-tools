@@ -69,6 +69,7 @@ Raw footage (hours)
   → optional videoedit ai score-frames + rate --ai-frame-scores for profile-based AI scoring
   → ratings.json + candidates.csv + review assets
   → optional videoedit ai judge after review-assets when a local VLM provider is configured
+  → optional videoedit ai dataset/train-scorer when reviewed decisions exist across projects
   → videoedit calibrate from-decisions/evaluate/tune/compare/apply when human feedback exists
   → content-map / quote-mining / series planning when editorial direction is needed
   → review/contact_sheet.html or review_decisions.json
@@ -121,7 +122,7 @@ Available built-in modules:
 | `content.reports` | Content maps and quote mining |
 | `project.scaffold` | Project folder scaffolding |
 | `advanced.vision` | OCR, object, face/person providers |
-| `advanced.ai` | AI profiles, OpenCLIP frame scoring, clip judging, missed-moment discovery |
+| `advanced.ai` | AI profiles, OpenCLIP frame scoring, clip judging, review learning, missed-moment discovery |
 | `advanced.motorsports` | Motorsports event/topic artifacts |
 | `cloud.adapters` | Future maintained cloud adapters |
 
@@ -208,7 +209,30 @@ videoedit rate footage/ --output analysis_with_ai_explanations/ \
 
 If no provider is configured, `videoedit ai judge` writes an unavailable artifact and returns non-zero. Do not treat AI clip-judge suggestions as approvals; show them in review as `ai_explanations` and let the human decide.
 
-### 2d. Calibrate scoring with human annotations
+### 2d. Optional learning from reviewed decisions
+
+Use this after there are reviewed decisions from one or more projects. The dataset is JSONL, portable, and does not copy source video by default. The learned scorer is a small inspectable local model and must be explicitly supplied to `rate`.
+
+```bash
+videoedit ai dataset build \
+  --inputs analysis/*/review_decisions.json \
+  --output training/review_dataset.jsonl
+
+videoedit ai train-scorer training/review_dataset.jsonl \
+  --output models/local_scorer.json
+
+videoedit rate footage/ --output analysis_learned/ \
+  --learned-scorer models/local_scorer.json
+
+videoedit calibrate evaluate analysis_learned/ratings.json \
+  --annotations annotations.json \
+  --output calibration/learned/
+videoedit calibrate compare calibration/baseline calibration/learned --output calibration/compare/
+```
+
+Do not train from unreviewed machine output. Prefer datasets that include multiple project profiles and both positive and negative decisions.
+
+### 2e. Calibrate scoring with human annotations
 
 Use calibration when the user has reviewed footage or wants to tune the scorer before rough cuts:
 
@@ -329,6 +353,8 @@ cluster_transcript_topics
 find_ai_missed_moments
 generate_missed_review
 judge_ai_clips
+build_review_dataset
+train_review_scorer
 ```
 
 Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants.
@@ -352,6 +378,8 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
 | `ai_frame_scores.json` | Optional OpenCLIP/profile frame-score artifact |
 | `ai_clip_judgments.json` | Optional local VLM clip-judge artifact with separate AI reasons |
+| `review_dataset.jsonl` | Portable reviewed-decision training records without source video copies |
+| `local_scorer.json` | Small inspectable learned scorer trained from review decisions |
 | `ai_missed_moments.json` | Optional review-only AI-discovered missed moments |
 | `missed_review.html`, `missed_review_decisions.json` | Review and annotation-compatible decisions for missed moments |
 

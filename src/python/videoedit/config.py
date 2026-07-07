@@ -27,6 +27,7 @@ class AnalysisConfig:
     visual_objects_path: str | None = None
     ai_frame_scores_path: str | None = None
     ai_clip_judgments_path: str | None = None
+    learned_scorer_path: str | None = None
     signal_artifacts: dict[str, str] = field(default_factory=dict)
     object_window_pre_roll: float = 1.0
     object_window_post_roll: float = 2.0

@@ -34,6 +34,9 @@ videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_fra
 videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
 videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
+videoedit ai dataset build --inputs analysis/*/review_decisions.json --output training/review_dataset.jsonl
+videoedit ai train-scorer training/review_dataset.jsonl --output models/local_scorer.json
+videoedit rate footage/ --output analysis_learned/ --learned-scorer models/local_scorer.json
 videoedit calibrate init --output annotations.json
 videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
@@ -134,6 +137,24 @@ videoedit rate footage/ --output analysis_with_ai_explanations/ \
 ```
 
 The provider command reads request JSON on stdin and writes a judgment JSON object with `score_dimensions`, `suggested_action`, `labels`, and `reason`. These AI reasons are carried in `ai_explanations` and displayed separately from deterministic score explanations.
+
+Optional learned scoring uses reviewed decisions across projects:
+
+```bash
+videoedit ai dataset build \
+  --inputs analysis/*/review_decisions.json \
+  --output training/review_dataset.jsonl
+videoedit ai train-scorer training/review_dataset.jsonl \
+  --output models/local_scorer.json
+videoedit rate footage/ --output analysis_learned/ \
+  --learned-scorer models/local_scorer.json
+videoedit calibrate evaluate analysis_learned/ratings.json \
+  --annotations annotations.json \
+  --output calibration/learned/
+videoedit calibrate compare calibration/baseline calibration/learned --output calibration/compare/
+```
+
+`review_dataset.jsonl` stores portable feature records and reviewed labels without copying source video. `local_scorer.json` is a CPU-friendly linear feature model with version, weights, feature statistics, and training metrics. Learned scoring is opt-in.
 
 ### Calibration and Scoring Evaluation
 
@@ -252,6 +273,8 @@ videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp
 | `find_ai_missed_moments` | Find likely missed moments from AI frame scores |
 | `generate_missed_review` | Generate review HTML and decisions for missed moments |
 | `judge_ai_clips` | Judge review clips with an optional local VLM provider |
+| `build_review_dataset` | Build portable JSONL records from reviewed decisions |
+| `train_review_scorer` | Train a small inspectable local scorer |
 | `plan_content_series` | Generate content-series plan, captions, and selection JSON |
 | `generate_content_map` | Generate ranked editorial content-map artifacts |
 | `quote_mining` | Generate transcript-forward quote-mining report |
@@ -270,6 +293,8 @@ videoedit extract-segments approved.json --output clips/
 videoedit export-edl analysis/selections/*.json --output edl/
 videoedit ai judge review/review_assets.json --profile social_reel --output analysis/ai_clip_judgments.json
 videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judgments analysis/ai_clip_judgments.json
+videoedit ai dataset build --inputs analysis/*/review_decisions.json --output training/review_dataset.jsonl
+videoedit ai train-scorer training/review_dataset.jsonl --output models/local_scorer.json
 
 videoedit init reel --output pipeline.yaml
 videoedit validate pipeline.yaml

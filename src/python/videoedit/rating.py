@@ -12,6 +12,7 @@ from .ai import load_clip_judgment_explanations
 from .config import AnalysisConfig
 from .ffmpeg import analyze_audio_levels, detect_scene_changes, detect_silence, probe_media, scan_video_files
 from .inventory import write_inventory_outputs
+from .learning import apply_learned_scorer_to_candidates, load_learned_scorer
 from .models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, RatingReport, SignalReport
 from .reports import write_candidate_csv, write_rating_json, write_review_html, write_review_markdown, write_selection_sets
 from .signals import load_signal_artifacts
@@ -59,6 +60,12 @@ def run_rating(
     candidates = sorted(candidates, key=lambda item: (-item.score, item.source, item.start))[
         : config.max_candidates
     ]
+    learned_model = load_learned_scorer(config.learned_scorer_path)
+    if learned_model:
+        candidates = apply_learned_scorer_to_candidates(candidates, learned_model, config)
+        candidates = sorted(candidates, key=lambda item: (-item.score, item.source, item.start))[
+            : config.max_candidates
+        ]
     candidates = [
         CandidateClip(
             id=f"clip_{index:04d}",
@@ -653,6 +660,8 @@ def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
         "visual_objects_path": config.visual_objects_path,
         "signal_artifacts": config.signal_artifacts,
         "signal_artifacts_signature": _artifact_signatures(config),
+        "learned_scorer_path": config.learned_scorer_path,
+        "learned_scorer_signature": _artifact_signature(config.learned_scorer_path),
     }
 
 

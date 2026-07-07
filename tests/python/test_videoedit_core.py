@@ -729,6 +729,265 @@ class AITests(unittest.TestCase):
             self.assertEqual(data["clips"][0]["rating"], "review")
 
 
+class LearningTests(unittest.TestCase):
+    def test_build_review_dataset_from_multiple_projects_without_source_paths(self):
+        from videoedit.learning import build_review_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inputs = []
+            for project, decision, score, ai_score in (
+                ("Drive Example", "approve", 82, 91),
+                ("Garage Example", "reject", 42, 20),
+            ):
+                project_dir = os.path.join(tmp, project.replace(" ", "_"))
+                os.makedirs(project_dir, exist_ok=True)
+                ratings = os.path.join(project_dir, "ratings.json")
+                decisions = os.path.join(project_dir, "review_decisions.json")
+                source = os.path.join(project_dir, "private_source.mp4")
+                with open(ratings, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "project": project,
+                                "root": os.path.join(project_dir, "footage"),
+                                "config": {"profile": "shop_reel"},
+                                "candidates": [
+                                    {
+                                        "id": "clip_0001",
+                                        "source": source,
+                                        "start": "00:00:01",
+                                        "end": "00:00:06",
+                                        "start_seconds": 1,
+                                        "end_seconds": 6,
+                                        "duration": 5,
+                                        "score": score,
+                                        "action": "review",
+                                        "labels": ["audio_spike", "ai_clip_judge"],
+                                        "reasons": ["deterministic reason"],
+                                        "signals": {"audio_interest_score": 12, "ai_frame_score": 4},
+                                        "ai_explanations": [
+                                            {
+                                                "score": ai_score,
+                                                "suggested_action": "select",
+                                                "labels": ["ai_clip_judge"],
+                                                "reason": "AI reason",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        )
+                    )
+                with open(decisions, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "ratings": ratings,
+                                "project": project,
+                                "project_profile": "shop_reel",
+                                "decisions": [
+                                    {
+                                        "id": "clip_0001",
+                                        "decision": decision,
+                                        "order": 1,
+                                        "note": f"{project} note",
+                                    }
+                                ],
+                            }
+                        )
+                    )
+                inputs.append(decisions)
+            output = os.path.join(tmp, "review_dataset.jsonl")
+            result = build_review_dataset(inputs, output)
+            self.assertEqual(result["records"], 2)
+            with open(output, encoding="utf-8") as handle:
+                rows = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual({row["project"]["name"] for row in rows}, {"Drive Example", "Garage Example"})
+            self.assertNotIn("source_path", json.dumps(rows))
+            self.assertIn("source_id", rows[0]["clip"])
+            self.assertEqual(rows[0]["features"]["deterministic_score"], 82)
+            self.assertIn("label_audio_spike", rows[0]["features"])
+            self.assertIn("ai_clip_judge_score", rows[0]["features"])
+            self.assertEqual({row["label"]["target"] for row in rows}, {0, 1})
+
+    def test_train_local_scorer_is_small_inspectable_and_ranks_deterministically(self):
+        from videoedit.learning import score_candidate_with_model, train_local_scorer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = os.path.join(tmp, "review_dataset.jsonl")
+            model = os.path.join(tmp, "local_scorer.json")
+            rows = [
+                {
+                    "schema_version": "videoedit.review_dataset.v1",
+                    "features": {"deterministic_score": 90, "audio_interest_score": 12, "label_audio_spike": 1},
+                    "label": {"rating": "select", "target": 1},
+                },
+                {
+                    "schema_version": "videoedit.review_dataset.v1",
+                    "features": {"deterministic_score": 35, "audio_interest_score": 0, "label_audio_spike": 0},
+                    "label": {"rating": "reject", "target": 0},
+                },
+            ]
+            with open(dataset, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row) + "\n")
+            result = train_local_scorer(dataset, model)
+            self.assertEqual(result["records"], 2)
+            data = _read_json(model)
+            self.assertEqual(data["schema_version"], "videoedit.learned_scorer.v1")
+            self.assertIn("weights", data)
+            self.assertLess(os.path.getsize(model), 10000)
+            positive = score_candidate_with_model(
+                {
+                    "score": 88,
+                    "signals": {"audio_interest_score": 10},
+                    "labels": ["audio_spike"],
+                },
+                data,
+            )
+            negative = score_candidate_with_model(
+                {
+                    "score": 20,
+                    "signals": {"audio_interest_score": 0},
+                    "labels": [],
+                },
+                data,
+            )
+            self.assertGreater(positive["score"], negative["score"])
+            self.assertIn("learned_score", positive["signals"])
+
+    def test_ai_dataset_and_train_scorer_cli_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            decisions = os.path.join(tmp, "review_decisions.json")
+            dataset = os.path.join(tmp, "training", "review_dataset.jsonl")
+            model = os.path.join(tmp, "models", "local_scorer.json")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "candidates": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": "/private/source.mp4",
+                                    "start_seconds": 0,
+                                    "end_seconds": 5,
+                                    "score": 80,
+                                    "action": "review",
+                                    "labels": ["audio_spike"],
+                                    "signals": {"audio_interest_score": 10},
+                                }
+                            ]
+                        }
+                    )
+                )
+            with open(decisions, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"ratings": ratings, "decisions": [{"id": "clip_0001", "decision": "approve"}]}))
+            self.assertEqual(main(["ai", "dataset", "build", "--inputs", decisions, "--output", dataset]), 0)
+            self.assertTrue(os.path.exists(dataset))
+            self.assertEqual(main(["ai", "train-scorer", dataset, "--output", model]), 0)
+            self.assertEqual(_read_json(model)["schema_version"], "videoedit.learned_scorer.v1")
+
+    def test_rate_config_accepts_learned_scorer_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model = os.path.join(tmp, "local_scorer.json")
+            with open(model, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"schema_version": "videoedit.learned_scorer.v1", "weights": {}, "intercept": 0}))
+            parser = cli_module.build_parser()
+            args = parser.parse_args(["rate", tmp, "--output", os.path.join(tmp, "analysis"), "--learned-scorer", model])
+            config = cli_module.config_from_args(args)
+            self.assertEqual(config.learned_scorer_path, model)
+
+    def test_run_rating_with_learned_scorer_adds_learned_signal(self):
+        import videoedit.rating as rating_module
+
+        original_scan = rating_module.scan_video_files
+        original_probe = rating_module.probe_media
+        original_scene = rating_module.detect_scene_changes
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "clip.mp4")
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write("video")
+            model = os.path.join(tmp, "local_scorer.json")
+            with open(model, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.learned_scorer.v1",
+                            "weights": {"deterministic_score": 1.0},
+                            "intercept": 0,
+                            "threshold": 0,
+                        }
+                    )
+                )
+
+            def fake_scan(_directory):
+                return [source]
+
+            def fake_probe(path, timeout=60):
+                return MediaAsset(
+                    filename=os.path.basename(path),
+                    filepath=path,
+                    duration=8,
+                    width=1920,
+                    height=1080,
+                    fps=30,
+                    codec="h264",
+                    has_audio=False,
+                )
+
+            rating_module.scan_video_files = fake_scan
+            rating_module.probe_media = fake_probe
+            rating_module.detect_scene_changes = lambda path, threshold=0.35, timeout=180: ([], None)
+            try:
+                output = os.path.join(tmp, "analysis")
+                report = rating_module.run_rating(tmp, output, AnalysisConfig(learned_scorer_path=model, cache=False))
+            finally:
+                rating_module.scan_video_files = original_scan
+                rating_module.probe_media = original_probe
+                rating_module.detect_scene_changes = original_scene
+
+            self.assertEqual(len(report.candidates), 1)
+            self.assertIn("learned_score", report.candidates[0].signals)
+            self.assertIn("learned_positive", report.candidates[0].labels)
+            data = _read_json(os.path.join(output, "ratings.json"))
+            self.assertEqual(data["config"]["learned_scorer_path"], model)
+            self.assertIn("learned_score", data["candidates"][0]["signals"])
+
+    def test_calibration_compare_preserves_scoring_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline = os.path.join(tmp, "baseline")
+            learned = os.path.join(tmp, "learned")
+            os.makedirs(baseline)
+            os.makedirs(learned)
+            for path, modes, f1 in (
+                (baseline, ["deterministic"], 0.5),
+                (learned, ["deterministic", "learned"], 0.75),
+            ):
+                with open(os.path.join(path, "calibration_report.json"), "w", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "metrics": {
+                                    "precision": f1,
+                                    "recall": f1,
+                                    "f1": f1,
+                                    "missed": 1,
+                                    "false_positives": 1,
+                                },
+                                "summary": {},
+                                "scoring_modes": modes,
+                            }
+                        )
+                    )
+            result = compare_calibration_runs([baseline, learned], os.path.join(tmp, "compare"))
+            self.assertEqual(result["best"]["scoring_modes"], ["deterministic", "learned"])
+            with open(result["markdown"], encoding="utf-8") as handle:
+                markdown = handle.read()
+            self.assertIn("Modes", markdown)
+            self.assertIn("learned", markdown)
+
+
 class PipelineTests(unittest.TestCase):
     def test_preset_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:

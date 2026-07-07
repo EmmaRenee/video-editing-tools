@@ -92,6 +92,9 @@ videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_fra
 videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 videoedit calibrate init --output annotations.json
 videoedit calibrate from-decisions review/review_decisions.json --ratings analysis/ratings.json --output annotations.json
+videoedit ai dataset build --inputs analysis/*/review_decisions.json --output training/review_dataset.jsonl
+videoedit ai train-scorer training/review_dataset.jsonl --output models/local_scorer.json
+videoedit rate footage/ --output analysis_learned/ --learned-scorer models/local_scorer.json
 videoedit calibrate evaluate analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate tune analysis/ratings.json --annotations annotations.json --output calibration/
 videoedit calibrate compare calibration/baseline calibration/tuned --output calibration/compare/
@@ -207,6 +210,29 @@ videoedit rate footage/ --output analysis_with_ai_explanations/ \
 ```
 
 `ai_clip_judgments.json` keeps VLM-style reasons separate from deterministic scoring reasons. Missing providers write an unavailable artifact with setup guidance; base rating and review still work.
+
+### Optional Learning From Reviews
+
+V15 can turn reviewed decisions into a portable JSONL dataset, train a small inspectable local scorer, and apply it only when explicitly supplied. Datasets do not copy source video by default; records use hashed source IDs plus deterministic/AI features and decision labels.
+
+```bash
+videoedit ai dataset build \
+  --inputs analysis/*/review_decisions.json \
+  --output training/review_dataset.jsonl
+
+videoedit ai train-scorer training/review_dataset.jsonl \
+  --output models/local_scorer.json
+
+videoedit rate footage/ --output analysis_learned/ \
+  --learned-scorer models/local_scorer.json
+
+videoedit calibrate evaluate analysis_learned/ratings.json \
+  --annotations annotations.json \
+  --output calibration/learned/
+videoedit calibrate compare calibration/baseline calibration/learned --output calibration/compare/
+```
+
+`local_scorer.json` is a dependency-free linear feature model with weights, feature stats, and training metrics. Learned scoring is opt-in and calibration reports label runs as deterministic, AI-assisted, and/or learned.
 
 ---
 
