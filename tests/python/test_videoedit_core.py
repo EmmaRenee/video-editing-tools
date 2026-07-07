@@ -1124,6 +1124,70 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(plan["steps"][0]["planned_result"]["status"], "planned")
             self.assertIn("detection_count", plan["steps"][0]["planned_result"])
 
+    def test_ai_presets_declare_requirements_and_plan_artifacts(self):
+        expected_profiles = {
+            "ai_reel": "social_reel",
+            "ai_garage_shop": "garage_shop",
+            "ai_event_recap": "event_recap",
+        }
+        for preset, profile in expected_profiles.items():
+            with tempfile.TemporaryDirectory() as tmp:
+                output = os.path.join(tmp, f"{preset}.yaml")
+                write_preset(preset, output)
+                data = load_pipeline(output)
+                self.assertEqual(data["name"], preset)
+                self.assertIn("advanced.ai", data["requires_modules"])
+                self.assertIn("core.review", data["requires_modules"])
+                dependency_names = {item["name"] for item in data["requires_dependencies"]}
+                self.assertGreaterEqual(dependency_names, {"open_clip", "torch", "PIL"})
+                operations = [step["operation"] for step in data["steps"]]
+                self.assertIn("score_ai_frames", operations)
+                self.assertIn("rate_footage", operations)
+                self.assertIn("generate_review_assets", operations)
+                score_step = next(step for step in data["steps"] if step["operation"] == "score_ai_frames")
+                self.assertEqual(score_step["params"]["profile"], profile)
+                rate_step = next(step for step in data["steps"] if step["operation"] == "rate_footage")
+                self.assertEqual(rate_step["params"]["ai_frame_scores"], "ai_scores.output")
+
+                plan = plan_pipeline(output, os.path.join(tmp, "footage"), os.path.join(tmp, "out"))
+                self.assertEqual(plan["requirements"]["modules"], data["requires_modules"])
+                self.assertEqual(plan["requirements"]["dependencies"], data["requires_dependencies"])
+                planned_ai = next(step for step in plan["steps"] if step["operation"] == "score_ai_frames")
+                self.assertEqual(
+                    planned_ai["planned_result"]["output"],
+                    os.path.join(tmp, "out", "signals", "ai_frame_scores.json"),
+                )
+                planned_rate = next(step for step in plan["steps"] if step["operation"] == "rate_footage")
+                self.assertEqual(
+                    planned_rate["params"]["ai_frame_scores"],
+                    os.path.join(tmp, "out", "signals", "ai_frame_scores.json"),
+                )
+
+    def test_ai_preset_validation_fails_when_ai_module_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                disable_module("advanced.ai")
+                pipeline = os.path.join(tmp, "ai_reel.yaml")
+                with open(pipeline, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "name": "ai_reel",
+                                "requires_modules": ["advanced.ai"],
+                                "steps": [{"name": "ai_scores", "operation": "score_ai_frames"}],
+                            }
+                        )
+                    )
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    exit_code = main(["validate", pipeline])
+                self.assertEqual(exit_code, 1)
+                self.assertIn("requires disabled module advanced.ai", stderr.getvalue())
+            finally:
+                os.chdir(cwd)
+
     def test_pipeline_validation_rejects_unknown_step_output_reference(self):
         pipeline = {
             "name": "bad_reference",
@@ -1151,7 +1215,18 @@ class PipelineTests(unittest.TestCase):
             validate_pipeline(pipeline)
 
     def test_pipeline_validation_accepts_all_presets(self):
-        for preset in ["simple", "reel", "roughcut", "youtube", "documentary", "motorsports", "vision_reel"]:
+        for preset in [
+            "simple",
+            "reel",
+            "roughcut",
+            "youtube",
+            "documentary",
+            "motorsports",
+            "vision_reel",
+            "ai_reel",
+            "ai_garage_shop",
+            "ai_event_recap",
+        ]:
             with tempfile.TemporaryDirectory() as tmp:
                 output = os.path.join(tmp, f"{preset}.yaml")
                 write_preset(preset, output)

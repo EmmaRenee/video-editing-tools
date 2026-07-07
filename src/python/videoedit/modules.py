@@ -170,6 +170,10 @@ PRESET_MODULES = {
     "youtube": {"core.rating", "core.handoff"},
     "documentary": {"core.rating", "core.handoff"},
     "motorsports": {"core.rating", "advanced.motorsports", "content.reports", "core.review", "core.handoff"},
+    "vision_reel": {"core.rating", "advanced.vision", "core.review", "core.handoff"},
+    "ai_reel": {"core.rating", "advanced.ai", "core.review", "core.handoff"},
+    "ai_garage_shop": {"core.rating", "advanced.ai", "core.review", "content.reports", "core.handoff"},
+    "ai_event_recap": {"core.rating", "advanced.ai", "core.review", "core.handoff"},
 }
 
 
