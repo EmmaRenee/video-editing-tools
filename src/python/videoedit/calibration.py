@@ -229,6 +229,7 @@ def compare_calibration_runs(inputs: list[str], output_dir: str) -> dict[str, An
                 "name": run["name"],
                 "path": run["path"],
                 "metrics": metrics,
+                "scoring_modes": run.get("scoring_modes", []),
                 "delta": {
                     key: round(float(metrics.get(key, 0.0)) - float(baseline_metrics.get(key, 0.0)), 4)
                     for key in ["precision", "recall", "f1"]
@@ -353,6 +354,7 @@ def evaluate_candidate_set(
         "generated": datetime.now().isoformat(),
         "project": annotations.project,
         "source_root": annotations.source_root,
+        "scoring_modes": _scoring_modes(ratings, candidate_rows),
         "summary": {
             "annotations": len(annotations.clips),
             "positive_annotations": len(positives),
@@ -461,6 +463,7 @@ def _calibration_run(path: str) -> dict[str, Any]:
         "path": report_path,
         "metrics": data.get("metrics", {}),
         "summary": data.get("summary", {}),
+        "scoring_modes": data.get("scoring_modes", []),
     }
 
 
@@ -471,13 +474,14 @@ def _write_compare_markdown(payload: dict[str, Any], output: str) -> None:
         f"**Generated:** {payload['generated']}",
         f"**Baseline:** {payload['baseline']}",
         "",
-        "| Rank | Run | F1 | Recall | Precision | Missed | False positives | Delta F1 |",
-        "|------|-----|----|--------|-----------|--------|-----------------|----------|",
+        "| Rank | Run | Modes | F1 | Recall | Precision | Missed | False positives | Delta F1 |",
+        "|------|-----|-------|----|--------|-----------|--------|-----------------|----------|",
     ]
     for run in payload.get("runs", []):
         metrics = run.get("metrics", {})
         lines.append(
-            f"| {run['rank']} | {run['name']} | {metrics.get('f1', 0)} | {metrics.get('recall', 0)} | "
+            f"| {run['rank']} | {run['name']} | {', '.join(run.get('scoring_modes', []))} | "
+            f"{metrics.get('f1', 0)} | {metrics.get('recall', 0)} | "
             f"{metrics.get('precision', 0)} | {metrics.get('missed', 0)} | "
             f"{metrics.get('false_positives', 0)} | {run['delta'].get('f1', 0)} |"
         )
@@ -505,6 +509,22 @@ def _signal_breakdown(candidate: dict[str, Any] | None) -> dict[str, Any]:
         },
         "reasons": list(candidate.get("reasons", []))[:6],
     }
+
+
+def _scoring_modes(ratings: dict[str, Any], candidates: list[dict[str, Any]]) -> list[str]:
+    config = ratings.get("config", {}) if isinstance(ratings.get("config"), dict) else {}
+    modes = ["deterministic"]
+    signal_artifacts = config.get("signal_artifacts", {}) if isinstance(config.get("signal_artifacts"), dict) else {}
+    has_ai = bool(signal_artifacts.get("ai_frame_scores") or config.get("ai_frame_scores_path"))
+    has_ai = has_ai or any(candidate.get("signals", {}).get("ai_frame_score") is not None for candidate in candidates)
+    has_ai = has_ai or any(candidate.get("ai_explanations") for candidate in ratings.get("candidates", []))
+    if has_ai:
+        modes.append("ai-assisted")
+    has_learned = bool(config.get("learned_scorer_path"))
+    has_learned = has_learned or any(candidate.get("signals", {}).get("learned_score") is not None for candidate in candidates)
+    if has_learned:
+        modes.append("learned")
+    return modes
 
 
 def _metrics(

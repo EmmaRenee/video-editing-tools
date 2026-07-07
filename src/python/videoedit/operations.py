@@ -25,6 +25,7 @@ from .diagnostics import resolve_command
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
 from .inventory import build_inventory, write_inventory_outputs
+from .learning import build_review_dataset, train_local_scorer
 from .modules import all_modules, is_module_enabled, load_module_config, module_for_operation, operation_enabled
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
@@ -48,6 +49,8 @@ SIGNAL_ARTIFACT_ALIASES = {
     "ai_frame_scores_path": "ai_frame_scores",
     "ai_clip_judgments": "ai_clip_judgments",
     "ai_clip_judgments_path": "ai_clip_judgments",
+    "learned_scorer": "learned_scorer",
+    "learned_scorer_path": "learned_scorer",
 }
 
 
@@ -116,6 +119,8 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "find_ai_missed_moments", "Find AI-scored missed moment candidates", op_find_ai_missed_moments)
     _register(registry, enabled_only, cwd, "generate_missed_review", "Generate review HTML for AI missed moments", op_generate_missed_review)
     _register(registry, enabled_only, cwd, "judge_ai_clips", "Judge review clips with an optional local VLM provider", op_judge_ai_clips)
+    _register(registry, enabled_only, cwd, "build_review_dataset", "Build a portable review-decision learning dataset", op_build_review_dataset)
+    _register(registry, enabled_only, cwd, "train_review_scorer", "Train a small local scorer from review decisions", op_train_review_scorer)
     _register(registry, enabled_only, cwd, "plan_content_series", "Plan reusable content-series clips from ratings", op_plan_content_series)
     _register(registry, enabled_only, cwd, "generate_content_map", "Generate a ranked editorial content map", op_generate_content_map)
     _register(registry, enabled_only, cwd, "quote_mining", "Generate transcript-forward quote-mining report", op_quote_mining)
@@ -189,6 +194,10 @@ def _merge_signal_artifact_aliases(config_data: dict[str, Any]) -> None:
             config_data["visual_objects_path"] = artifacts["visual_objects"]
         if artifacts.get("ai_frame_scores"):
             config_data["ai_frame_scores_path"] = artifacts["ai_frame_scores"]
+        if artifacts.get("ai_clip_judgments"):
+            config_data["ai_clip_judgments_path"] = artifacts["ai_clip_judgments"]
+        if artifacts.get("learned_scorer"):
+            config_data["learned_scorer_path"] = artifacts["learned_scorer"]
 
 
 def op_filter_candidates(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -576,9 +585,42 @@ def op_judge_ai_clips(context: dict[str, Any], params: dict[str, Any]) -> dict[s
     return result
 
 
+def op_build_review_dataset(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    inputs_value = params.get("inputs") or params.get("input") or context.get("review_decisions")
+    if not inputs_value:
+        raise ValueError("build_review_dataset requires review_decisions inputs")
+    inputs = inputs_value if isinstance(inputs_value, list) else [inputs_value]
+    output = _jsonl_output(params.get("output") or context["output"], "review_dataset.jsonl")
+    result = build_review_dataset(
+        [os.fspath(item) for item in inputs],
+        output,
+        include_source_paths=bool(params.get("include_source_paths", False)),
+        project_profile=params.get("project_profile"),
+    )
+    context["review_dataset"] = output
+    return result
+
+
+def op_train_review_scorer(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    dataset_value = params.get("input") or params.get("dataset") or context.get("review_dataset")
+    if not dataset_value:
+        raise ValueError("train_review_scorer requires review_dataset artifact")
+    output = _json_output(params.get("output") or context["output"], "local_scorer.json")
+    result = train_local_scorer(os.fspath(dataset_value), output)
+    context["learned_scorer"] = output
+    return result
+
+
 def _json_output(value: Any, default_name: str) -> str:
     output = os.fspath(value)
     if os.path.splitext(output)[1].lower() == ".json":
+        return output
+    return os.path.join(output, default_name)
+
+
+def _jsonl_output(value: Any, default_name: str) -> str:
+    output = os.fspath(value)
+    if os.path.splitext(output)[1].lower() == ".jsonl":
         return output
     return os.path.join(output, default_name)
 

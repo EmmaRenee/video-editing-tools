@@ -15,6 +15,7 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | OpenCV | Optional | Face/person presence detection |
 | OpenCLIP + Torch | Optional | AI profile frame scoring and missed-moment discovery |
 | Local VLM judge command | Optional | Heavier review-clip judging through `videoedit ai judge` |
+| Local learned scorer | Optional | Dependency-free scorer trained from reviewed decisions |
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
@@ -186,6 +187,16 @@ videoedit review-assets analysis/ratings.json --output review_ai/ --ai-clip-judg
 ```
 
 If no provider is configured, `videoedit ai judge` writes an unavailable `ai_clip_judgments.json` artifact with setup guidance and returns a non-zero CLI status.
+
+Optional local scorer trained from reviewed decisions:
+
+```bash
+videoedit ai dataset build --inputs analysis/*/review_decisions.json --output training/review_dataset.jsonl
+videoedit ai train-scorer training/review_dataset.jsonl --output models/local_scorer.json
+videoedit rate footage/ --output analysis_learned/ --learned-scorer models/local_scorer.json
+```
+
+The JSONL dataset is portable and does not copy source videos by default. `local_scorer.json` is small and inspectable, and learned scoring only affects rating when a scorer path is supplied via `--learned-scorer` or `AnalysisConfig.learned_scorer_path`.
 
 Calibrate scoring after marking human-approved moments:
 

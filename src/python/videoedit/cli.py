@@ -37,6 +37,7 @@ from .content import generate_content_map, generate_quote_mining, list_series_te
 from .diagnostics import format_diagnostics, run_diagnostics
 from .edl import export_selection_file
 from .inventory import build_inventory, write_inventory_outputs
+from .learning import build_review_dataset, train_local_scorer
 from .modules import (
     disable_module,
     enable_module,
@@ -218,6 +219,18 @@ def build_parser() -> argparse.ArgumentParser:
     ai_judge.add_argument("--retries", type=int, default=1)
     ai_judge.add_argument("--timeout", type=int, default=180)
     ai_judge.set_defaults(func=cmd_ai_judge)
+    ai_dataset = ai_sub.add_parser("dataset", help="Build or inspect AI learning datasets")
+    ai_dataset_sub = ai_dataset.add_subparsers(dest="ai_dataset_command", required=True)
+    ai_dataset_build = ai_dataset_sub.add_parser("build", help="Build a portable review training dataset")
+    ai_dataset_build.add_argument("--inputs", nargs="+", required=True, help="review_decisions.json files")
+    ai_dataset_build.add_argument("--output", "-o", required=True)
+    ai_dataset_build.add_argument("--project-profile")
+    ai_dataset_build.add_argument("--include-source-paths", action="store_true")
+    ai_dataset_build.set_defaults(func=cmd_ai_dataset_build)
+    ai_train = ai_sub.add_parser("train-scorer", help="Train a small local scorer from review dataset JSONL")
+    ai_train.add_argument("dataset")
+    ai_train.add_argument("--output", "-o", required=True)
+    ai_train.set_defaults(func=cmd_ai_train_scorer)
 
     calibrate = sub.add_parser("calibrate", help="Evaluate and tune footage scoring against annotations")
     calibrate_sub = calibrate.add_subparsers(dest="calibrate_command", required=True)
@@ -350,6 +363,7 @@ def add_rate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--topic-clusters", help="topic_clusters.json from cluster_transcript_topics")
     parser.add_argument("--ai-frame-scores", help="ai_frame_scores.json from videoedit ai score-frames")
     parser.add_argument("--ai-clip-judgments", help="ai_clip_judgments.json from videoedit ai judge")
+    parser.add_argument("--learned-scorer", help="local_scorer.json from videoedit ai train-scorer")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--min-select-score", type=int)
     parser.add_argument("--min-review-score", type=int)
@@ -382,6 +396,8 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         config.signal_artifacts["ai_frame_scores"] = args.ai_frame_scores
     if args.ai_clip_judgments:
         config.ai_clip_judgments_path = args.ai_clip_judgments
+    if args.learned_scorer:
+        config.learned_scorer_path = args.learned_scorer
     if args.max_candidates is not None:
         config.max_candidates = args.max_candidates
     if args.min_select_score is not None:
@@ -654,6 +670,25 @@ def cmd_ai_judge(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, indent=2))
     return 0 if result.get("status") != "unavailable" else 1
+
+
+def cmd_ai_dataset_build(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = build_review_dataset(
+        args.inputs,
+        args.output,
+        include_source_paths=args.include_source_paths,
+        project_profile=args.project_profile,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_ai_train_scorer(args: argparse.Namespace) -> int:
+    require_module_enabled("advanced.ai")
+    result = train_local_scorer(args.dataset, args.output)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_calibrate_init(args: argparse.Namespace) -> int:
