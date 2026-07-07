@@ -876,17 +876,57 @@ class LearningTests(unittest.TestCase):
                                     "action": "review",
                                     "labels": ["audio_spike"],
                                     "signals": {"audio_interest_score": 10},
+                                },
+                                {
+                                    "id": "clip_0002",
+                                    "source": "/private/source.mp4",
+                                    "start_seconds": 10,
+                                    "end_seconds": 15,
+                                    "score": 20,
+                                    "action": "cut",
+                                    "labels": [],
+                                    "signals": {"audio_interest_score": 0},
                                 }
                             ]
                         }
                     )
                 )
             with open(decisions, "w", encoding="utf-8") as handle:
-                handle.write(json.dumps({"ratings": ratings, "decisions": [{"id": "clip_0001", "decision": "approve"}]}))
+                handle.write(
+                    json.dumps(
+                        {
+                            "ratings": ratings,
+                            "decisions": [
+                                {"id": "clip_0001", "decision": "approve"},
+                                {"id": "clip_0002", "decision": "reject"},
+                            ],
+                        }
+                    )
+                )
             self.assertEqual(main(["ai", "dataset", "build", "--inputs", decisions, "--output", dataset]), 0)
             self.assertTrue(os.path.exists(dataset))
             self.assertEqual(main(["ai", "train-scorer", dataset, "--output", model]), 0)
             self.assertEqual(_read_json(model)["schema_version"], "videoedit.learned_scorer.v1")
+
+    def test_train_local_scorer_rejects_single_class_dataset(self):
+        from videoedit.learning import train_local_scorer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = os.path.join(tmp, "review_dataset.jsonl")
+            model = os.path.join(tmp, "local_scorer.json")
+            with open(dataset, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "schema_version": "videoedit.review_dataset.v1",
+                            "features": {"deterministic_score": 90},
+                            "label": {"rating": "select", "target": 1},
+                        }
+                    )
+                    + "\n"
+                )
+            with self.assertRaisesRegex(ValueError, "both positive and negative"):
+                train_local_scorer(dataset, model)
 
     def test_rate_config_accepts_learned_scorer_flag(self):
         with tempfile.TemporaryDirectory() as tmp:

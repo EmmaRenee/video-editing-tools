@@ -213,7 +213,7 @@ videoedit rate footage/ --output analysis_with_ai_explanations/ \
 
 ### Optional Learning From Reviews
 
-V15 can turn reviewed decisions into a portable JSONL dataset, train a small inspectable local scorer, and apply it only when explicitly supplied. Datasets do not copy source video by default; records use hashed source IDs plus deterministic/AI features and decision labels.
+videoedit can turn reviewed decisions into a portable JSONL dataset, train a small inspectable local scorer, and apply it only when explicitly supplied. Datasets do not copy source video by default; records use hashed source IDs plus deterministic/AI features and decision labels.
 
 ```bash
 videoedit ai dataset build \

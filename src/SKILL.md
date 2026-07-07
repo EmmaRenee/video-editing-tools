@@ -378,12 +378,17 @@ Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_
 | `config_candidates.csv`, `proposed_config.json` | Ranked tuning candidates from `videoedit calibrate tune` |
 | `ai_frame_scores.json` | Optional OpenCLIP/profile frame-score artifact |
 | `ai_clip_judgments.json` | Optional local VLM clip-judge artifact with separate AI reasons |
-| `review_dataset.jsonl` | Portable reviewed-decision training records without source video copies |
-| `local_scorer.json` | Small inspectable learned scorer trained from review decisions |
 | `ai_missed_moments.json` | Optional review-only AI-discovered missed moments |
 | `missed_review.html`, `missed_review_decisions.json` | Review and annotation-compatible decisions for missed moments |
 
 Candidates include score, action (`select`, `review`, `broll`, `cut`), labels, signal scores, and reasons explaining why they were selected.
+
+Learning/training outputs are conditional and are produced by the `videoedit ai dataset build` and `videoedit ai train-scorer` commands:
+
+| Artifact | Purpose |
+|----------|---------|
+| `review_dataset.jsonl` | Portable reviewed-decision training records without source video copies |
+| `local_scorer.json` | Small inspectable learned scorer trained from review decisions |
 
 ## Content Planning Outputs
 

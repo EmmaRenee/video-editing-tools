@@ -67,9 +67,11 @@ def train_local_scorer(dataset_jsonl: str, output: str) -> dict[str, Any]:
     train_rows = [record for record in records if record.get("label", {}).get("target") in {0, 1}]
     if not train_rows:
         raise ValueError("training dataset has no labeled select/reject records")
-    feature_names = sorted({name for record in train_rows for name in record.get("features", {}) if _is_number(record["features"].get(name))})
     positives = [record for record in train_rows if int(record["label"]["target"]) == 1]
     negatives = [record for record in train_rows if int(record["label"]["target"]) == 0]
+    if not positives or not negatives:
+        raise ValueError("training dataset must include both positive and negative review decisions")
+    feature_names = sorted({name for record in train_rows for name in record.get("features", {}) if _is_number(record["features"].get(name))})
     stats = {}
     weights = {}
     for name in feature_names:

@@ -196,7 +196,7 @@ videoedit ai train-scorer training/review_dataset.jsonl --output models/local_sc
 videoedit rate footage/ --output analysis_learned/ --learned-scorer models/local_scorer.json
 ```
 
-The JSONL dataset is portable and does not copy source videos by default. `local_scorer.json` is small and inspectable, and learned scoring only affects rating when `--learned-scorer` is provided.
+The JSONL dataset is portable and does not copy source videos by default. `local_scorer.json` is small and inspectable, and learned scoring only affects rating when a scorer path is supplied via `--learned-scorer` or `AnalysisConfig.learned_scorer_path`.
 
 Calibrate scoring after marking human-approved moments:
 
