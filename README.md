@@ -112,6 +112,10 @@ videoedit init roughcut --output roughcut.yaml
 videoedit run roughcut.yaml --input footage/ --output output/
 videoedit init vision_reel --output vision_reel.yaml
 videoedit run vision_reel.yaml --input footage/ --output output/
+videoedit init ai_reel --output ai_reel.yaml
+videoedit run ai_reel.yaml --input footage/ --output output/
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit init ai_event_recap --output ai_event_recap.yaml
 videoedit content-map analysis/ratings.json --output reports/
 videoedit quote-mining analysis/ratings.json --output reports/
 videoedit series analysis/ratings.json --template team_tuesday --output series/
@@ -177,7 +181,7 @@ videoedit rate footage/ --output analysis_fused/ \
 
 ### Optional AI Frame Scoring And Missed-Moment Discovery
 
-`advanced.ai` adds project-agnostic AI profiles and optional OpenCLIP frame scoring. This is explicit and local-first: `videoedit rate` is unchanged unless you pass `--ai-frame-scores`.
+`advanced.ai` adds project-agnostic AI profiles and optional OpenCLIP frame scoring. This is explicit, local-first, and does not require a paid subscription. `videoedit rate` is unchanged unless you pass `--ai-frame-scores` or run an AI preset that supplies that artifact.
 
 ```bash
 videoedit ai profiles list
@@ -197,6 +201,25 @@ videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
 ```
 
 Profiles include `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`. AI missed moments are review-only; they are never inserted into approvals or rough cuts automatically.
+
+Preset-based AI workflows declare their optional modules and local dependencies in the YAML. Use `validate` before long runs and `run --dry-run` to inspect expected artifacts:
+
+```bash
+videoedit init ai_reel --output ai_reel.yaml
+videoedit validate ai_reel.yaml
+videoedit run ai_reel.yaml --input footage/ --output output/ --dry-run
+videoedit run ai_reel.yaml --input footage/ --output output/
+
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit validate ai_garage_shop.yaml
+videoedit run ai_garage_shop.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_event_recap --output ai_event_recap.yaml
+videoedit validate ai_event_recap.yaml
+videoedit run ai_event_recap.yaml --input footage/ --output output/ --dry-run
+```
+
+Use `ai_garage_shop` for generic garage/shop work such as build process, tools, vehicle details, and educational B-roll. Use `ai_event_recap` for generic event or motorsports recap workflows where arrival, venue, action, signage, and missed visual moments matter. These examples are project-agnostic; project names are not hardcoded into the scoring behavior.
 
 Optional clip judging uses a configured local provider command after review assets exist. The command reads request JSON on stdin and writes judgment JSON on stdout; set `VIDEOEDIT_AI_JUDGE_COMMAND` or pass `--provider-command`.
 

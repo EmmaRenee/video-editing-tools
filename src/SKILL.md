@@ -67,6 +67,7 @@ Raw footage (hours)
   → videoedit inventory/rate (metadata, scenes, silence, audio spikes, transcripts)
   → optional detect_visual_objects + rate --visual-objects when YOLO vision signals should affect B-roll
   → optional videoedit ai score-frames + rate --ai-frame-scores for profile-based AI scoring
+  → optional ai_reel / ai_garage_shop / ai_event_recap presets for local AI-assisted recall
   → ratings.json + candidates.csv + review assets
   → optional videoedit ai judge after review-assets when a local VLM provider is configured
   → optional videoedit ai dataset/train-scorer when reviewed decisions exist across projects
@@ -94,7 +95,7 @@ videoedit modules list
 videoedit modules doctor
 ```
 
-Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, OpenCLIP, and Torch are optional providers.
+Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, OpenCLIP, and Torch are optional providers. The recommended AI path is local/open-source and does not require a paid subscription.
 
 ### 1a. Check or configure feature modules
 
@@ -192,6 +193,23 @@ videoedit calibrate from-decisions review_missed/missed_review_decisions.json \
 Built-in AI profiles: `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`.
 
 AI missed moments are review-only. Never insert them into `approved.json` or a rough cut automatically; route them through `missed_review.html`, decisions, and calibration annotations first.
+
+For reusable YAML workflows, prefer these AI presets before hand-writing steps:
+
+```bash
+videoedit init ai_reel --output ai_reel.yaml
+videoedit validate ai_reel.yaml
+videoedit run ai_reel.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit validate ai_garage_shop.yaml
+videoedit run ai_garage_shop.yaml --input footage/ --output output/ --dry-run
+videoedit init ai_event_recap --output ai_event_recap.yaml
+videoedit validate ai_event_recap.yaml
+videoedit run ai_event_recap.yaml --input footage/ --output output/ --dry-run
+```
+
+Use `ai_reel` for short-form local AI frame scoring and review handoff. Use `ai_garage_shop` for generic shop work, tools, vehicle detail, and build-process B-roll. Use `ai_event_recap` for generic event or motorsports recap footage and review-only missed moments. These presets declare `advanced.ai` and OpenCLIP/Torch/Pillow dependency metadata; run `videoedit modules doctor` when setup is unclear.
 
 ### 2c. Optional AI clip judging
 
@@ -292,6 +310,9 @@ videoedit init roughcut --output roughcut.yaml
 videoedit init reel --output reel.yaml
 videoedit init documentary --output documentary.yaml
 videoedit init motorsports --output motorsports.yaml
+videoedit init ai_reel --output ai_reel.yaml
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit init ai_event_recap --output ai_event_recap.yaml
 ```
 
 Always validate or dry-run before a long scan:
@@ -314,6 +335,9 @@ Preset intent:
 | `documentary` | Transcript-heavy story and soundbite selection |
 | `motorsports` | Racing event/topic artifacts plus review outputs |
 | `vision_reel` | Optional vision providers plus fused rating and review |
+| `ai_reel` | Local AI frame scoring plus deterministic reel review |
+| `ai_garage_shop` | Generic shop, tools, vehicle detail, and build-process review |
+| `ai_event_recap` | Event recap scoring plus review-only missed moments |
 
 ---
 

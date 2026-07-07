@@ -97,7 +97,7 @@ Scoring is deterministic and explainable. It combines technical metadata, scene-
 
 ### Optional AI Frame Scoring
 
-AI frame scoring is an explicit optional layer. It uses project-agnostic profiles to score sampled frames against prompt sets, writes a JSON artifact, and lets `videoedit rate` fuse that artifact only when supplied.
+AI frame scoring is an explicit optional layer. It is local-first and does not require a paid subscription. It uses project-agnostic profiles to score sampled frames against prompt sets, writes a JSON artifact, and lets `videoedit rate` fuse that artifact only when supplied.
 
 ```bash
 videoedit ai profiles list
@@ -109,6 +109,24 @@ videoedit rate footage/ --output analysis_ai/ \
 ```
 
 Built-in profiles are `general_broll`, `garage_shop`, `motorsports`, `interview`, `event_recap`, `social_reel`, and `documentary`. The frame-score artifact includes schema version, provider metadata, source paths, frame times, prompt scores, labels, and explanations. Missing OpenCLIP/Torch dependencies produce install guidance instead of breaking core rating.
+
+Preset-based AI workflows generate YAML with required optional modules and local dependency metadata:
+
+```bash
+videoedit init ai_reel --output ai_reel.yaml
+videoedit validate ai_reel.yaml
+videoedit run ai_reel.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit validate ai_garage_shop.yaml
+videoedit run ai_garage_shop.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_event_recap --output ai_event_recap.yaml
+videoedit validate ai_event_recap.yaml
+videoedit run ai_event_recap.yaml --input footage/ --output output/ --dry-run
+```
+
+`ai_reel` writes `signals/ai_frame_scores.json`, rates with that artifact, and creates review/approval handoff files. `ai_garage_shop` uses the `garage_shop` profile for generic shop work, vehicle details, tools, and build-process B-roll. `ai_event_recap` uses the `event_recap` profile and adds review-only missed-moment artifacts. These workflows are examples for categories of footage; no project names are hardcoded into scoring.
 
 AI frame scores can also scan rejected or low-ranked footage for likely missed usable moments:
 

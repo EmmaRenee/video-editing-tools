@@ -3,6 +3,25 @@
 from __future__ import annotations
 
 
+AI_FRAME_SCORING_DEPENDENCIES = [
+    {
+        "name": "open_clip",
+        "type": "python_module",
+        "purpose": "local OpenCLIP frame scoring against AI profile prompts",
+    },
+    {
+        "name": "torch",
+        "type": "python_module",
+        "purpose": "local tensor runtime used by OpenCLIP",
+    },
+    {
+        "name": "PIL",
+        "type": "python_module",
+        "purpose": "image loading for sampled video frames",
+    },
+]
+
+
 PRESETS = {
     "simple": {
         "name": "simple",
@@ -232,6 +251,181 @@ PRESETS = {
                 "params": {
                     "output": "${output}/review",
                     "max_items": 60,
+                    "proxy": False,
+                },
+            },
+            {
+                "name": "approve",
+                "operation": "approve_candidates",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/approved.json",
+                    "decisions": "review.decisions",
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "input": "approve.approved", "params": {"output": "${output}/edl"}},
+        ],
+    },
+    "ai_reel": {
+        "name": "ai_reel",
+        "description": "Local-first AI frame scoring plus deterministic rating for short-form reel review",
+        "requires_modules": ["core.rating", "advanced.ai", "core.review", "core.handoff"],
+        "requires_dependencies": AI_FRAME_SCORING_DEPENDENCIES,
+        "steps": [
+            {
+                "name": "ai_scores",
+                "operation": "score_ai_frames",
+                "params": {
+                    "output": "${output}/signals/ai_frame_scores.json",
+                    "profile": "social_reel",
+                    "sample_interval": 6,
+                    "max_frames_per_file": 12,
+                    "min_score": 0.22,
+                },
+            },
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "output": "${output}/rate",
+                    "transcript_mode": "auto",
+                    "max_candidates": 60,
+                    "window_pre_roll": 3,
+                    "window_post_roll": 9,
+                    "ai_frame_scores": "ai_scores.output",
+                },
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 60,
+                    "proxy": False,
+                },
+            },
+            {
+                "name": "approve",
+                "operation": "approve_candidates",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/approved.json",
+                    "decisions": "review.decisions",
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "input": "approve.approved", "params": {"output": "${output}/edl"}},
+        ],
+    },
+    "ai_garage_shop": {
+        "name": "ai_garage_shop",
+        "description": "Local AI prompts for shop work, vehicle details, and build-process review",
+        "requires_modules": ["core.rating", "advanced.ai", "core.review", "content.reports", "core.handoff"],
+        "requires_dependencies": AI_FRAME_SCORING_DEPENDENCIES,
+        "steps": [
+            {
+                "name": "ai_scores",
+                "operation": "score_ai_frames",
+                "params": {
+                    "output": "${output}/signals/ai_frame_scores.json",
+                    "profile": "garage_shop",
+                    "sample_interval": 8,
+                    "max_frames_per_file": 10,
+                    "min_score": 0.22,
+                },
+            },
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "output": "${output}/rate",
+                    "transcript_mode": "auto",
+                    "max_candidates": 75,
+                    "window_pre_roll": 4,
+                    "window_post_roll": 14,
+                    "ai_frame_scores": "ai_scores.output",
+                },
+            },
+            {
+                "name": "content_map",
+                "operation": "generate_content_map",
+                "input": "rate.ratings",
+                "params": {"output": "${output}/reports"},
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 75,
+                    "proxy": False,
+                },
+            },
+            {
+                "name": "approve",
+                "operation": "approve_candidates",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/approved.json",
+                    "decisions": "review.decisions",
+                },
+            },
+            {"name": "edl", "operation": "generate_edl", "input": "approve.approved", "params": {"output": "${output}/edl"}},
+        ],
+    },
+    "ai_event_recap": {
+        "name": "ai_event_recap",
+        "description": "Local AI event-recap prompts with missed-moment review support",
+        "requires_modules": ["core.rating", "advanced.ai", "core.review", "core.handoff"],
+        "requires_dependencies": AI_FRAME_SCORING_DEPENDENCIES,
+        "steps": [
+            {
+                "name": "ai_scores",
+                "operation": "score_ai_frames",
+                "params": {
+                    "output": "${output}/signals/ai_frame_scores.json",
+                    "profile": "event_recap",
+                    "sample_interval": 8,
+                    "max_frames_per_file": 12,
+                    "min_score": 0.22,
+                },
+            },
+            {
+                "name": "rate",
+                "operation": "rate_footage",
+                "params": {
+                    "output": "${output}/rate",
+                    "transcript_mode": "auto",
+                    "max_candidates": 75,
+                    "window_pre_roll": 4,
+                    "window_post_roll": 16,
+                    "ai_frame_scores": "ai_scores.output",
+                },
+            },
+            {
+                "name": "missed",
+                "operation": "find_ai_missed_moments",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/ai_missed_moments.json",
+                    "ai_frame_scores": "ai_scores.output",
+                    "min_score": 0.35,
+                },
+            },
+            {
+                "name": "missed_review",
+                "operation": "generate_missed_review",
+                "input": "missed.output",
+                "params": {"output": "${output}/missed_review"},
+            },
+            {
+                "name": "review",
+                "operation": "generate_review_assets",
+                "input": "rate.ratings",
+                "params": {
+                    "output": "${output}/review",
+                    "max_items": 75,
                     "proxy": False,
                 },
             },

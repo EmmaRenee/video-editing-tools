@@ -9,7 +9,7 @@ import re
 import time
 from typing import Any
 
-from .modules import PRESET_MODULES, all_modules, assert_modules_available, is_module_enabled, load_module_config, preset_enabled
+from .modules import PRESET_MODULES, all_modules, assert_modules_available, is_module_enabled, load_module_config
 from .operations import OperationRegistry, default_registry
 from .presets import PRESETS
 from .simple_yaml import dumps, load_mapping
@@ -56,8 +56,11 @@ OPERATION_OUTPUTS = {
         "warnings",
     },
     "detect_face_person_presence": {"output", "count", "status", "warnings"},
+    "score_ai_frames": {"output", "status", "sources", "frames", "warnings"},
     "detect_motorsports_events": {"output", "count"},
     "cluster_transcript_topics": {"output", "count"},
+    "find_ai_missed_moments": {"output", "count"},
+    "generate_missed_review": {"html", "decisions", "count"},
     "plan_content_series": {"plan", "captions", "selections", "count"},
     "generate_content_map": {"json", "markdown"},
     "quote_mining": {"markdown", "candidates", "transcript_hits"},
@@ -78,8 +81,11 @@ OPERATION_CONTEXT_OUTPUTS = {
     "detect_ocr_signage": {"ocr_signage"},
     "detect_visual_objects": {"visual_objects"},
     "detect_face_person_presence": {"face_person_presence"},
+    "score_ai_frames": {"ai_frame_scores"},
     "detect_motorsports_events": {"motorsports_events"},
     "cluster_transcript_topics": {"topic_clusters"},
+    "find_ai_missed_moments": {"ai_missed_moments"},
+    "generate_missed_review": {"missed_review_decisions"},
     "plan_content_series": {"series_plan", "series_selections"},
     "generate_content_map": {"content_map"},
     "quote_mining": {"quote_mining"},
@@ -129,6 +135,7 @@ def validate_pipeline(data: dict[str, Any]) -> None:
     if "steps" not in data or not isinstance(data["steps"], list):
         raise ValueError("pipeline requires a steps list")
     assert_modules_available(data.get("requires_modules", []))
+    _validate_required_dependencies(data.get("requires_dependencies", []))
     registry = default_registry(enabled_only=False)
     step_infos = []
     step_names: set[str] = set()
@@ -280,6 +287,10 @@ def plan_pipeline(path: str, input_path: str, output_dir: str) -> dict[str, Any]
     return {
         "pipeline": context["pipeline"],
         "description": pipeline.get("description"),
+        "requirements": {
+            "modules": list(pipeline.get("requires_modules", [])),
+            "dependencies": list(pipeline.get("requires_dependencies", [])),
+        },
         "input": input_path,
         "output": output_dir,
         "steps": steps,
@@ -396,10 +407,26 @@ def _planned_result(
         }
     if operation_name == "detect_face_person_presence":
         return {"output": _json_output_plan(output, "face_person_presence.json"), "count": "unknown", "status": "planned", "warnings": []}
+    if operation_name == "score_ai_frames":
+        return {
+            "output": _json_output_plan(output, "ai_frame_scores.json"),
+            "status": "planned",
+            "sources": "unknown",
+            "frames": "unknown",
+            "warnings": [],
+        }
     if operation_name == "detect_motorsports_events":
         return {"output": _json_output_plan(output, "motorsports_events.json"), "count": "unknown"}
     if operation_name == "cluster_transcript_topics":
         return {"output": _json_output_plan(output, "topic_clusters.json"), "count": "unknown"}
+    if operation_name == "find_ai_missed_moments":
+        return {"output": _json_output_plan(output, "ai_missed_moments.json"), "count": "unknown"}
+    if operation_name == "generate_missed_review":
+        return {
+            "html": os.path.join(output, "missed_review.html"),
+            "decisions": os.path.join(output, "missed_review_decisions.json"),
+            "count": "unknown",
+        }
     if operation_name == "plan_content_series":
         return {
             "plan": os.path.join(output, "series_plan.json"),
@@ -466,10 +493,16 @@ def _apply_planned_context(operation_name: str, result: dict[str, Any], context:
         context["visual_objects"] = result.get("output")
     elif operation_name == "detect_face_person_presence":
         context["face_person_presence"] = result.get("output")
+    elif operation_name == "score_ai_frames":
+        context["ai_frame_scores"] = result.get("output")
     elif operation_name == "detect_motorsports_events":
         context["motorsports_events"] = result.get("output")
     elif operation_name == "cluster_transcript_topics":
         context["topic_clusters"] = result.get("output")
+    elif operation_name == "find_ai_missed_moments":
+        context["ai_missed_moments"] = result.get("output")
+    elif operation_name == "generate_missed_review":
+        context["missed_review_decisions"] = result.get("decisions")
     elif operation_name == "plan_content_series":
         context["series_plan"] = result.get("plan")
         context["series_selections"] = result.get("selections")
@@ -596,15 +629,26 @@ def _valid_reference_name(value: str) -> bool:
     return bool(re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", value))
 
 
+def _validate_required_dependencies(dependencies: Any) -> None:
+    if dependencies in (None, []):
+        return
+    if not isinstance(dependencies, list):
+        raise ValueError("requires_dependencies must be a list")
+    for index, dependency in enumerate(dependencies, 1):
+        if not isinstance(dependency, dict):
+            raise ValueError(f"requires_dependencies item {index} must be a mapping")
+        if not dependency.get("name"):
+            raise ValueError(f"requires_dependencies item {index} is missing name")
+        dependency_type = dependency.get("type", "python_module")
+        if dependency_type not in {"python_module", "command"}:
+            raise ValueError(f"requires_dependencies item {index} has unsupported type: {dependency_type}")
+
+
 def _preset_is_enabled(name: str, preset: dict[str, Any]) -> bool:
     required = set(PRESET_MODULES.get(name, set()))
     required.update(preset.get("requires_modules", []))
-    return preset_enabled(name) and all(_module_enabled(module_id) for module_id in required)
-
-
-def _module_enabled(module_id: str) -> bool:
     try:
-        assert_modules_available([module_id])
+        assert_modules_available(sorted(required))
     except ValueError:
         return False
     return True

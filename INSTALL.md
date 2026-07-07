@@ -175,7 +175,25 @@ videoedit ai find-missed analysis/ratings.json --ai-frame-scores analysis/ai_fra
 videoedit ai review-missed analysis/ai_missed_moments.json --output review_missed/
 ```
 
-AI frame scoring is optional. Missing OpenCLIP/Torch dependencies write an unavailable artifact with install guidance; core inventory, rating, review, and rough-cut commands still work.
+AI frame scoring is optional, local-first, and does not require a paid subscription. Missing OpenCLIP/Torch dependencies write an unavailable artifact with install guidance; core inventory, rating, review, and rough-cut commands still work.
+
+AI-assisted presets declare their optional modules and local dependencies. Use `validate` and `run --dry-run` before long footage runs:
+
+```bash
+videoedit init ai_reel --output ai_reel.yaml
+videoedit validate ai_reel.yaml
+videoedit run ai_reel.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_garage_shop --output ai_garage_shop.yaml
+videoedit validate ai_garage_shop.yaml
+videoedit run ai_garage_shop.yaml --input footage/ --output output/ --dry-run
+
+videoedit init ai_event_recap --output ai_event_recap.yaml
+videoedit validate ai_event_recap.yaml
+videoedit run ai_event_recap.yaml --input footage/ --output output/ --dry-run
+```
+
+`ai_reel` uses the `social_reel` profile. `ai_garage_shop` targets generic shop work, tools, vehicle details, and build-process B-roll. `ai_event_recap` targets event or motorsports recap material and creates review-only missed-moment artifacts.
 
 Optional AI clip judging runs after `review-assets` and requires a configured local provider command. The provider command must read request JSON on stdin and write judgment JSON on stdout.
 
