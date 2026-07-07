@@ -234,6 +234,8 @@ videoedit rate footage/ --output analysis_with_ai_explanations/ \
 
 `ai_clip_judgments.json` keeps VLM-style reasons separate from deterministic scoring reasons. Missing providers write an unavailable artifact with setup guidance; base rating and review still work.
 
+Regenerating `videoedit review-assets` in an existing review folder preserves matching decisions, notes, and ordering from `review_decisions.json`. Review decisions of `approve`, `promote`, `select`, `review`, and `broll` flow into `approved.json`; `reject`, `cut`, and `ignore` stay out of handoff and rough-cut outputs.
+
 ### Optional Learning From Reviews
 
 videoedit can turn reviewed decisions into a portable JSONL dataset, train a small inspectable local scorer, and apply it only when explicitly supplied. Datasets do not copy source video by default; records use hashed source IDs plus deterministic/AI features and decision labels.

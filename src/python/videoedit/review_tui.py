@@ -32,17 +32,24 @@ def filter_review_clips(
     action: str = "",
     label: str = "",
     source: str = "",
+    decision: str = "",
+    calibration: str = "",
 ) -> list[dict[str, Any]]:
     query = query.lower().strip()
     action = action.strip()
     label = label.strip()
     source = source.lower().strip()
+    decision = decision.strip()
+    calibration = calibration.strip()
     rows = []
     for clip in clips:
+        calibration_status = str((clip.get("calibration") or {}).get("status", "unreviewed"))
         text = " ".join(
             [
                 str(clip.get("id", "")),
                 str(clip.get("source_name", "")),
+                str(clip.get("decision", "")),
+                calibration_status,
                 " ".join(clip.get("labels", [])),
                 " ".join(clip.get("reasons", [])),
             ]
@@ -54,6 +61,10 @@ def filter_review_clips(
         if label and label not in clip.get("labels", []):
             continue
         if source and source not in str(clip.get("source_name", "")).lower():
+            continue
+        if decision and clip.get("decision") != decision:
+            continue
+        if calibration and calibration_status != calibration:
             continue
         rows.append(clip)
     return sorted(rows, key=lambda item: (int(item.get("order", 999999)), -int(item.get("score", 0))))
@@ -116,15 +127,20 @@ def run_review_tui(manifest_json: str, decisions_json: str) -> dict[str, Any]:
 
 
 def _interactive_loop(clips: list[dict[str, Any]]) -> None:
-    query = ""
+    filters = {"query": "", "action": "", "label": "", "source": "", "decision": "", "calibration": ""}
     while True:
-        rows = filter_review_clips(clips, query=query)[:20]
+        rows = filter_review_clips(clips, **filters)[:20]
         print("")
+        active_filters = ", ".join(f"{key}={value}" for key, value in filters.items() if value)
+        if active_filters:
+            print(f"filters: {active_filters}")
         for clip in rows:
             labels = ", ".join(clip.get("labels", [])[:4])
+            calibration_status = (clip.get("calibration") or {}).get("status", "unreviewed")
             print(
                 f"{clip.get('order'):>3} {clip.get('id')} "
-                f"{clip.get('score')} {clip.get('decision')} {clip.get('source_name')} {labels}"
+                f"{clip.get('score')} {clip.get('decision')} cal:{calibration_status} "
+                f"{clip.get('source_name')} {labels}"
             )
         try:
             command = input("review> ").strip()
@@ -133,7 +149,15 @@ def _interactive_loop(clips: list[dict[str, Any]]) -> None:
         if command in {"q", "quit", "save", "exit"}:
             return
         if command.startswith("filter "):
-            query = command.split(" ", 1)[1].strip()
+            filters["query"] = command.split(" ", 1)[1].strip()
+            continue
+        if command == "clear":
+            for key in filters:
+                filters[key] = ""
+            continue
+        if command.startswith(("action ", "label ", "source ", "decision ", "calibration ")):
+            key, value = command.split(" ", 1)
+            filters[key] = value.strip()
             continue
         parts = command.split(" ", 2)
         if len(parts) >= 2 and parts[0] in {"approve", "review", "reject", "cut", "broll", "promote"}:
@@ -151,7 +175,10 @@ def _interactive_loop(clips: list[dict[str, Any]]) -> None:
         if len(parts) >= 3 and parts[0] == "note":
             update_review_decision(clips, parts[1], note=command.split(" ", 2)[2])
             continue
-        print("Commands: filter TEXT, approve ID [note], review ID, reject ID, order ID N, note ID TEXT, save")
+        print(
+            "Commands: filter TEXT, action VALUE, label VALUE, source VALUE, decision VALUE, "
+            "calibration VALUE, clear, approve ID [note], review ID, reject ID, order ID N, note ID TEXT, save"
+        )
 
 
 def _decision_map(data: dict[str, Any]) -> dict[str, dict[str, Any]]:

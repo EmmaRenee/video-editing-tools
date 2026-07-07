@@ -260,6 +260,8 @@ videoedit roughcut plan approved.json --output roughcut_plan.json --target-durat
 videoedit assemble approved.json --plan roughcut_plan.json --output rough_cut.mp4
 ```
 
+Regenerating review assets into the same folder preserves matching decisions, notes, and order from `review_decisions.json`; clips no longer present in `ratings.json` are dropped from the active decision file. `approve`, `promote`, `select`, `review`, and `broll` decisions become handoff clips, while `reject`, `cut`, and `ignore` do not.
+
 ### Available Operations
 
 | Operation | Description |

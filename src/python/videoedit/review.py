@@ -205,9 +205,11 @@ def generate_review_assets(
     manifest_path = os.path.join(output_dir, "review_assets.json")
     contact_sheet_path = os.path.join(output_dir, "contact_sheet.html")
     decisions_path = os.path.join(output_dir, "review_decisions.json")
+    existing_decisions = _load_decisions(decisions_path) if os.path.exists(decisions_path) else {}
+    decisions_payload = _decision_template(ratings_json, rows, existing_decisions)
     _write_json(manifest_path, manifest)
-    _write_json(decisions_path, _decision_template(ratings_json, rows))
-    _write_contact_sheet(contact_sheet_path, manifest)
+    _write_json(decisions_path, decisions_payload)
+    _write_contact_sheet(contact_sheet_path, manifest, decisions_payload)
     return {
         "manifest": manifest_path,
         "contact_sheet": contact_sheet_path,
@@ -386,31 +388,53 @@ def _clip_seconds(clip: dict, formatted_key: str, seconds_key: str) -> float:
     return timecode_to_seconds(clip.get(formatted_key, 0))
 
 
-def _decision_template(ratings_json: str, rows: list[dict]) -> dict:
+def _decision_template(ratings_json: str, rows: list[dict], existing: dict[str, dict] | None = None) -> dict:
     decisions = []
+    existing = existing or {}
+    active_existing_orders = [
+        _decision_order(existing[row["id"]])
+        for row in rows
+        if row.get("id") in existing and _decision_order(existing[row["id"]]) != 999999
+    ]
+    next_order = (max(active_existing_orders) + 1) if active_existing_orders else 1
     for index, row in enumerate(rows, 1):
         action = row.get("action", "")
+        previous = existing.get(row["id"], {})
+        if previous:
+            order = _decision_order(previous)
+        else:
+            order = next_order if active_existing_orders else index
+            next_order += 1
         decisions.append(
-            {
-                "id": row["id"],
-                "decision": _default_decision(action),
-                "order": index,
-                "note": "",
-                "score": row.get("score", 0),
-                "current_action": action,
-                "source": row.get("source"),
-                "start": row.get("start"),
-                "end": row.get("end"),
-                "labels": row.get("labels", []),
-                "reasons": row.get("reasons", []),
-                "signals": row.get("signals", {}),
-                "calibration": row.get("calibration", {}),
-            }
+            _decision_row(
+                row,
+                decision=str(previous.get("decision") or _default_decision(action)),
+                order=order,
+                note=str(previous.get("note") or ""),
+            )
         )
     return {
         "generated": datetime.now().isoformat(),
         "ratings": ratings_json,
         "decisions": decisions,
+    }
+
+
+def _decision_row(row: dict, decision: str, order: int, note: str) -> dict:
+    return {
+        "id": row["id"],
+        "decision": decision,
+        "order": order,
+        "note": note,
+        "score": row.get("score", 0),
+        "current_action": row.get("action", ""),
+        "source": row.get("source"),
+        "start": row.get("start"),
+        "end": row.get("end"),
+        "labels": row.get("labels", []),
+        "reasons": row.get("reasons", []),
+        "signals": row.get("signals", {}),
+        "calibration": row.get("calibration", {}),
     }
 
 
@@ -441,9 +465,9 @@ def _candidate_selected(
     clip_id = clip.get("id") or clip.get("label")
     if decisions:
         decision = str(decisions.get(clip_id, {}).get("decision", "")).strip().lower()
-        if decision in {"approve", "approved", "promote", "select", "review", "yes", "y"}:
+        if decision in {"approve", "approved", "promote", "select", "review", "broll", "b-roll", "b_roll", "yes", "y"}:
             return True
-        if decision in {"reject", "rejected", "demote", "skip", "cut", "broll", "no", "n"}:
+        if decision in {"reject", "rejected", "demote", "skip", "cut", "ignore", "no", "n"}:
             return False
     score = int(clip.get("score", 0))
     action = clip.get("action", "")
@@ -460,7 +484,12 @@ def _decision_order(decision: dict) -> int:
         return 999999
 
 
-def _write_contact_sheet(path: str, manifest: dict) -> None:
+def _write_contact_sheet(path: str, manifest: dict, decisions: dict | None = None) -> None:
+    decision_by_id = {
+        str(item.get("id")): item
+        for item in (decisions or {}).get("decisions", [])
+        if isinstance(item, dict) and item.get("id")
+    }
     cards = []
     for index, clip in enumerate(manifest.get("clips", []), 1):
         labels_text = ", ".join(clip.get("labels", []))
@@ -487,7 +516,10 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
             if clip.get("proxy")
             else ""
         )
-        decision = _default_decision(clip.get("action", ""))
+        decision_row = decision_by_id.get(clip["id"], {})
+        decision = str(decision_row.get("decision") or _default_decision(clip.get("action", "")))
+        order = _decision_order(decision_row) if decision_row else index
+        note = str(decision_row.get("note") or "")
         cards.append(
             '<article class="clip"'
             f' data-id="{html.escape(clip["id"], quote=True)}"'
@@ -518,10 +550,10 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
             f'<select class="decision">{_decision_options(decision)}</select>'
             '</label>'
             '<label>Order'
-            f'<input class="order" type="number" min="1" value="{index}">'
+            f'<input class="order" type="number" min="1" value="{html.escape(str(order), quote=True)}">'
             '</label>'
             '<label>Note'
-            '<textarea class="note" rows="2"></textarea>'
+            f'<textarea class="note" rows="2">{html.escape(note)}</textarea>'
             '</label>'
             '</div>'
             '</div>'
@@ -884,7 +916,11 @@ def _write_contact_sheet(path: str, manifest: dict) -> None:
 
 
 def _default_decision(action: str) -> str:
-    return "approve" if action in {"select", "review"} else "reject"
+    if action in {"select", "review"}:
+        return "approve"
+    if action in {"broll", "b-roll", "b_roll"}:
+        return "broll"
+    return "reject"
 
 
 def _decision_options(selected: str) -> str:
