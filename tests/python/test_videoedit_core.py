@@ -2013,6 +2013,54 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(data["clips"][0]["label"], "clip_0002")
             self.assertEqual(data["clips"][0]["review_note"], "story beat")
 
+    def test_create_approval_file_treats_broll_as_handoff_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            decisions = os.path.join(tmp, "review_decisions.json")
+            approved = os.path.join(tmp, "approved.json")
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "candidates": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": "/tmp/a.mp4",
+                                    "start": "00:00:01",
+                                    "end": "00:00:05",
+                                    "score": 55,
+                                    "action": "cut",
+                                },
+                                {
+                                    "id": "clip_0002",
+                                    "source": "/tmp/b.mp4",
+                                    "start": "00:00:06",
+                                    "end": "00:00:10",
+                                    "score": 95,
+                                    "action": "select",
+                                },
+                            ]
+                        }
+                    )
+                )
+            with open(decisions, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "decisions": [
+                                {"id": "clip_0001", "decision": "broll", "order": 1, "note": "use as texture"},
+                                {"id": "clip_0002", "decision": "ignore", "order": 2, "note": "already used"},
+                            ]
+                        }
+                    )
+                )
+            create_approval_file(ratings, approved, decisions_json=decisions)
+            with open(approved, encoding="utf-8") as handle:
+                data = json.loads(handle.read())
+            self.assertEqual([clip["label"] for clip in data["clips"]], ["clip_0001"])
+            self.assertEqual(data["clips"][0]["review_decision"], "broll")
+            self.assertEqual(data["clips"][0]["review_note"], "use as texture")
+
     def test_roughcut_plan_sequences_limits_and_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
             approved = os.path.join(tmp, "approved.json")
@@ -2149,6 +2197,65 @@ class ReviewTests(unittest.TestCase):
             with open(result["manifest"], encoding="utf-8") as handle:
                 manifest = json.loads(handle.read())
             self.assertNotIn("ai_explanations", manifest["clips"][0])
+
+    def test_generate_review_assets_preserves_existing_decisions_on_regeneration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ratings = os.path.join(tmp, "ratings.json")
+            output = os.path.join(tmp, "review")
+            os.makedirs(output, exist_ok=True)
+            with open(ratings, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "candidates": [
+                                {
+                                    "id": "clip_0001",
+                                    "source": "/missing/a.mp4",
+                                    "start_seconds": 0,
+                                    "end_seconds": 4,
+                                    "score": 70,
+                                    "action": "review",
+                                },
+                                {
+                                    "id": "clip_0002",
+                                    "source": "/missing/b.mp4",
+                                    "start_seconds": 10,
+                                    "end_seconds": 14,
+                                    "score": 50,
+                                    "action": "cut",
+                                },
+                            ]
+                        }
+                    )
+                )
+            with open(os.path.join(output, "review_decisions.json"), "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "ratings": ratings,
+                            "decisions": [
+                                {"id": "clip_0001", "decision": "broll", "order": 7, "note": "texture shot"},
+                                {"id": "removed_clip", "decision": "approve", "order": 1, "note": "old"},
+                            ],
+                        }
+                    )
+                )
+
+            result = generate_review_assets(ratings, output, max_items=2)
+            with open(result["decisions"], encoding="utf-8") as handle:
+                decisions = json.loads(handle.read())
+            rows = {row["id"]: row for row in decisions["decisions"]}
+            self.assertEqual(set(rows), {"clip_0001", "clip_0002"})
+            self.assertEqual(rows["clip_0001"]["decision"], "broll")
+            self.assertEqual(rows["clip_0001"]["order"], 7)
+            self.assertEqual(rows["clip_0001"]["note"], "texture shot")
+            self.assertEqual(rows["clip_0002"]["decision"], "reject")
+            self.assertEqual(rows["clip_0002"]["order"], 8)
+            with open(result["contact_sheet"], encoding="utf-8") as handle:
+                html = handle.read()
+            self.assertIn('<option value="broll" selected>B-roll</option>', html)
+            self.assertIn('value="7"', html)
+            self.assertIn(">texture shot</textarea>", html)
 
     def test_generate_review_assets_includes_signal_and_calibration_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2335,6 +2442,17 @@ class ReviewTests(unittest.TestCase):
             session = load_review_session(manifest)
             filtered = filter_review_clips(session["clips"], label="object_person")
             self.assertEqual([clip["id"] for clip in filtered], ["clip_0001"])
+            session["clips"][0]["calibration"] = {"status": "matched"}
+            session["clips"][1]["calibration"] = {"status": "false_positive"}
+            session["clips"][1]["decision"] = "reject"
+            self.assertEqual(
+                [clip["id"] for clip in filter_review_clips(session["clips"], decision="reject")],
+                ["clip_0002"],
+            )
+            self.assertEqual(
+                [clip["id"] for clip in filter_review_clips(session["clips"], calibration="matched")],
+                ["clip_0001"],
+            )
             update_review_decision(session["clips"], "clip_0002", decision="promote", note="use it", order=0)
             write_review_decisions(session["clips"], "ratings.json", decisions)
             with open(decisions, encoding="utf-8") as handle:

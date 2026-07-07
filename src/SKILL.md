@@ -277,6 +277,8 @@ videoedit approve analysis/ratings.json --output approved.json --decisions revie
 
 Open the static review UI at `review/contact_sheet.html` or use `videoedit review-tui` to inspect thumbnails/proxies, filter/sort clips, review signal and calibration context, approve or reject clips, add notes, reorder, and export `review_decisions.json`.
 
+Regenerating `review-assets` into the same folder preserves matching decisions, notes, and order from `review_decisions.json`; do not delete that file unless the user wants to reset review state. Treat `approve`, `promote`, `select`, `review`, and `broll` decisions as handoff-positive, and treat `reject`, `cut`, and `ignore` as excluded from `approved.json`.
+
 ### 4. Assemble, extract, and export
 
 ```bash
