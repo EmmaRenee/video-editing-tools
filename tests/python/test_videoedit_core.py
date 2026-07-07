@@ -954,6 +954,41 @@ class LearningTests(unittest.TestCase):
             self.assertEqual(data["config"]["learned_scorer_path"], model)
             self.assertIn("learned_score", data["candidates"][0]["signals"])
 
+    def test_learned_scorer_does_not_invalidate_file_analysis_signature(self):
+        import videoedit.rating as rating_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "clip.mp4")
+            model_a = os.path.join(tmp, "model_a.json")
+            model_b = os.path.join(tmp, "model_b.json")
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write("video")
+            with open(model_a, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"schema_version": "videoedit.learned_scorer.v1", "weights": {"a": 1}}))
+            with open(model_b, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"schema_version": "videoedit.learned_scorer.v1", "weights": {"b": 2}}))
+
+            signature_a = rating_module._file_signature(
+                source,
+                AnalysisConfig(learned_scorer_path=model_a),
+            )
+            signature_b = rating_module._file_signature(
+                source,
+                AnalysisConfig(learned_scorer_path=model_b),
+            )
+            self.assertEqual(signature_a, signature_b)
+            self.assertNotIn("learned_scorer_path", signature_a)
+            self.assertNotIn("learned_scorer_signature", signature_a)
+
+    def test_calibration_detects_ai_mode_when_ai_frame_score_is_zero(self):
+        import videoedit.calibration as calibration_module
+
+        modes = calibration_module._scoring_modes(
+            {"candidates": []},
+            [{"signals": {"ai_frame_score": 0.0}}],
+        )
+        self.assertEqual(modes, ["deterministic", "ai-assisted"])
+
     def test_calibration_compare_preserves_scoring_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
             baseline = os.path.join(tmp, "baseline")

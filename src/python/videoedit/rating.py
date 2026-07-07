@@ -660,8 +660,6 @@ def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
         "visual_objects_path": config.visual_objects_path,
         "signal_artifacts": config.signal_artifacts,
         "signal_artifacts_signature": _artifact_signatures(config),
-        "learned_scorer_path": config.learned_scorer_path,
-        "learned_scorer_signature": _artifact_signature(config.learned_scorer_path),
     }
 
 

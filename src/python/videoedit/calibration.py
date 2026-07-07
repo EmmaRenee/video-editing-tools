@@ -516,7 +516,7 @@ def _scoring_modes(ratings: dict[str, Any], candidates: list[dict[str, Any]]) ->
     modes = ["deterministic"]
     signal_artifacts = config.get("signal_artifacts", {}) if isinstance(config.get("signal_artifacts"), dict) else {}
     has_ai = bool(signal_artifacts.get("ai_frame_scores") or config.get("ai_frame_scores_path"))
-    has_ai = has_ai or any(candidate.get("signals", {}).get("ai_frame_score") for candidate in candidates)
+    has_ai = has_ai or any(candidate.get("signals", {}).get("ai_frame_score") is not None for candidate in candidates)
     has_ai = has_ai or any(candidate.get("ai_explanations") for candidate in ratings.get("candidates", []))
     if has_ai:
         modes.append("ai-assisted")
