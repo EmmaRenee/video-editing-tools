@@ -108,6 +108,8 @@ videoedit modules scaffold my_feature --output videoedit-my-feature/
 
 Core modules are always enabled. Optional modules are project-local via `.videoedit/config.json`. Pipelines may declare `requires_modules`; validate before long runs.
 
+Community extensions should be installable Python packages registered through the `videoedit.modules` entry point group. Use `docs/community-modules.md` and `videoedit modules scaffold` for the contract: stable dotted IDs, lightweight imports, diagnostics for optional providers, JSON-first artifacts, preset `requires_modules`, and tests. Do not load arbitrary local scripts as modules.
+
 Available built-in modules:
 
 | Module | Use |

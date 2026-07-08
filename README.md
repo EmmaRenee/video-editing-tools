@@ -126,7 +126,7 @@ python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
 videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
 ```
 
-See [src/python/README.md](src/python/README.md) for full documentation.
+See [src/python/README.md](src/python/README.md) for full documentation. Community extensions use the `videoedit.modules` entry point group and are documented in [docs/community-modules.md](docs/community-modules.md); external modules can contribute validated operations, diagnostics, and pipeline presets.
 
 ### Calibration Loop
 

@@ -226,7 +226,7 @@ videoedit modules scaffold my_feature --output videoedit-my-feature/
 
 Core modules are always enabled. Optional modules are project-local and are stored in `.videoedit/config.json` when you enable or disable them. Pipeline YAML may declare `requires_modules`; validation fails before processing if a required module is disabled or unavailable.
 
-Community packages can expose modules through the `videoedit.modules` Python entry point group. External modules may contribute operations, presets, diagnostics, and content templates.
+Community packages can expose modules through the `videoedit.modules` Python entry point group. External modules may contribute operations, presets, diagnostics, and content templates. See [../../docs/community-modules.md](../../docs/community-modules.md) for the full contributor contract.
 
 Community module conventions:
 
@@ -234,6 +234,8 @@ Community module conventions:
 - Keep optional dependencies optional; diagnostics should report unavailable providers instead of breaking package import.
 - Operations should read/write JSON-first artifacts and return a small result dictionary.
 - Presets should declare `requires_modules` when they depend on optional modules.
+- Invalid entry points are reported by `videoedit modules doctor` without breaking built-in modules.
+- Disabled external modules hide their presets from `videoedit init`.
 - Include unit tests for module metadata, operation registration, and generated artifacts.
 
 ### Review and Approval
