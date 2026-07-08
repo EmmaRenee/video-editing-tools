@@ -84,6 +84,8 @@ python src/python/rate_footage.py "footage/" --output analysis/
 # Package CLI
 videoedit doctor
 videoedit modules list
+videoedit cloud adapters
+videoedit cloud doctor
 videoedit rate footage/ --output analysis/
 videoedit ai profiles list
 videoedit ai score-frames footage/ --profile garage_shop --output analysis/ai_frame_scores.json
@@ -120,6 +122,8 @@ videoedit content-map analysis/ratings.json --output reports/
 videoedit quote-mining analysis/ratings.json --output reports/
 videoedit series analysis/ratings.json --template team_tuesday --output series/
 videoedit init-project "May Shop Reel" --type reel --output projects/
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs --job-type voiceover --input scripts/narration.txt --output cloud_jobs/voiceover.json --param voice=narrator
 
 # Burn captions
 python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
@@ -258,6 +262,24 @@ videoedit calibrate compare calibration/baseline calibration/learned --output ca
 ```
 
 `local_scorer.json` is a dependency-free linear feature model with weights, feature stats, and training metrics. Learned scoring is opt-in and calibration reports label runs as deterministic, AI-assisted, and/or learned.
+
+### Optional Cloud Adapter Handoffs
+
+`cloud.adapters` is optional and disabled by default. It provides maintained metadata, readiness diagnostics, and local `cloud_job.json` planning for ElevenLabs, HeyGen, and Descript-style handoffs. These commands do not call provider APIs and do not write credentials into artifacts; execution belongs in a maintained adapter runner, desktop workflow, or external service.
+
+```bash
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs \
+  --job-type voiceover \
+  --input scripts/narration.txt \
+  --output cloud_jobs/voiceover.json \
+  --project "Launch Reel" \
+  --param voice=narrator
+```
+
+The `cloud_job.json` artifact records the adapter, job type, input path, parameters, and execution boundary with `network_called: false` and `credentials_stored: false`.
 
 ---
 

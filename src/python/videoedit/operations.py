@@ -19,6 +19,7 @@ from .advanced import (
 from .ai import find_missed_moments, generate_missed_review, judge_review_clips, score_frames
 from .calibration import evaluate_ratings, tune_scoring
 from .captions import burn_captions
+from .cloud import plan_cloud_job
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, plan_content_series
 from .diagnostics import resolve_command
@@ -121,6 +122,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "judge_ai_clips", "Judge review clips with an optional local VLM provider", op_judge_ai_clips)
     _register(registry, enabled_only, cwd, "build_review_dataset", "Build a portable review-decision learning dataset", op_build_review_dataset)
     _register(registry, enabled_only, cwd, "train_review_scorer", "Train a small local scorer from review decisions", op_train_review_scorer)
+    _register(registry, enabled_only, cwd, "plan_cloud_job", "Write a local cloud adapter job spec", op_plan_cloud_job)
     _register(registry, enabled_only, cwd, "plan_content_series", "Plan reusable content-series clips from ratings", op_plan_content_series)
     _register(registry, enabled_only, cwd, "generate_content_map", "Generate a ranked editorial content map", op_generate_content_map)
     _register(registry, enabled_only, cwd, "quote_mining", "Generate transcript-forward quote-mining report", op_quote_mining)
@@ -608,6 +610,26 @@ def op_train_review_scorer(context: dict[str, Any], params: dict[str, Any]) -> d
     output = _json_output(params.get("output") or context["output"], "local_scorer.json")
     result = train_local_scorer(os.fspath(dataset_value), output)
     context["learned_scorer"] = output
+    return result
+
+
+def op_plan_cloud_job(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    adapter = params.get("adapter") or params.get("adapter_id")
+    if not adapter:
+        raise ValueError("plan_cloud_job requires adapter")
+    job_type = params.get("job_type") or params.get("type")
+    if not job_type:
+        raise ValueError("plan_cloud_job requires job_type")
+    output = _json_output(params.get("output") or context["output"], "cloud_job.json")
+    result = plan_cloud_job(
+        str(adapter),
+        output,
+        job_type=str(job_type),
+        input_path=params.get("input") or context.get("approved") or context.get("ratings"),
+        params=dict(params.get("params") or {}),
+        project=params.get("project") or context.get("pipeline"),
+    )
+    context["cloud_job"] = output
     return result
 
 

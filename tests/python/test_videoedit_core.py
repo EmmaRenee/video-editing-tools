@@ -38,6 +38,7 @@ from videoedit.calibration import (
     load_annotations,
 )
 from videoedit.captions import srt_to_ass
+from videoedit.cloud import cloud_diagnostics, list_cloud_adapters, plan_cloud_job
 from videoedit.cli import main
 import videoedit.cli as cli_module
 from videoedit.content import generate_content_map, generate_quote_mining, plan_content_series
@@ -2763,6 +2764,103 @@ class ModuleTests(unittest.TestCase):
                             "steps": [{"name": "rate", "operation": "rate_footage"}],
                         }
                     )
+            finally:
+                os.chdir(cwd)
+
+
+class CloudAdapterTests(unittest.TestCase):
+    def test_cloud_adapter_metadata_diagnostics_and_job_schema(self):
+        adapters = {adapter["id"]: adapter for adapter in list_cloud_adapters()}
+        self.assertGreaterEqual(set(adapters), {"elevenlabs", "heygen", "descript"})
+        diagnostics = cloud_diagnostics(env={})
+        elevenlabs = [row for row in diagnostics["adapters"] if row["id"] == "elevenlabs"][0]
+        self.assertFalse(elevenlabs["ready"])
+        self.assertEqual(elevenlabs["checks"][0]["name"], "ELEVENLABS_API_KEY")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "cloud_job.json")
+            result = plan_cloud_job(
+                "elevenlabs",
+                output,
+                job_type="voiceover",
+                input_path=os.path.join(tmp, "script.txt"),
+                params={"voice": "narrator"},
+                project="Launch Reel",
+            )
+            self.assertEqual(result["status"], "planned")
+            with open(output, encoding="utf-8") as handle:
+                data = json.loads(handle.read())
+            self.assertEqual(data["schema_version"], "videoedit.cloud_job.v1")
+            self.assertEqual(data["adapter"]["id"], "elevenlabs")
+            self.assertEqual(data["job"]["params"]["voice"], "narrator")
+            self.assertFalse(data["execution"]["network_called"])
+            self.assertFalse(data["execution"]["credentials_stored"])
+
+    def test_cloud_cli_and_operation_respect_module_enablement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                rows = module_rows(cwd=tmp)
+                cloud = [row for row in rows if row["id"] == "cloud.adapters"][0]
+                self.assertTrue(cloud["available"])
+                self.assertFalse(cloud["enabled"])
+                self.assertNotIn("plan_cloud_job", [item.name for item in default_registry(cwd=tmp).list()])
+
+                adapters_out = io.StringIO()
+                with redirect_stdout(adapters_out):
+                    self.assertEqual(main(["cloud", "adapters"]), 0)
+                self.assertIn("elevenlabs", adapters_out.getvalue())
+
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    exit_code = main(
+                        [
+                            "cloud",
+                            "plan",
+                            "elevenlabs",
+                            "--job-type",
+                            "voiceover",
+                            "--output",
+                            os.path.join(tmp, "blocked.json"),
+                        ]
+                    )
+                self.assertEqual(exit_code, 1)
+                self.assertIn("cloud.adapters is disabled", stderr.getvalue())
+
+                enable_module("cloud.adapters", cwd=tmp)
+                registry = default_registry(cwd=tmp)
+                self.assertIn("plan_cloud_job", [item.name for item in registry.list()])
+                with self.assertRaisesRegex(ValueError, "requires job_type"):
+                    registry.get("plan_cloud_job").func({"output": tmp}, {"adapter": "elevenlabs"})
+                op_output = os.path.join(tmp, "operation_cloud_job.json")
+                result = registry.get("plan_cloud_job").func(
+                    {"output": tmp},
+                    {"adapter": "elevenlabs", "job_type": "voiceover", "output": op_output},
+                )
+                self.assertEqual(result["status"], "planned")
+                self.assertTrue(os.path.exists(op_output))
+                output = os.path.join(tmp, "cloud_job.json")
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    self.assertEqual(
+                        main(
+                            [
+                                "cloud",
+                                "plan",
+                                "elevenlabs",
+                                "--job-type",
+                                "voiceover",
+                                "--output",
+                                output,
+                                "--param",
+                                "voice=narrator",
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertTrue(os.path.exists(output))
+                self.assertEqual(_read_json(output)["job"]["params"]["voice"], "narrator")
             finally:
                 os.chdir(cwd)
 

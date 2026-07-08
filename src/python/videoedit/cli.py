@@ -32,6 +32,7 @@ from .calibration import (
     tune_scoring,
 )
 from .captions import burn_captions, list_caption_styles
+from .cloud import cloud_diagnostics, list_cloud_adapters, plan_cloud_job
 from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
 from .diagnostics import format_diagnostics, run_diagnostics
@@ -176,6 +177,23 @@ def build_parser() -> argparse.ArgumentParser:
     signals_validate = signals_sub.add_parser("validate", help="Validate a signal artifact JSON file")
     signals_validate.add_argument("artifact")
     signals_validate.set_defaults(func=cmd_signals_validate)
+
+    cloud = sub.add_parser("cloud", help="Plan optional cloud adapter handoffs")
+    cloud_sub = cloud.add_subparsers(dest="cloud_command", required=True)
+    cloud_adapters = cloud_sub.add_parser("adapters", help="List maintained cloud adapters")
+    cloud_adapters.add_argument("--json", action="store_true")
+    cloud_adapters.set_defaults(func=cmd_cloud_adapters)
+    cloud_doctor = cloud_sub.add_parser("doctor", help="Check cloud adapter readiness without calling APIs")
+    cloud_doctor.add_argument("--json", action="store_true")
+    cloud_doctor.set_defaults(func=cmd_cloud_doctor)
+    cloud_plan = cloud_sub.add_parser("plan", help="Write a cloud_job.json handoff spec without calling APIs")
+    cloud_plan.add_argument("adapter")
+    cloud_plan.add_argument("--job-type", required=True)
+    cloud_plan.add_argument("--input")
+    cloud_plan.add_argument("--output", "-o", required=True)
+    cloud_plan.add_argument("--project")
+    cloud_plan.add_argument("--param", action="append", default=[], help="Job parameter as key=value; can be repeated")
+    cloud_plan.set_defaults(func=cmd_cloud_plan)
 
     ai = sub.add_parser("ai", help="AI profile, frame scoring, and missed-moment tools")
     ai_sub = ai.add_subparsers(dest="ai_command", required=True)
@@ -600,6 +618,45 @@ def cmd_signals_validate(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "ok" else 1
 
 
+def cmd_cloud_adapters(args: argparse.Namespace) -> int:
+    adapters = list_cloud_adapters()
+    if args.json:
+        print(json.dumps({"adapters": adapters}, indent=2))
+        return 0
+    for adapter in adapters:
+        jobs = ", ".join(adapter.get("supported_jobs", []))
+        print(f"{adapter['id']:12} {adapter['kind']:14} {adapter['name']} - {jobs}")
+    return 0
+
+
+def cmd_cloud_doctor(args: argparse.Namespace) -> int:
+    report = cloud_diagnostics()
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    for adapter in report["adapters"]:
+        status = "ready" if adapter["ready"] else "not-ready"
+        print(f"{adapter['id']:12} {status}")
+        for check in adapter.get("checks", []):
+            marker = "ok" if check["available"] else "missing"
+            print(f"  {marker:7} {check['name']}")
+    return 0
+
+
+def cmd_cloud_plan(args: argparse.Namespace) -> int:
+    require_module_enabled("cloud.adapters")
+    result = plan_cloud_job(
+        args.adapter,
+        args.output,
+        job_type=args.job_type,
+        input_path=args.input,
+        params=_parse_key_values(args.param),
+        project=args.project,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_ai_profiles_list(args: argparse.Namespace) -> int:
     require_module_enabled("advanced.ai")
     for profile in list_ai_profiles():
@@ -888,6 +945,19 @@ def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_key_values(values: list[str]) -> dict[str, str]:
+    rows = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(f"expected key=value parameter: {value}")
+        key, item_value = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"empty parameter key: {value}")
+        rows[key] = item_value.strip()
+    return rows
 
 
 if __name__ == "__main__":

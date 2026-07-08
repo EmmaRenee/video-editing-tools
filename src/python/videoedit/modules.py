@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any, Callable
 
+from .cloud import cloud_diagnostics
 from .diagnostics import resolve_command
 
 
@@ -122,11 +123,9 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
     ),
     "cloud.adapters": FeatureModule(
         id="cloud.adapters",
-        description="Optional maintained adapters for cloud video and voice tools",
+        description="Optional maintained adapters for cloud video, voice, and text-editing handoffs",
         category="cloud",
         enabled_by_default=False,
-        available=False,
-        unavailable_reason="cloud adapters are documented as future maintained modules",
     ),
 }
 
@@ -160,6 +159,7 @@ OPERATION_MODULES = {
     "judge_ai_clips": "advanced.ai",
     "build_review_dataset": "advanced.ai",
     "train_review_scorer": "advanced.ai",
+    "plan_cloud_job": "cloud.adapters",
     "plan_content_series": "content.series",
     "generate_content_map": "content.reports",
     "quote_mining": "content.reports",
@@ -652,6 +652,19 @@ def _module_dependency_check(module_id: str) -> dict[str, Any]:
         return {"module": module_id, "checks": [_command_status("whisper")]}
     if module_id == "delivery.captions":
         return {"module": module_id, "checks": [_command_status("ffmpeg"), _command_status("ffprobe")]}
+    if module_id == "cloud.adapters":
+        checks = []
+        for adapter in cloud_diagnostics().get("adapters", []):
+            for check in adapter.get("checks", []):
+                checks.append(
+                    {
+                        "name": f"{adapter['id']}:{check['name']}",
+                        "type": check.get("type", "cloud"),
+                        "available": bool(check.get("available", False)),
+                        "path": check.get("path"),
+                    }
+                )
+        return {"module": module_id, "checks": checks}
     return {"module": module_id, "checks": []}
 
 

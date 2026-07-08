@@ -25,6 +25,8 @@ python src/python/rate_footage.py footage/ --output analysis/
 # Package CLI
 videoedit doctor
 videoedit modules list
+videoedit cloud adapters
+videoedit cloud doctor
 videoedit inventory footage/ --output analysis/
 videoedit rate footage/ --output analysis/
 videoedit ai profiles list
@@ -68,6 +70,8 @@ videoedit quote-mining analysis/ratings.json --output reports/
 videoedit series analysis/ratings.json --template team_tuesday --output series/
 videoedit init-project "May Shop Reel" --type reel --output projects/
 videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs --job-type voiceover --input scripts/narration.txt --output cloud_jobs/voiceover.json --param voice=narrator
 ```
 
 ### Python API
@@ -329,6 +333,10 @@ videoedit modules list
 videoedit modules doctor
 videoedit doctor
 videoedit doctor --json
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs --job-type voiceover --input scripts/narration.txt --output cloud_jobs/voiceover.json --param voice=narrator
 
 videoedit signals objects footage/ --output analysis/visual_objects.json --model yolo26n.pt
 videoedit signals ocr footage/ --output analysis/ocr_signage.json
@@ -542,7 +550,21 @@ The base package has no mandatory Python runtime dependencies beyond the standar
 
 ### Optional Cloud/API Tools
 
-Cloud integrations are not required for local scanning, review, or rough cuts. Maintained integrations should be added as `cloud.adapters` modules. Older direct cloud scripts are legacy references unless restored as package-backed adapters.
+Cloud integrations are not required for local scanning, review, or rough cuts. The built-in `cloud.adapters` module provides adapter metadata, readiness diagnostics, and local planning artifacts for optional cloud handoffs. It is disabled by default; enable it per project before writing a `cloud_job.json`.
+
+```bash
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs \
+  --job-type voiceover \
+  --input scripts/narration.txt \
+  --output cloud_jobs/voiceover.json \
+  --project "Launch Reel" \
+  --param voice=narrator
+```
+
+`videoedit cloud plan` does not call provider APIs and does not store credentials. Execution belongs in a maintained adapter runner, connector, desktop workflow, or external service. Older direct cloud scripts are legacy references unless restored as package-backed adapters.
 
 | Tool | Description | Setup |
 |------|-------------|-------|
@@ -654,7 +676,29 @@ See `team_config.example.json` for a template.
 
 ## Cloud API Setup
 
-The local pipeline does not require cloud APIs. Future ElevenLabs, HeyGen, Descript, and similar integrations should be added as optional `cloud.adapters` modules through the `videoedit.modules` entry point group.
+The local pipeline does not require cloud APIs. Current built-in adapters cover planning for:
+
+- `elevenlabs`: `voiceover`, `narration`; checks `ELEVENLABS_API_KEY`.
+- `heygen`: `avatar_video`, `presenter_video`; checks `HEYGEN_API_KEY`.
+- `descript`: `transcript_edit`, `review_handoff`; checks for a maintained desktop or MCP connector workflow.
+
+Use diagnostics before execution handoff:
+
+```bash
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit cloud doctor --json
+```
+
+The planner writes a portable `cloud_job.json` only:
+
+```bash
+videoedit modules enable cloud.adapters
+videoedit cloud plan descript \
+  --job-type review_handoff \
+  --input review/review_assets.json \
+  --output cloud_jobs/descript_review.json
+```
 
 ### Canva Design Helpers
 

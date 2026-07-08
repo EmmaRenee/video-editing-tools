@@ -16,6 +16,7 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 | OpenCLIP + Torch | Optional | AI profile frame scoring and missed-moment discovery |
 | Local VLM judge command | Optional | Heavier review-clip judging through `videoedit ai judge` |
 | Local learned scorer | Optional | Dependency-free scorer trained from reviewed decisions |
+| Cloud adapter planner | Optional | Credential-safe ElevenLabs, HeyGen, and Descript-style handoff specs |
 | PowerShell module | Optional | Windows-friendly FFmpeg helper cmdlets |
 | DaVinci Resolve | Optional | Final polish after generated handoff files |
 
@@ -308,7 +309,7 @@ videoedit modules doctor
 videoedit modules scaffold my_feature --output videoedit-my-feature/
 ```
 
-Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, AI frame scoring, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group; see `docs/community-modules.md` for module ID, diagnostics, preset, artifact, and test rules.
+Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, AI frame scoring, motorsports events, and credential-safe cloud adapter planning. Community packages can register modules through the `videoedit.modules` Python entry point group; see `docs/community-modules.md` for module ID, diagnostics, preset, artifact, and test rules.
 
 ## Content, Captions, And Projects
 
@@ -365,19 +366,40 @@ Generated handoff files include EDL, XML, M3U, and FFmpeg extraction scripts. Us
 
 ## Optional Cloud/API Tools
 
-Cloud integrations are not required for local scanning or rough cuts. Install only when using those scripts:
+Cloud integrations are not required for local scanning or rough cuts. The built-in cloud planner uses only package code, but install the cloud extra before adding maintained execution adapters:
 
 ```bash
 python -m pip install -e "./src/python[cloud]"
 ```
 
-Create a local `.env` outside version control:
+List adapters and check readiness without calling external APIs:
+
+```bash
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit cloud doctor --json
+```
+
+Enable cloud handoff planning per project and write a reviewable job spec:
+
+```bash
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs \
+  --job-type voiceover \
+  --input scripts/narration.txt \
+  --output cloud_jobs/voiceover.json \
+  --project "Launch Reel" \
+  --param voice=narrator
+```
+
+`videoedit cloud plan` writes `cloud_job.json`; it does not call provider APIs and does not store credentials. The artifact records `network_called: false` and `credentials_stored: false`. Keep credentials in your shell environment or a local `.env` outside version control for external runners:
 
 ```bash
 ELEVENLABS_API_KEY=your_key_here
 HEYGEN_API_KEY=your_key_here
-DESCRIPT_API_KEY=your_key_here
 ```
+
+Descript-style handoffs currently expect a maintained desktop or MCP connector workflow rather than a stored API key.
 
 ## Troubleshooting
 
