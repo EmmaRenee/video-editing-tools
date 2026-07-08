@@ -412,6 +412,8 @@ git submodule add <your-repo-url> tools/video-editing
 | File | Description |
 |------|-------------|
 | [INSTALL.md](INSTALL.md) | Canonical install guide for all tooling, YOLO, and the skill |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes and package version history |
+| [docs/release.md](docs/release.md) | Release checklist, package build checks, and publication gates |
 | [SKILL.md](src/SKILL.md) | Claude skill — workflows and techniques |
 | [SETUP.md](src/SETUP.md) | Legacy platform-specific setup reference |
 | [QUICKREF.md](src/QUICKREF.md) | PowerShell cmdlet reference |
@@ -438,10 +440,4 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ## Changelog
 
-### 1.0.0 (2026-05-01)
-- Initial release
-- 20+ PowerShell cmdlets
-- Cross-platform FFmpeg workflows
-- Claude skill for AI-assisted editing
-- Whisper transcription support
-- DaVinci Resolve export formats
+See [CHANGELOG.md](CHANGELOG.md). Release and package publication steps are documented in [docs/release.md](docs/release.md).

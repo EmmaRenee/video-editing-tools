@@ -6,6 +6,7 @@ from .diagnostics import run_diagnostics
 from .models import CandidateClip, MediaAsset, RatingReport, SelectionSet, SignalReport
 from .pipeline import plan_pipeline, run_pipeline
 from .rating import run_rating
+from ._version import __version__
 
 __all__ = [
     "AnalysisConfig",
@@ -21,4 +22,5 @@ __all__ = [
     "SignalReport",
     "tune_scoring",
     "run_rating",
+    "__version__",
 ]

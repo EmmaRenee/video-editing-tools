@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include requirements.txt
+include team_config.example.json
+include auto_caption.py
+include inventory.py
+include rate_footage.py
+include video_start.py
+recursive-include canva *.py
+recursive-include davinci *.py
+global-exclude __pycache__ *.py[cod] .DS_Store

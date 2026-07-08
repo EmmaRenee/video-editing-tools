@@ -12,6 +12,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PYTHON_SRC = os.path.join(ROOT, "src", "python")
 sys.path.insert(0, PYTHON_SRC)
 
+import videoedit
 from videoedit.config import AnalysisConfig
 from videoedit.ai import (
     find_missed_moments,
@@ -69,6 +70,9 @@ from videoedit.simple_yaml import load_mapping
 
 
 class ParserTests(unittest.TestCase):
+    def test_package_version_is_exported(self):
+        self.assertRegex(videoedit.__version__, r"^\d+\.\d+\.\d+")
+
     def test_parse_scene_output(self):
         output = "n:0 pts_time:1.25 x\nn:1 pts_time:3.5 x\n"
         self.assertEqual(parse_scene_output(output), [1.25, 3.5])
