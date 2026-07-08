@@ -308,7 +308,7 @@ videoedit modules doctor
 videoedit modules scaffold my_feature --output videoedit-my-feature/
 ```
 
-Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, AI frame scoring, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group.
+Optional built-in modules include styled captions, content series planning, editorial reports, project scaffolding, advanced vision, AI frame scoring, motorsports events, and future cloud adapters. Community packages can register modules through the `videoedit.modules` Python entry point group; see `docs/community-modules.md` for module ID, diagnostics, preset, artifact, and test rules.
 
 ## Content, Captions, And Projects
 

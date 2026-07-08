@@ -46,9 +46,10 @@ from videoedit.edl import export_selection_file, generate_extract_script
 from videoedit.ffmpeg import CommandResult, parse_audio_metadata_output, parse_scene_output, parse_silence_output, run_command_check
 from videoedit.models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, SignalReport
 from videoedit.modules import disable_module, enable_module, module_rows, operation_enabled
+import videoedit.modules as modules_module
 from videoedit.operations import default_registry
 import videoedit.operations as operations_module
-from videoedit.pipeline import load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
+from videoedit.pipeline import available_presets, load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from videoedit.rating import generate_candidates, score_signal
 import videoedit.review as review_module
 from videoedit.review import create_approval_file, generate_review_assets
@@ -2622,8 +2623,131 @@ class ModuleTests(unittest.TestCase):
                     self.assertEqual(main(["modules", "scaffold", "my_feature", "--output", module_root]), 0)
                 self.assertTrue(os.path.exists(os.path.join(module_root, "pyproject.toml")))
                 self.assertTrue(os.path.exists(os.path.join(module_root, "my_feature", "module.py")))
+                with open(os.path.join(module_root, "my_feature", "module.py"), encoding="utf-8") as handle:
+                    module_py = handle.read()
+                with open(os.path.join(module_root, "README.md"), encoding="utf-8") as handle:
+                    readme = handle.read()
+                self.assertIn("def diagnose", module_py)
+                self.assertIn('"presets"', module_py)
+                self.assertIn("schema_version", module_py)
+                self.assertIn("Compatibility Rules", readme)
+                self.assertIn("videoedit.modules", readme)
             finally:
                 os.chdir(cwd)
+
+    def test_external_module_operations_presets_and_diagnostics(self):
+        def demo_operation(context, params):
+            return {"output": params.get("output"), "status": "ok"}
+
+        def demo_diagnostics():
+            return {"module": "community.demo", "checks": [{"name": "demo", "available": True}]}
+
+        module_payload = {
+            "id": "community.demo",
+            "description": "Demo community module",
+            "category": "community",
+            "operations": [
+                {
+                    "name": "demo_operation",
+                    "description": "Demo operation",
+                    "func": demo_operation,
+                }
+            ],
+            "presets": {
+                "demo_preset": {
+                    "name": "demo_preset",
+                    "description": "Demo preset",
+                    "steps": [{"name": "demo", "operation": "demo_operation"}],
+                }
+            },
+            "diagnostics": demo_diagnostics,
+        }
+
+        original_entry_points = modules_module.importlib.metadata.entry_points
+
+        class FakeEntryPoint:
+            name = "demo"
+
+            def load(self):
+                return lambda: module_payload
+
+        def fake_entry_points(group=None):
+            return [FakeEntryPoint()] if group == modules_module.ENTRY_POINT_GROUP else []
+
+        modules_module.importlib.metadata.entry_points = fake_entry_points
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                registry = default_registry(cwd=tmp)
+                operation = registry.get("demo_operation")
+                self.assertEqual(operation.module, "community.demo")
+                self.assertIn("demo_preset", available_presets())
+                output = os.path.join(tmp, "demo.yaml")
+                write_preset("demo_preset", output)
+                data = load_pipeline(output)
+                self.assertEqual(data["requires_modules"], ["community.demo"])
+                report = modules_module.run_module_diagnostics(cwd=tmp)
+                demo_checks = [group for group in report["checks"] if group["module"] == "community.demo"][0]
+                self.assertTrue(demo_checks["checks"][0]["available"])
+
+                disable_module("community.demo", cwd=tmp)
+                self.assertNotIn("demo_preset", available_presets())
+                self.assertNotIn("demo_operation", [item.name for item in default_registry(cwd=tmp).list()])
+            finally:
+                os.chdir(cwd)
+                modules_module.importlib.metadata.entry_points = original_entry_points
+
+    def test_invalid_external_modules_are_reported_without_breaking_builtins(self):
+        payloads = [
+            {
+                "id": "core.bad",
+                "description": "Reserved prefix",
+                "operations": [],
+            },
+            {
+                "id": "community.good",
+                "description": "Good module",
+                "operations": [],
+            },
+            {
+                "id": "community.good",
+                "description": "Duplicate module",
+                "operations": [],
+            },
+            {
+                "id": "community.bad_operation",
+                "description": "Bad operation",
+                "operations": [{"name": "bad operation", "func": lambda _context, _params: {}}],
+            },
+        ]
+        original_entry_points = modules_module.importlib.metadata.entry_points
+
+        class FakeEntryPoint:
+            def __init__(self, name, payload):
+                self.name = name
+                self.payload = payload
+
+            def load(self):
+                return lambda: self.payload
+
+        def fake_entry_points(group=None):
+            if group != modules_module.ENTRY_POINT_GROUP:
+                return []
+            return [FakeEntryPoint(f"module_{index}", payload) for index, payload in enumerate(payloads)]
+
+        modules_module.importlib.metadata.entry_points = fake_entry_points
+        try:
+            rows = module_rows()
+            self.assertTrue(any(row["id"] == "core.rating" for row in rows))
+            self.assertTrue(any(row["id"] == "community.good" for row in rows))
+            errors = modules_module.discover_external_module_errors()
+            serialized = json.dumps(errors)
+            self.assertIn("reserved prefix", serialized)
+            self.assertIn("duplicate module id", serialized)
+            self.assertIn("invalid operation name", serialized)
+        finally:
+            modules_module.importlib.metadata.entry_points = original_entry_points
 
     def test_pipeline_requires_modules_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
