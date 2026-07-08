@@ -73,6 +73,7 @@ Raw footage (hours)
   → optional videoedit ai dataset/train-scorer when reviewed decisions exist across projects
   → videoedit calibrate from-decisions/evaluate/tune/compare/apply when human feedback exists
   → content-map / quote-mining / series planning when editorial direction is needed
+  → optional videoedit cloud plan when a cloud voice/avatar/text-editing handoff is needed
   → review/contact_sheet.html or review_decisions.json
   → approved.json
   → videoedit roughcut plan + assemble --plan
@@ -95,7 +96,7 @@ videoedit modules list
 videoedit modules doctor
 ```
 
-Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, OpenCLIP, and Torch are optional providers. The recommended AI path is local/open-source and does not require a paid subscription.
+Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, OpenCLIP, Torch, and cloud adapters are optional providers. The recommended AI path is local/open-source and does not require a paid subscription.
 
 ### 1a. Check or configure feature modules
 
@@ -103,6 +104,9 @@ Required base tools are FFmpeg and ffprobe. Whisper, Tesseract, OpenCV, YOLO, Op
 videoedit modules list
 videoedit modules enable content.series
 videoedit modules disable advanced.vision
+videoedit modules enable cloud.adapters
+videoedit cloud adapters
+videoedit cloud doctor
 videoedit modules scaffold my_feature --output videoedit-my-feature/
 ```
 
@@ -127,7 +131,7 @@ Available built-in modules:
 | `advanced.vision` | OCR, object, face/person providers |
 | `advanced.ai` | AI profiles, OpenCLIP frame scoring, clip judging, review learning, missed-moment discovery |
 | `advanced.motorsports` | Motorsports event/topic artifacts |
-| `cloud.adapters` | Future maintained cloud adapters |
+| `cloud.adapters` | Optional ElevenLabs, HeyGen, and Descript-style cloud handoff planning |
 
 ### 2. Inventory, score, and select candidates
 
@@ -383,9 +387,10 @@ generate_missed_review
 judge_ai_clips
 build_review_dataset
 train_review_scorer
+plan_cloud_job
 ```
 
-Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants.
+Favor `rate_footage`, `generate_review_assets`, `approve_candidates`, `assemble_rough_cut`, and `generate_edl` for rough-cut automation. Use format/caption/audio operations for final delivery variants. Use `plan_cloud_job` only for explicit cloud handoff specs; it does not call provider APIs.
 
 ---
 
@@ -762,14 +767,23 @@ ffmpeg -i rough_cut.mp4 -c:v prores_ks -profile:v 3 -c:a pcm_s16le for_davinci.m
 
 Cloud tools are optional and should not be required for inventory, scoring, review, rough cuts, or handoff.
 
-Prefer maintained `cloud.adapters` modules when they exist:
+Prefer the maintained `cloud.adapters` command surface for handoffs:
 
 ```bash
 videoedit modules list
 videoedit modules doctor
+videoedit cloud adapters
+videoedit cloud doctor
+videoedit modules enable cloud.adapters
+videoedit cloud plan elevenlabs \
+  --job-type voiceover \
+  --input scripts/narration.txt \
+  --output cloud_jobs/voiceover.json \
+  --project "Launch Reel" \
+  --param voice=narrator
 ```
 
-Older direct ElevenLabs, HeyGen, and Descript scripts are legacy references unless restored as package-backed modules.
+Current built-in adapters cover `elevenlabs`, `heygen`, and `descript`. `videoedit cloud plan` writes a local `cloud_job.json` with adapter metadata, job type, input, params, and execution boundary. It does not call provider APIs and does not store credentials. Older direct ElevenLabs, HeyGen, and Descript scripts are legacy references unless restored as package-backed execution adapters.
 
 ### Descript - Text-Based Editing (MCP)
 
@@ -906,10 +920,13 @@ ffmpeg -i vertical.mp4 -vf "subtitles=vertical.srt:force_style='FontSize=28,Bord
 videoedit doctor
 videoedit modules list
 videoedit modules doctor
+videoedit cloud adapters
+videoedit cloud doctor
 
 # Configure optional feature modules for this project
 videoedit modules enable content.series
 videoedit modules disable advanced.vision
+videoedit modules enable cloud.adapters
 videoedit modules scaffold my_feature --output videoedit-my-feature/
 
 # Inventory only
@@ -940,6 +957,9 @@ videoedit burn-captions clip.mp4 captions.srt --output captioned.mp4 --style aut
 
 # Project setup
 videoedit init-project "Race Day Reel" --type reel --output projects/
+
+# Cloud handoff planning
+videoedit cloud plan elevenlabs --job-type voiceover --input scripts/narration.txt --output cloud_jobs/voiceover.json --param voice=narrator
 
 # Preset pipelines
 videoedit init roughcut --output roughcut.yaml
