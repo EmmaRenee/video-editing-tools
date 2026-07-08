@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
+build/
+dist/
+wheelhouse/
 
 # PowerShell module build output
 *.psd1

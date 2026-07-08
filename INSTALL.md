@@ -66,6 +66,8 @@ Activate this environment before running repository commands:
 source .venv/bin/activate
 ```
 
+Package and release verification commands are documented in [docs/release.md](docs/release.md). Build artifacts such as `dist/`, `build/`, wheels, source distributions, generated media, analysis folders, and model weights should stay out of git.
+
 ## Windows Setup
 
 Install system tools:

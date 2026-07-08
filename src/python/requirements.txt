@@ -1,18 +1,14 @@
-# Video-Edit Pipeline System Requirements
-
-# CLI framework
-click>=8.0.0
-
-# YAML parsing
-pyyaml>=6.0
-
-# TUI framework (optional)
-textual>=0.50.0
-rich>=13.0.0
-
-# Existing dependencies
-openai-whisper>=20231117
-
-# Cloud APIs (optional)
-# elevenlabs
-# python-dotenv
+# Legacy compatibility file.
+#
+# The core videoedit package has no mandatory Python runtime dependencies beyond
+# the standard library. Prefer package extras instead of this file:
+#
+#   python -m pip install -e ".[whisper]"
+#   python -m pip install -e ".[advanced]"
+#   python -m pip install -e ".[ai]"
+#   python -m pip install -e ".[ui]"
+#   python -m pip install -e ".[cloud]"
+#
+# From the repository root, use ./src/python in place of ".":
+#
+#   python -m pip install -e "./src/python[whisper,advanced,ai]"

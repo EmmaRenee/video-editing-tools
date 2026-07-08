@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  python-tests:
+    name: Python ${{ matrix.python-version }} tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ./src/python
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests/python
+
+      - name: Check whitespace
+        run: git diff --check
+
+  package-build:
+    name: Package build and wheel smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build package
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build src/python --outdir /tmp/videoedit-dist
+
+      - name: Smoke test wheel install
+        run: |
+          python -m venv /tmp/videoedit-wheel-smoke
+          /tmp/videoedit-wheel-smoke/bin/python -m pip install --upgrade pip
+          /tmp/videoedit-wheel-smoke/bin/python -m pip install /tmp/videoedit-dist/videoedit-*.whl
+          /tmp/videoedit-wheel-smoke/bin/videoedit operations
+          /tmp/videoedit-wheel-smoke/bin/python -c "import videoedit; print(videoedit.__version__)"

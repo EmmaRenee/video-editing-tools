@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "videoedit"
+dynamic = ["version"]
+description = "Local-first video editing analysis and pipeline tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  {name = "Emma Werner"}
+]
+keywords = [
+  "video",
+  "ffmpeg",
+  "editing",
+  "rough-cut",
+  "media-analysis"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Multimedia :: Video :: Conversion",
+]
+dependencies = []
+
+[project.optional-dependencies]
+whisper = ["openai-whisper>=20231117"]
+advanced = ["opencv-python>=4.8.0", "ultralytics>=8.0.0"]
+ai = ["open_clip_torch>=2.24.0", "torch>=2.2.0", "Pillow>=10.0"]
+cloud = ["elevenlabs", "python-dotenv"]
+ui = ["textual>=0.50.0", "rich>=13.0.0"]
+
+[project.scripts]
+videoedit = "videoedit.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/EmmaRenee/video-editing-tools"
+Repository = "https://github.com/EmmaRenee/video-editing-tools"
+Issues = "https://github.com/EmmaRenee/video-editing-tools/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["videoedit*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "videoedit._version.__version__"}
