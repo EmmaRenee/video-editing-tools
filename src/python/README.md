@@ -520,7 +520,7 @@ Supported sequencing modes are `review_order`, `score`, `source_order`, and `div
 
 ## Installation
 
-See [../../INSTALL.md](../../INSTALL.md) for the canonical full setup guide, including Python 3.12 virtual environments, YOLO/Ultralytics, Whisper, OpenCV, Tesseract, skill installation, and DaVinci handoff. See [../../docs/release.md](../../docs/release.md) for package build, wheel smoke, CI, and release publication checks.
+See [../../INSTALL.md](../../INSTALL.md) for the canonical full setup guide, including Python 3.12 virtual environments, YOLO/Ultralytics, Whisper, OpenCV, Tesseract, skill installation, and DaVinci handoff. See [../../docs/components.md](../../docs/components.md) for the supported component map and [../../docs/release.md](../../docs/release.md) for package build, wheel smoke, CI, and release publication checks.
 
 ```bash
 # Requires Python 3.10+; Python 3.12 is recommended for full local extras.

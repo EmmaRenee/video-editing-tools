@@ -2,13 +2,13 @@
 
 Portable video editing toolkit for racing footage, social media reels, and documentary content. Works on Windows, macOS, and Linux.
 
-**Status:** Active | **Version:** 1.0.0
+**Status:** Active | **Package Version:** 0.5.0
 
 ---
 
 ## Overview
 
-This toolkit provides FFmpeg-based video editing workflows with optional PowerShell cmdlets, Bash helpers, and AI/cloud integrations. Designed for editing real footage — not generating from scratch.
+This toolkit provides FFmpeg-based video editing workflows with optional PowerShell cmdlets, Python automation, and AI/cloud handoff integrations. Designed for editing real footage, not generating from scratch.
 
 **What it does:**
 - Cut dead air and silence from footage
@@ -126,12 +126,8 @@ video-editing-tools/
 │   ├── python/            # Python tools
 │   │   ├── inventory.py        # Footage scanner
 │   │   ├── auto_caption.py     # Cross-platform caption burning
-│   │   ├── elevenlabs/         # TTS integration
-│   │   ├── heygen/             # Avatar generation
 │   │   ├── canva/              # Graphics automation
 │   │   ├── davinci/            # EDL tools
-│   │   └── descript/           # MCP server
-│   └── bash/              # Bash helpers (coming soon)
 ├── tests/
 │   └── Test-VideoEditing.ps1   # Windows installation test
 ├── README.md
@@ -217,11 +213,12 @@ git submodule add <your-repo-url> tools/video-editing
 | File | Description |
 |------|-------------|
 | [INSTALL.md](../INSTALL.md) | Canonical install guide for all tooling, YOLO, and the skill |
-| [SKILL.md](src/SKILL.md) | Claude skill — workflows and techniques |
+| [SKILL.md](SKILL.md) | Claude skill — workflows and techniques |
 | [CHANGELOG.md](../CHANGELOG.md) | Release notes and package version history |
+| [components.md](../docs/components.md) | Component map for the package, CLI, artifacts, docs, and optional providers |
 | [release.md](../docs/release.md) | Release checklist, package build checks, and publication gates |
-| [SETUP.md](src/SETUP.md) | Legacy platform-specific setup reference |
-| [QUICKREF.md](src/QUICKREF.md) | PowerShell cmdlet reference |
+| [SETUP.md](SETUP.md) | Legacy platform-specific setup reference |
+| [QUICKREF.md](QUICKREF.md) | PowerShell cmdlet reference |
 
 ---
 

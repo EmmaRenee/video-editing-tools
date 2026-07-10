@@ -21,6 +21,7 @@ venv/
 # OS specific
 .DS_Store
 .DS_Store?
+.DS_Store.partial
 ._*
 .Spotlight-V100
 .Trashes
@@ -72,6 +73,7 @@ temp/
 *.log
 
 # Test files
+.pytest_cache/
 test_*
 *_test.*
 !tests/
