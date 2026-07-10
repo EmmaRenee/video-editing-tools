@@ -73,6 +73,26 @@ class ParserTests(unittest.TestCase):
     def test_package_version_is_exported(self):
         self.assertRegex(videoedit.__version__, r"^\d+\.\d+\.\d+")
 
+    def test_documented_package_version_matches_runtime(self):
+        version = videoedit.__version__
+        docs = [
+            "README.md",
+            "src/README.md",
+            "INSTALL.md",
+            "src/python/README.md",
+            "CHANGELOG.md",
+            "docs/components.md",
+        ]
+        for relative_path in docs:
+            with self.subTest(relative_path=relative_path):
+                with open(os.path.join(ROOT, relative_path), encoding="utf-8") as handle:
+                    text = handle.read()
+                self.assertIn(version, text)
+                self.assertNotIn("**Version:** 1.0.0", text)
+        with open(os.path.join(PYTHON_SRC, "pyproject.toml"), encoding="utf-8") as handle:
+            pyproject = handle.read()
+        self.assertIn('version = {attr = "videoedit._version.__version__"}', pyproject)
+
     def test_parse_scene_output(self):
         output = "n:0 pts_time:1.25 x\nn:1 pts_time:3.5 x\n"
         self.assertEqual(parse_scene_output(output), [1.25, 3.5])
