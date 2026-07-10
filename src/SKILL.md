@@ -16,6 +16,7 @@ AI-assisted video editing for cutting real footage, not generating from scratch.
 **📚 Additional Resources:**
 - Root `INSTALL.md` — Canonical installation for `videoedit`, YOLO, the skill, and optional tooling
 - `SETUP.md` — Cross-platform installation and configuration guide
+- `docs/user-guide.md` — User-facing feature guide with commands, artifacts, and workflows
 - `VideoEditing.psm1` — PowerShell module with 20+ video editing cmdlets
 - `QUICKREF.md` — Cmdlet quick reference and common workflows
 - `python/README.md` — `videoedit` package, CLI, presets, and pipeline docs

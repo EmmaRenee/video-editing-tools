@@ -8,6 +8,8 @@ Cross-platform Python scripts for video editing workflows.
 
 Local-first video editing analysis package. V1 inventories footage, scores it, and writes explainable clip candidates. The `videoedit` package builds on that scanner with CLI commands, typed artifacts, reusable operations, YAML presets, DaVinci/FFmpeg handoff files, and rough-cut assembly.
 
+For a complete user-facing walkthrough of every feature, command, output artifact, and recommended workflow, see the [Videoedit User Guide](../../docs/user-guide.md). This README focuses on package usage and API details.
+
 ### Quick Start
 
 ```bash

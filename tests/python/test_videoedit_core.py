@@ -82,6 +82,7 @@ class ParserTests(unittest.TestCase):
             "src/python/README.md",
             "CHANGELOG.md",
             "docs/components.md",
+            "docs/user-guide.md",
         ]
         for relative_path in docs:
             with self.subTest(relative_path=relative_path):
@@ -92,6 +93,47 @@ class ParserTests(unittest.TestCase):
         with open(os.path.join(PYTHON_SRC, "pyproject.toml"), encoding="utf-8") as handle:
             pyproject = handle.read()
         self.assertIn('version = {attr = "videoedit._version.__version__"}', pyproject)
+
+    def test_user_guide_documents_public_command_surface(self):
+        with open(os.path.join(ROOT, "docs", "user-guide.md"), encoding="utf-8") as handle:
+            guide = handle.read()
+        required = [
+            "videoedit doctor",
+            "videoedit inventory",
+            "videoedit rate",
+            "videoedit review-assets",
+            "videoedit review-tui",
+            "videoedit approve",
+            "videoedit roughcut plan",
+            "videoedit assemble",
+            "videoedit export-edl",
+            "videoedit extract-segments",
+            "videoedit calibrate",
+            "videoedit signals",
+            "videoedit ai",
+            "videoedit captions styles",
+            "videoedit burn-captions",
+            "videoedit content-map",
+            "videoedit quote-mining",
+            "videoedit series",
+            "videoedit init-project",
+            "videoedit modules",
+            "videoedit cloud",
+            "videoedit init",
+            "videoedit validate",
+            "videoedit plan",
+            "videoedit run",
+            "PowerShell",
+            "inventory.json",
+            "ratings.json",
+            "review_decisions.json",
+            "approved.json",
+            "roughcut_plan.json",
+            "cloud_job.json",
+        ]
+        for item in required:
+            with self.subTest(item=item):
+                self.assertIn(item, guide)
 
     def test_parse_scene_output(self):
         output = "n:0 pts_time:1.25 x\nn:1 pts_time:3.5 x\n"

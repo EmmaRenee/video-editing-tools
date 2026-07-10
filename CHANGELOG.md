@@ -9,6 +9,7 @@ This project uses semantic versioning for the Python `videoedit` package once pu
 - Added local-first footage inventory, rating, calibration, review, rough-cut, signal fusion, AI scoring, community module, cloud adapter, and release-hardening workflows.
 - Added CI and package-build verification for the Python `videoedit` package.
 - Added a component reference and version-consistency checks for README/install docs.
+- Added a user guide covering the supported feature set, commands, artifacts, and recommended workflows.
 
 ## 0.5.0
 
