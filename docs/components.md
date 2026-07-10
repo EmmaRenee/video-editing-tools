@@ -73,6 +73,7 @@ These remain for direct local use and backward compatibility:
 
 | File | Role |
 |------|------|
+| `docs/user-guide.md` | User-facing feature guide covering commands, artifacts, workflows, and troubleshooting. |
 | `src/SKILL.md` | Agent-facing workflow instructions for using `videoedit` first and FFmpeg manually as fallback. |
 | `INSTALL.md` | Canonical install guide for Python, FFmpeg, YOLO/OpenCV, OpenCLIP, cloud extras, skills, and DaVinci handoff. |
 | `src/python/README.md` | Package, CLI, preset, artifact, calibration, review, AI, and module documentation. |

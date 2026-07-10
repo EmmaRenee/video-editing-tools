@@ -22,7 +22,7 @@ This toolkit provides FFmpeg-based video editing workflows with optional PowerSh
 
 ## Quick Start
 
-For a complete installation path covering `videoedit`, YOLO/Ultralytics, PowerShell helpers, Claude/Codex skill installation, and DaVinci handoff, use the canonical [INSTALL.md](INSTALL.md).
+For a complete installation path covering `videoedit`, YOLO/Ultralytics, PowerShell helpers, Claude/Codex skill installation, and DaVinci handoff, use the canonical [INSTALL.md](INSTALL.md). For feature-by-feature usage, commands, outputs, and recommended workflows, use the [Videoedit User Guide](docs/user-guide.md).
 
 ### 1. Install FFmpeg
 
@@ -130,7 +130,7 @@ python src/python/auto_caption.py video.mp4 out.mp4 subs.srt
 videoedit burn-captions video.mp4 subs.srt --output out.mp4 --style automotive_racing --format reel
 ```
 
-See [src/python/README.md](src/python/README.md) for full documentation. Community extensions use the `videoedit.modules` entry point group and are documented in [docs/community-modules.md](docs/community-modules.md); external modules can contribute validated operations, diagnostics, and pipeline presets.
+See the [Videoedit User Guide](docs/user-guide.md) for the complete user-facing command map and [src/python/README.md](src/python/README.md) for package details. Community extensions use the `videoedit.modules` entry point group and are documented in [docs/community-modules.md](docs/community-modules.md); external modules can contribute validated operations, diagnostics, and pipeline presets.
 
 ### Calibration Loop
 
