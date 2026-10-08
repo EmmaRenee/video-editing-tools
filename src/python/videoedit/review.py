@@ -7,37 +7,50 @@ import html
 import json
 import os
 import re
+import time
 
 from .ai import load_clip_judgment_explanations
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
+from .manifests import RunManifest, fingerprint
 from .roughcut import clips_from_plan
 from .selections import load_selection
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
-def assemble(selection_json: str, output: str, plan_json: str | None = None) -> str:
+def assemble(selection_json: str, output: str, plan_json: str | None = None,
+             manifest_paths: str = "absolute") -> str:
     selection_json = os.fspath(selection_json)
     output = os.fspath(output)
-    clips = clips_from_plan(plan_json) if plan_json else load_selection(selection_json).clips
     output_dir = os.path.dirname(output) or "."
     output_stem = os.path.splitext(os.path.basename(output))[0]
     os.makedirs(output_dir, exist_ok=True)
     clips_dir = os.path.join(output_dir, f"{output_stem}_clips")
-    os.makedirs(clips_dir, exist_ok=True)
     concat = os.path.join(output_dir, f"{output_stem}_concat.txt")
-    lines: list[str] = []
-    for index, clip in enumerate(clips, 1):
-        source = clip["source"]
-        label = _safe_slug(clip.get("label") or clip.get("id") or f"clip_{index:03d}")
-        clip_path = os.path.join(clips_dir, f"{index:03d}_{label}.mp4")
-        _extract_roughcut_clip(source, clip, clip_path)
-        lines.append(f"file '{os.path.abspath(clip_path)}'")
-    if not lines:
-        raise ValueError("selection has no clips to assemble")
-    with open(concat, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(lines) + "\n")
-    run_command_check(["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat, "-c", "copy", output, "-y"])
+    inputs = [selection_json] + ([plan_json] if plan_json else [])
+    with RunManifest(os.path.join(output_dir, f"{output_stem}_assembly.json"), "assemble_rough_cut",
+                     inputs=inputs, config={"plan": bool(plan_json)}, path_mode=manifest_paths) as manifest:
+        clips = clips_from_plan(plan_json) if plan_json else load_selection(selection_json).clips
+        manifest.data["inputs"].extend(fingerprint(source, content=False) for source in sorted({clip["source"] for clip in clips}))
+        os.makedirs(clips_dir, exist_ok=True)
+        lines: list[str] = []
+        for index, clip in enumerate(clips, 1):
+            before = time.monotonic()
+            source = clip["source"]
+            label = _safe_slug(clip.get("label") or clip.get("id") or f"clip_{index:03d}")
+            clip_path = os.path.join(clips_dir, f"{index:03d}_{label}.mp4")
+            _extract_roughcut_clip(source, clip, clip_path)
+            manifest.record_step(f"clip_{index:03d}", "extract_segments", {"render_mode": clip.get("render_mode", "copy")},
+                                 {"output": clip_path}, time.monotonic() - before)
+            lines.append(f"file '{os.path.abspath(clip_path)}'")
+        if not lines:
+            raise ValueError("selection has no clips to assemble")
+        with open(concat, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        before = time.monotonic()
+        run_command_check(["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat, "-c", "copy", output, "-y"])
+        manifest.add_outputs([concat])
+        manifest.record_step("concat", "concatenate_videos", {}, {"output": output}, time.monotonic() - before)
     return output
 
 
@@ -107,10 +120,29 @@ def generate_review_assets(
     thumbnail_width: int = 360,
     calibration_json: str | None = None,
     ai_clip_judgments_json: str | None = None,
+    manifest_paths: str = "absolute",
 ) -> dict:
+    inputs = [ratings_json] + [path for path in (calibration_json, ai_clip_judgments_json) if path]
+    with RunManifest(os.path.join(output_dir, "review_run.json"), "generate_review_assets", inputs=inputs,
+                     config={"max_items": max_items, "proxies": proxies, "thumbnail_width": thumbnail_width},
+                     path_mode=manifest_paths) as manifest:
+        result = _generate_review_assets(ratings_json, output_dir, max_items, proxies, thumbnail_width,
+                                         calibration_json, ai_clip_judgments_json, manifest)
+        manifest.data["partial"] = bool(result["warnings"])
+        manifest.data["warnings"].extend(result["warnings"])
+        manifest.record_step("review", "generate_review_assets", {}, result, time.monotonic() - manifest.started)
+    result["run_manifest"] = os.path.join(output_dir, "review_run.json")
+    return result
+
+
+def _generate_review_assets(ratings_json: str, output_dir: str, max_items: int, proxies: bool,
+                            thumbnail_width: int, calibration_json: str | None, ai_clip_judgments_json: str | None,
+                            execution: RunManifest) -> dict:
     ratings_json = os.fspath(ratings_json)
     output_dir = os.fspath(output_dir)
     data = _read_json(ratings_json)
+    execution.data["inputs"].extend(fingerprint(source, content=False)
+                                   for source in sorted({clip["source"] for clip in data.get("candidates", [])[:max(0, max_items)] if clip.get("source")}))
     signal_context = _signal_context(data)
     source_context = _source_context(data)
     calibration_context = _calibration_context(calibration_json)
@@ -210,6 +242,8 @@ def generate_review_assets(
     _write_json(manifest_path, manifest)
     _write_json(decisions_path, decisions_payload)
     _write_contact_sheet(contact_sheet_path, manifest, decisions_payload)
+    execution.add_outputs([os.path.join(output_dir, row[key]) for row in rows
+                           for key in ("thumbnail", "proxy") if row.get(key)])
     return {
         "manifest": manifest_path,
         "contact_sheet": contact_sheet_path,

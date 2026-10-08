@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--input", "-i", required=True)
     run.add_argument("--output", "-o", required=True)
     run.add_argument("--dry-run", action="store_true", help="Validate and print the execution plan without running steps")
+    run.add_argument("--manifest-paths", choices=["absolute", "relative", "redacted"], default="absolute")
     run.set_defaults(func=cmd_run)
 
     plan = sub.add_parser("plan", help="Validate a pipeline and print its resolved execution plan")
@@ -381,6 +382,8 @@ def build_parser() -> argparse.ArgumentParser:
     modules_scaffold.add_argument("--output", "-o", required=True)
     modules_scaffold.set_defaults(func=cmd_modules_scaffold)
 
+    for command in (rate, export_edl, review_assets, assemble_cmd, roughcut_plan):
+        command.add_argument("--manifest-paths", choices=["absolute", "relative", "redacted"], default="absolute")
     return parser
 
 
@@ -481,7 +484,7 @@ def cmd_benchmark_compare(args: argparse.Namespace) -> int:
 
 def cmd_rate(args: argparse.Namespace) -> int:
     require_module_enabled("core.rating")
-    report = run_rating(args.footage, args.output, config=config_from_args(args))
+    report = run_rating(args.footage, args.output, config=config_from_args(args), manifest_paths=args.manifest_paths)
     print(json.dumps(report.summary, indent=2))
     return 0
 
@@ -493,7 +496,7 @@ def cmd_export_edl(args: argparse.Namespace) -> int:
     for value in args.selections:
         paths = _expand_paths(value)
         for path in paths:
-            written.extend(export_selection_file(path, output, fps=args.fps))
+            written.extend(export_selection_file(path, output, fps=args.fps, manifest_paths=args.manifest_paths))
     print(f"Wrote {len(written)} handoff files to {output}")
     return 0
 
@@ -518,6 +521,7 @@ def cmd_review_assets(args: argparse.Namespace) -> int:
         thumbnail_width=args.thumb_width,
         calibration_json=args.calibration,
         ai_clip_judgments_json=args.ai_clip_judgments,
+        manifest_paths=args.manifest_paths,
     )
     print(json.dumps(result, indent=2))
     return 0
@@ -563,7 +567,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(json.dumps(plan_pipeline(args.pipeline, args.input, args.output), indent=2))
         return 0
-    context = run_pipeline(args.pipeline, args.input, args.output)
+    context = run_pipeline(args.pipeline, args.input, args.output, manifest_paths=args.manifest_paths)
     print(json.dumps({"manifest": context.get("manifest"), "results": context["results"]}, indent=2))
     return 0
 
@@ -834,7 +838,7 @@ def cmd_calibrate_apply(args: argparse.Namespace) -> int:
 
 def cmd_assemble(args: argparse.Namespace) -> int:
     require_module_enabled("core.review")
-    output = assemble(args.selection, args.output, plan_json=args.plan)
+    output = assemble(args.selection, args.output, plan_json=args.plan, manifest_paths=args.manifest_paths)
     print(f"Rough cut written to {output}")
     return 0
 
@@ -852,6 +856,7 @@ def cmd_roughcut_plan(args: argparse.Namespace) -> int:
         max_clips=args.max_clips,
         render_mode=args.render_mode,
         report_output=args.report_output,
+        manifest_paths=args.manifest_paths,
     )
     print(json.dumps(result, indent=2))
     return 0

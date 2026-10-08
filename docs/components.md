@@ -7,6 +7,8 @@ V17 benchmarking is documented in [benchmarking.md](benchmarking.md).
 calibration module and produce redacted metrics and reproducibility hashes.
 Experimental-code dispositions are recorded in
 [v17-experimental-inventory.md](v17-experimental-inventory.md).
+Shared provider identity, portable diagnostics, and failure/handoff limitations
+are documented in [provenance-and-manifests.md](provenance-and-manifests.md).
 
 This page maps the supported repository components. It documents the tracked, releaseable surface of the project; local experiments should be promoted here only after they are committed with tests and user-facing docs.
 
@@ -18,6 +20,7 @@ This page maps the supported repository components. It documents the tracked, re
 |------|--------------|---------|
 | Inventory and rating | `inventory.py`, `rating.py`, `config.py`, `models.py` | Scan footage, collect metadata, analyze deterministic signals, score candidate clips, and write JSON-first artifacts. |
 | Calibration | `calibration.py` | Compare rated candidates against human annotations, report misses/false positives, tune scoring proposals, and compare calibration runs. |
+| Benchmarking and provenance | `benchmark.py`, `provenance.py`, `manifests.py` | Scoped human-ground-truth comparisons, typed provider identity, atomic run diagnostics, portable paths, and handoff traceability. |
 | Review and rough cuts | `review.py`, `review_tui.py`, `roughcut.py` | Generate review assets/contact sheets, apply decisions, plan sequencing, and assemble rough cuts. |
 | Handoff | `edl.py`, `selections.py` | Normalize selection JSON and export EDL/XML/M3U/FFmpeg-friendly handoff files. |
 | Signals | `advanced.py`, `signals.py`, `transcript.py` | Load and validate optional object/OCR/face/person/motorsports/topic artifacts and fuse them into scoring. |

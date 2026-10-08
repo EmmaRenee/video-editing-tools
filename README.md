@@ -8,6 +8,12 @@ V17 adds [scoped footage benchmarking](docs/benchmarking.md) with
 `videoedit benchmark validate`, `run`, and `compare`. Compare scoring against
 independent human review before selecting optional providers or tuning defaults.
 
+[Provider provenance and execution manifests](docs/provenance-and-manifests.md)
+record model identity, input/output fingerprints, timing, cache reuse, failures,
+and handoff assumptions. Use `--manifest-paths redacted` on `rate`, `run`,
+`review-assets`, `roughcut plan`, `assemble`, and `export-edl` for shareable
+diagnostics; editing artifacts themselves remain private.
+
 ---
 
 ## Overview

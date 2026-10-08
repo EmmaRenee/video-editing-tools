@@ -36,6 +36,27 @@ operations. A `synthetic` or `insufficient_evidence` report does not prove
 real-footage quality. Preserve source footage and keep real manifests,
 annotations, decisions, and intermediate `.private/` outputs out of Git.
 
+### Provenance And Run Diagnostics
+
+Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`, `roughcut plan`,
+`assemble`, and `export-edl` when preparing shareable diagnostics. Use `relative`
+for portable private diagnostics; the default `absolute` retains legacy paths.
+Pipeline mode propagates to operation sidecars unless explicitly overridden.
+Never assume these flags redact ratings, footage, contact sheets, selections,
+or decisions.
+
+Read `rating_run.json`, `review_run.json`, `pipeline_run.json`, and plan/assembly/
+handoff sidecars for versions, input/output fingerprints, config hashes,
+timing, cache origin, warnings, and terminal status. A `partial`, `running`,
+`error`, or `interrupted` manifest must not be presented as complete. Provider
+provenance records only known model identity and prompt/config hashes; warnings
+for unknown model revisions or seeds must remain visible. Validate artifacts
+before reuse and compare provider identities before interpreting AI ablations.
+Legacy supported artifacts remain readable with warnings; future incompatible
+schemas require upgrade or re-generation. Consult
+`docs/provenance-and-manifests.md` for the complete contract. Generated EDL/XML
+and `editor_verified: false` are not proof of a successful Resolve handoff.
+
 ## When to Use
 
 ```

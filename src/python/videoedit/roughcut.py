@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import time
 from typing import Any
 
 from .selections import load_selection
+from .edl import handoff_metadata
+from .manifests import RunManifest, fingerprint
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
@@ -32,7 +35,23 @@ def plan_roughcut(
     max_clips: int | None = None,
     render_mode: str = "copy",
     report_output: str | None = None,
+    manifest_paths: str = "absolute",
 ) -> dict[str, Any]:
+    stem = os.path.splitext(os.fspath(output))[0]
+    settings = {"preset": preset, "sequence": sequence, "target_duration": target_duration, "format": format_type,
+                "handles": handles, "max_clips": max_clips, "render_mode": render_mode}
+    with RunManifest(f"{stem}_run.json", "plan_roughcut", inputs=[selection_json], config=settings,
+                     path_mode=manifest_paths) as manifest:
+        result = _plan_roughcut(selection_json, output, preset, sequence, target_duration, format_type,
+                               handles, max_clips, render_mode, report_output, manifest)
+        manifest.record_step("plan", "plan_roughcut", settings, result, time.monotonic() - manifest.started)
+    result["run_manifest"] = f"{stem}_run.json"
+    return result
+
+
+def _plan_roughcut(selection_json: str, output: str, preset: str, sequence: str, target_duration: float | None,
+                  format_type: str, handles: float, max_clips: int | None, render_mode: str,
+                  report_output: str | None, execution: RunManifest) -> dict[str, Any]:
     if sequence not in SEQUENCING_MODES:
         raise ValueError(f"unsupported sequencing mode: {sequence}")
     if format_type not in FORMAT_PRESETS:
@@ -46,6 +65,10 @@ def plan_roughcut(
     if max_clips is not None:
         clips = clips[: max(0, int(max_clips))]
     clips = _apply_target_duration(clips, target_duration)
+    execution.data["inputs"].extend(fingerprint(source, content=False) for source in sorted({clip["source"] for clip in clips}))
+    execution.data["handoff"] = handoff_metadata(clips, selection.fps, handles=handles)
+    execution.data["handoff"].update(render_mode=render_mode, format=format_type,
+                                    planning_rounding="legacy_integral_hhmmss", handles_clamped_to_duration=False)
     total_duration = round(sum(clip["duration"] for clip in clips), 3)
     output = os.fspath(output)
     report_output = os.fspath(report_output or _default_report_path(output))

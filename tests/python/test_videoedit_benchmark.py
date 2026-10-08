@@ -244,7 +244,8 @@ class BenchmarkTests(unittest.TestCase):
         self.assertNotIn("private path", (self.output / "benchmark_report.json").read_text())
 
     def test_existing_pipeline_runtime_is_imported(self):
-        self.write(self.manifest.parent / "execution.json", {"status": "ok", "duration_seconds": 4.25})
+        self.write(self.manifest.parent / "execution.json", {"status": "ok", "duration_seconds": 4.25,
+                   "telemetry": {"storage_bytes": 400, "storage_scope": "tracked_output_files"}})
         data = self.read(self.manifest)
         data["projects"][0]["runs"][0].update(run_manifest="execution.json", telemetry={})
         self.write(self.manifest, data)
@@ -252,6 +253,7 @@ class BenchmarkTests(unittest.TestCase):
         telemetry = report["projects"][0]["runs"][0]["telemetry"]
         self.assertEqual(telemetry["elapsed_seconds"], 4.25)
         self.assertEqual(telemetry["origin"], "run_manifest")
+        self.assertEqual(telemetry["storage_scope"], "tracked_output_files")
 
     def test_malformed_rating_rows_fail_with_a_redacted_report(self):
         original = self.read(self.manifest.parent / "ratings.json")
@@ -307,6 +309,28 @@ class BenchmarkTests(unittest.TestCase):
         run = report["projects"][0]["runs"][0]
         self.assertEqual(len(run["inputs"]["command_sha256"]), 64)
         self.assertEqual(run["provider_metadata"], [])
+
+    def test_comparison_distinguishes_model_revisions_with_shared_provenance(self):
+        sys.path.insert(0, str(ROOT / "src" / "python"))
+        from videoedit.provenance import build_provenance
+        artifact = {"schema_version": "videoedit.signal.v1", "status": "ok", "sources": [],
+                    "provenance": build_provenance("yolo", "visual_objects", model_name="test", revision="a")}
+        artifact_path = self.manifest.parent / "objects.json"
+        self.write(artifact_path, artifact)
+        data = self.read(self.manifest)
+        data["projects"][0]["runs"][0].update(providers=["yolo"], provider_artifacts={"yolo": "objects.json"})
+        self.write(self.manifest, data)
+        baseline = self.run_report()
+        baseline_path = self.workspace / "baseline.json"
+        self.write(baseline_path, baseline)
+        artifact["provenance"] = build_provenance("yolo", "visual_objects", model_name="test", revision="b")
+        self.write(artifact_path, artifact)
+        self.run_report()
+        result = self.cli("compare", baseline_path, self.output / "benchmark_report.json", "--output", self.workspace / "comparison")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        comparison = self.read(self.workspace / "comparison" / "benchmark_compare.json")["comparisons"][0]
+        self.assertFalse(comparison["provider_changes"][0]["equivalent"])
+        self.assertEqual(comparison["provider_changes"][0]["candidate"]["model"]["revision"], "b")
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg not installed")
     def test_invokes_rating_from_local_synthetic_footage(self):

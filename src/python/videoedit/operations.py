@@ -182,10 +182,10 @@ def op_rate_footage(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     config_data = dict(config_data)
     _merge_signal_artifact_aliases(config_data)
     config = AnalysisConfig.from_mapping(config_data)
-    report = run_rating(input_path, output_dir, config=config)
+    report = run_rating(input_path, output_dir, config=config, manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute")))
     context["ratings"] = os.path.join(output_dir, "ratings.json")
     context["selections"] = os.path.join(output_dir, "selections")
-    return {"ratings": context["ratings"], "candidates": len(report.candidates)}
+    return {"ratings": context["ratings"], "candidates": len(report.candidates), "run_manifest": os.path.join(output_dir, "rating_run.json")}
 
 
 def _merge_signal_artifact_aliases(config_data: dict[str, Any]) -> None:
@@ -300,8 +300,10 @@ def op_generate_edl(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     selection_paths = _selection_paths(selection_glob)
     written = []
     for path in selection_paths:
-        written.extend(export_selection_file(path, output_dir, fps=fps))
-    return {"output": output_dir, "files": written}
+        written.extend(export_selection_file(path, output_dir, fps=fps, manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute"))))
+    return {"output": output_dir, "files": written,
+            "run_manifests": [os.path.join(output_dir, os.path.splitext(os.path.basename(path))[0] + "_handoff.json")
+                              for path in selection_paths]}
 
 
 def op_review_assets(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -314,6 +316,7 @@ def op_review_assets(context: dict[str, Any], params: dict[str, Any]) -> dict[st
         proxies=bool(params.get("proxy") or params.get("proxies", False)),
         thumbnail_width=int(params.get("thumbnail_width", 360)),
         calibration_json=params.get("calibration") or params.get("calibration_json") or context.get("calibration_report"),
+        manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute")),
     )
     context["review_assets"] = result["manifest"]
     context["review_decisions"] = result["decisions"]
@@ -344,7 +347,9 @@ def op_approve_candidates(context: dict[str, Any], params: dict[str, Any]) -> di
 def op_assemble(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     selection = os.fspath(params.get("input") or params.get("selection") or context.get("approved"))
     output = os.fspath(params.get("output") or os.path.join(context["output"], "rough_cut.mp4"))
-    return {"output": assemble(selection, output, plan_json=params.get("plan") or context.get("roughcut_plan"))}
+    return {"output": assemble(selection, output, plan_json=params.get("plan") or context.get("roughcut_plan"),
+                               manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute"))),
+            "run_manifest": os.path.splitext(output)[0] + "_assembly.json"}
 
 
 def op_plan_roughcut(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -361,6 +366,7 @@ def op_plan_roughcut(context: dict[str, Any], params: dict[str, Any]) -> dict[st
         max_clips=params.get("max_clips"),
         render_mode=params.get("render_mode", "copy"),
         report_output=params.get("report_output"),
+        manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute")),
     )
     context["roughcut_plan"] = result["plan"]
     return result

@@ -13,7 +13,10 @@ import re
 from typing import Any
 
 from .diagnostics import resolve_command
+from ._version import __version__
 from .ffmpeg import has_command, probe_media, run_command, run_command_check, scan_video_files
+from .manifests import atomic_json
+from .provenance import build_provenance
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
@@ -151,7 +154,9 @@ def detect_motorsports_events(ratings_json: str, output: str, min_confidence: fl
         "count": len(events),
         "events": events,
     }
-    _attach_signal_metadata(payload, "motorsports_events", payload["provider"], ratings_json, events)
+    _attach_signal_metadata(payload, "motorsports_events", payload["provider"], ratings_json, events,
+                            sampling={"kind": "ratings_candidates"}, provider_version=__version__,
+                            config={"keywords": MOTORSPORTS_EVENTS, "min_confidence": min_confidence})
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(events)}
 
@@ -199,7 +204,8 @@ def cluster_transcript_topics(ratings_json: str, output: str) -> dict[str, Any]:
         "count": len(topics),
         "topics": topics,
     }
-    _attach_signal_metadata(payload, "topic_clusters", payload["provider"], ratings_json, _topic_records(topics))
+    _attach_signal_metadata(payload, "topic_clusters", payload["provider"], ratings_json, _topic_records(topics),
+                            sampling={"kind": "transcript_hits"}, provider_version=__version__, config=TRANSCRIPT_TOPICS)
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(topics)}
 
@@ -264,7 +270,10 @@ def detect_ocr_signage(
         "hits": hits,
         "warnings": warnings,
     }
-    _attach_signal_metadata(payload, "ocr_signage", payload["provider"], input_path, hits)
+    _attach_signal_metadata(payload, "ocr_signage", payload["provider"], input_path, hits,
+                            sampling={"kind": "uniform", "interval_seconds": max(1.0, float(sample_interval)),
+                                      "max_frames_per_file": max(1, int(max_frames_per_file))},
+                            provider_version=_command_version("tesseract"))
     _write_json(output, payload)
     return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
 
@@ -361,7 +370,11 @@ def detect_visual_objects(
         "sources": sources,
         "warnings": warnings,
     }
-    _attach_signal_metadata(payload, "visual_objects", detector, input_path, sources)
+    _attach_signal_metadata(payload, "visual_objects", os.path.basename(detector), input_path, sources,
+                            sampling={"kind": "all_frames", "confidence": confidence,
+                                      "max_detections": max_detections, "segment_merge_gap": segment_merge_gap},
+                            model_name=os.path.basename(model) if model else None,
+                            checkpoint=model if model and os.path.isfile(model) else None)
     _write_json(output, payload)
     return {
         "output": output,
@@ -457,7 +470,10 @@ def detect_face_person_presence(
         "hits": hits,
         "warnings": warnings,
     }
-    _attach_signal_metadata(payload, "face_person_presence", payload["provider"], input_path, hits)
+    _attach_signal_metadata(payload, "face_person_presence", payload["provider"], input_path, hits,
+                            sampling={"kind": "uniform", "interval_seconds": max(1.0, float(sample_interval)),
+                                      "max_frames_per_file": max(1, int(max_frames_per_file))},
+                            provider_version=getattr(cv2, "__version__", None), model_name="opencv_haar_hog")
     _write_json(output, payload)
     return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
 
@@ -515,21 +531,35 @@ def _inferred_event(clip: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _command_version(command: str) -> str | None:
+    try:
+        result = run_command([command, "--version"], timeout=3)
+        words = result.stdout.splitlines()[0].split()
+        return words[1] if result.returncode == 0 and len(words) > 1 else None
+    except (OSError, RuntimeError, IndexError):
+        return None
+
+
 def _attach_signal_metadata(
     payload: dict[str, Any],
     artifact_kind: str,
     provider_name: str,
     input_path: str,
     records: list[dict[str, Any]],
+    *, sampling: dict[str, Any] | None = None, provider_version: str | None = None,
+    model_name: str | None = None, checkpoint: str | None = None, config: dict[str, Any] | None = None,
 ) -> None:
     summaries = _source_summaries(records)
     payload["schema_version"] = SIGNAL_SCHEMA_VERSION
     payload["artifact_kind"] = artifact_kind
     payload["provider_metadata"] = {
         "name": provider_name,
-        "version": "unknown",
+        "version": provider_version or "unknown",
         "artifact_kind": artifact_kind,
     }
+    payload["provenance"] = build_provenance(provider_name, artifact_kind, model_name=model_name,
+                                              checkpoint=checkpoint, library_version=provider_version,
+                                              sampling=sampling, config=config)
     payload["source_count"] = len(summaries)
     payload["source_summaries"] = summaries
     payload.setdefault("input", os.fspath(input_path))
@@ -925,11 +955,10 @@ def _read_json(path: str) -> dict[str, Any]:
 
 
 def _write_json(path: str, data: dict[str, Any]) -> None:
-    parent = os.path.dirname(os.fspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(os.fspath(path), "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(data, indent=2))
+    if "provenance" not in data:
+        data["provenance"] = build_provenance(data.get("provider") or "unknown", data.get("artifact_kind") or "unknown",
+                                               sampling={"kind": "unavailable"})
+    atomic_json(path, data)
 
 
 def _safe_slug(value: str) -> str:

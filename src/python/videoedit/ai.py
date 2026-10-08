@@ -15,9 +15,13 @@ import os
 import re
 import shlex
 import subprocess
+import time
 from typing import Any, Protocol
 
 from .ffmpeg import has_command, probe_media, run_command_check, scan_video_files
+from ._version import __version__
+from .manifests import atomic_json
+from .provenance import build_provenance, canonical_hash, ensure_compatible, file_sha256, library_version, public_provenance
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
 
@@ -213,7 +217,11 @@ def score_frames(
 
     profile = get_ai_profile(profile_id)
     output = os.fspath(output)
+    started = time.monotonic()
+    cache_hits = cache_misses = 0
     existing = _read_optional_json(output) if cache else {}
+    if existing:
+        ensure_compatible(existing)
     existing_sources = {
         row.get("source"): row
         for row in existing.get("sources", [])
@@ -237,12 +245,25 @@ def score_frames(
 
     probe = media_probe or probe_media
     sampler = frame_sampler or _sample_frame
+    provenance = build_provenance(
+        getattr(encoder, "provider_name", "openclip"), "ai_frame_scores",
+        model_name=getattr(encoder, "model_name", model), repository=getattr(encoder, "model_repository", None),
+        revision=getattr(encoder, "model_revision", None), checkpoint=getattr(encoder, "checkpoint_path", None),
+        model_checksum=getattr(encoder, "model_sha256", None), pretrained=pretrained,
+        library="open_clip_torch", library_version=getattr(encoder, "provider_version", None) or library_version("open_clip_torch"),
+        device=getattr(encoder, "device", None), precision=getattr(encoder, "precision", None),
+        profile=profile.to_dict(), sampling={"kind": "uniform", "interval_seconds": float(sample_interval), "max_frames_per_file": int(max_frames_per_file)},
+        random_seed=getattr(encoder, "random_seed", None), config={"model": model, "pretrained": pretrained, "min_score": min_score},
+    )
     for source in files:
         signature = _source_signature(source, profile.id, sample_interval, max_frames_per_file, min_score, model, pretrained)
+        signature["provenance_sha256"] = provenance["identity_sha256"]
         cached = existing_sources.get(source)
         if cached and cached.get("signature") == signature:
-            sources.append(cached)
+            sources.append({**cached, "cache_status": "cached"})
+            cache_hits += 1
             continue
+        cache_misses += 1
 
         asset = probe(source, timeout=min(timeout, 60))
         duration = float(getattr(asset, "duration", 0.0) or 0.0)
@@ -301,6 +322,8 @@ def score_frames(
         "input": os.fspath(input_path),
         "profile": profile.to_dict(),
         "provider": "openclip",
+        "provenance": provenance,
+        "telemetry": {"cache_hits": cache_hits, "cache_misses": cache_misses, "elapsed_seconds": round(time.monotonic() - started, 6)},
         "provider_metadata": {
             "name": getattr(encoder, "provider_name", "openclip"),
             "model": getattr(encoder, "model_name", model),
@@ -320,8 +343,10 @@ def score_frames(
         "sources": sources,
         "warnings": warnings,
     }
+    for source in sources:
+        source.setdefault("cache_status", "computed")
     _write_json(output, payload)
-    return {"output": output, "status": "ok", "sources": len(sources), "frames": payload["frame_count"], "warnings": warnings}
+    return {"output": output, "status": "ok", "sources": len(sources), "frames": payload["frame_count"], "warnings": warnings, "telemetry": payload["telemetry"]}
 
 
 def find_missed_moments(
@@ -335,6 +360,7 @@ def find_missed_moments(
 ) -> dict[str, Any]:
     ratings = _read_json(ratings_json)
     scores = _read_json(ai_frame_scores_json)
+    ensure_compatible(scores)
     candidates = list(ratings.get("candidates", []))
     positive = [candidate for candidate in candidates if str(candidate.get("action")) in {"select", "review", "broll"}]
     moments = []
@@ -388,12 +414,22 @@ def find_missed_moments(
         "count": len(moments),
         "moments": moments,
     }
+    upstream = public_provenance(scores)
+    provenance = dict(upstream) if upstream else build_provenance("legacy_frame_scores", "ai_frame_scores")
+    payload["derived_from"] = {"artifact_kind": "ai_frame_scores", "artifact_sha256": file_sha256(ai_frame_scores_json),
+                               "transform": "find_missed_moments", "transform_version": __version__,
+                               "provenance_sha256": upstream["identity_sha256"] if upstream else None}
+    provenance.update(artifact_kind="ai_missed_moments",
+                      config_sha256=canonical_hash({"settings": payload["settings"], "derived_from": payload["derived_from"]}))
+    provenance["identity_sha256"] = canonical_hash({key: value for key, value in provenance.items() if key != "identity_sha256"})
+    payload["provenance"] = provenance
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(moments)}
 
 
 def generate_missed_review(missed_json: str, output_dir: str) -> dict[str, Any]:
     data = _read_json(missed_json)
+    ensure_compatible(data)
     output_dir = os.fspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     decisions = {
@@ -463,6 +499,14 @@ def judge_review_clips(
         "review_assets": review_assets_json,
         "profile": profile.to_dict(),
         "provider": provider_meta,
+        "provenance": build_provenance(
+            provider_meta["name"], "ai_clip_judgments", model_name=provider_meta["model"],
+            repository=getattr(provider, "model_repository", None), revision=getattr(provider, "model_revision", None),
+            model_checksum=getattr(provider, "model_sha256", None), library_version=getattr(provider, "provider_version", None),
+            device=getattr(provider, "device", None), precision=getattr(provider, "precision", None),
+            profile=profile.to_dict(), sampling={"kind": "candidate_clips", "records": len(clips)},
+            random_seed=getattr(provider, "random_seed", None), config={"retries": retries, "timeout": timeout},
+        ),
         "status": "ok",
         "count": len(judgments),
         "clips": judgments,
@@ -478,6 +522,7 @@ def load_clip_judgment_explanations(path: str | None) -> dict[str, list[dict[str
     data = _read_optional_json(os.fspath(path))
     if not data:
         return {}
+    ensure_compatible(data)
     provider = data.get("provider") if isinstance(data.get("provider"), dict) else {}
     rows: dict[str, list[dict[str, Any]]] = {}
     for clip in data.get("clips", []):
@@ -498,7 +543,7 @@ class CommandClipJudgeProvider:
         if not self.command:
             raise ValueError("AI judge provider command is empty")
         self.timeout = timeout
-        self.model_name = " ".join(self.command)
+        self.model_name = "external-command"
 
     def judge_clip(self, request: dict[str, Any]) -> str:
         completed = subprocess.run(
@@ -536,6 +581,12 @@ class OpenCLIPEncoder:
         self.model = self.model.to(self.device).eval()
         self.tokenizer = open_clip.get_tokenizer(model)
         self.model_name = model
+        self.provider_version = library_version("open_clip_torch")
+        self.precision = str(next(self.model.parameters()).dtype).removeprefix("torch.")
+        self.checkpoint_path = pretrained if os.path.isfile(pretrained) else None
+        cfg = open_clip.get_pretrained_cfg(model, pretrained)
+        hub = cfg.get("hf_hub", "") if isinstance(cfg, dict) else ""
+        self.model_repository = "/".join(hub.split("/")[:2]) if hub else None
 
     def score_images(self, image_paths: list[str], prompts: list[str]) -> list[list[float]]:
         torch = self.torch
@@ -1172,11 +1223,12 @@ def _read_optional_json(path: str) -> dict[str, Any]:
 
 
 def _write_json(path: str, data: dict[str, Any]) -> None:
-    parent = os.path.dirname(os.fspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(os.fspath(path), "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(data, indent=2) + "\n")
+    if "provenance" not in data and data.get("schema_version") in {AI_FRAME_SCHEMA_VERSION, AI_CLIP_JUDGE_SCHEMA_VERSION}:
+        provider = data.get("provider")
+        name = provider.get("name", "unknown") if isinstance(provider, dict) else provider or "unknown"
+        data["provenance"] = build_provenance(name, data.get("artifact_kind", "unknown"), profile=data.get("profile"),
+                                               sampling={"kind": "unavailable"})
+    atomic_json(path, data)
 
 
 def _safe_slug(value: str) -> str:

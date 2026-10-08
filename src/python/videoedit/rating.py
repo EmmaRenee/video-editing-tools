@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from datetime import datetime
 from typing import Any
 
@@ -13,9 +14,10 @@ from .config import AnalysisConfig
 from .ffmpeg import analyze_audio_levels, detect_scene_changes, detect_silence, probe_media, scan_video_files
 from .inventory import write_inventory_outputs
 from .learning import apply_learned_scorer_to_candidates, load_learned_scorer
+from .manifests import RunManifest, fingerprint
 from .models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, RatingReport, SignalReport
 from .reports import write_candidate_csv, write_rating_json, write_review_html, write_review_markdown, write_selection_sets
-from .signals import load_signal_artifacts
+from .signals import load_signal_artifacts, signal_artifact_paths
 from .timecode import clamp_window
 from .transcript import find_transcript_hits
 
@@ -24,7 +26,34 @@ def run_rating(
     footage_dir: str,
     output_dir: str,
     config: AnalysisConfig | None = None,
+    manifest_paths: str = "absolute",
 ) -> RatingReport:
+    config = config or AnalysisConfig()
+    inputs = [os.fspath(footage_dir), *signal_artifact_paths(config).values()]
+    inputs.extend(path for path in (config.learned_scorer_path, config.ai_clip_judgments_path) if path)
+    stats = {"cache_hits": 0, "cache_misses": 0}
+    with RunManifest(os.path.join(output_dir, "rating_run.json"), "rate_footage", inputs=inputs,
+                     config=config.to_dict(), path_mode=manifest_paths) as manifest:
+        try:
+            report = _run_rating(footage_dir, output_dir, config, stats, manifest)
+        except BaseException as exc:
+            manifest.record_step("rating", "rate_footage", config.to_dict(), {"telemetry": stats},
+                                 time.monotonic() - manifest.started,
+                                 status="interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error", error=exc)
+            raise
+        result = {"ratings": os.path.join(output_dir, "ratings.json"), "inventory": os.path.join(output_dir, "inventory.json"),
+                  "candidates": os.path.join(output_dir, "candidates.csv"), "review": os.path.join(output_dir, "review.md"),
+                  "telemetry": stats, "summary": report.summary}
+        failures = sum(asset.status != "ok" for asset in report.inventory)
+        if failures:
+            manifest.data["partial"] = True
+            manifest.data["warnings"].append(f"media_analysis_failed:{failures}")
+        manifest.record_step("rating", "rate_footage", config.to_dict(), result, time.monotonic() - manifest.started)
+    return report
+
+
+def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
+                stats: dict[str, int], manifest: RunManifest) -> RatingReport:
     config = config or AnalysisConfig()
     footage_dir = os.fspath(footage_dir)
     output_dir = os.fspath(output_dir)
@@ -34,14 +63,18 @@ def run_rating(
     cache_changed = False
     signals: list[SignalReport] = []
     signal_artifacts = load_signal_artifacts(config)
+    manifest.data["warnings"].extend(signal_artifacts.warnings)
 
     for path in scan_video_files(footage_dir):
+        manifest.data["inputs"].append(fingerprint(path, content=False))
         key = os.path.abspath(path)
         signature = _file_signature(path, config)
         cached = cache.get(key)
         if cached and cached.get("signature") == signature:
+            stats["cache_hits"] += 1
             signals.append(SignalReport.from_dict(cached["report"]))
             continue
+        stats["cache_misses"] += 1
         report = analyze_file(
             path,
             config,
@@ -110,7 +143,8 @@ def run_rating(
     write_candidate_csv(candidates, os.path.join(output_dir, "candidates.csv"))
     write_review_markdown(report, os.path.join(output_dir, "review.md"))
     write_review_html(report, os.path.join(output_dir, "review.html"))
-    write_selection_sets(candidates, os.path.join(output_dir, "selections"))
+    selections = write_selection_sets(candidates, os.path.join(output_dir, "selections"))
+    manifest.add_outputs([os.path.join(output_dir, name) for name in ("inventory.csv", "inventory.md", "review.html")] + selections)
     return report
 
 
