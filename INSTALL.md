@@ -34,6 +34,12 @@ works with the core install and existing artifacts; generation alone needs
 optional provider dependencies. See [provider ablations](docs/provider-ablations.md)
 for controlled inputs, coverage requirements, and current instrumentation limits.
 
+`videoedit signals sample-frames footage/ --output analysis/frame_cache/`
+needs only the core install and FFmpeg/ffprobe. Optional OCR/face/AI commands
+accept `--frame-cache analysis/frame_cache/`; install only their corresponding
+extras/tools below. See [shared frame samples](docs/frame-cache.md) for matching
+sampling settings, privacy, invalidation, and interrupted-worker recovery.
+
 Execution sidecars and provider provenance also require no additional core
 dependencies. Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`,
 `roughcut plan`, `assemble`, or `export-edl` before sharing diagnostics. This does

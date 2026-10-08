@@ -33,7 +33,7 @@ class AblationTests(unittest.TestCase):
     def candidate(self, providers=("yolo",)):
         from videoedit.provenance import build_provenance
         bindings = {"yolo": "visual_objects_path", "openclip": "ai_frame_scores_path", "clip_judge": "ai_clip_judgments_path", "learned_scorer": "learned_scorer_path"}
-        kinds = {"yolo": "visual_objects", "openclip": "ai_frame_scores", "clip_judge": "ai_clip_judgments", "learned_scorer": "learned_scorer"}
+        kinds = {"yolo": "visual_objects", "openclip": "ai_frame_scores", "clip_judge": "ai_clip_judgments", "learned_scorer": "learned_scorer", "face_person": "face_person_presence"}
         data = self.read(self.manifest)
         ratings = self.read(self.inputs / "ratings.json")
         ratings["candidates"][1].update(start=10, end=14)
@@ -49,7 +49,10 @@ class AblationTests(unittest.TestCase):
                        "telemetry": {"elapsed_seconds": 1, "cache_hits": 0, "cache_misses": 1}}
             self.write(artifact, payload)
             artifacts[provider] = artifact.name
-            ratings["config"][bindings[provider]] = str(artifact)
+            if provider == "face_person":
+                ratings["config"].setdefault("signal_artifacts", {})["face_person"] = str(artifact)
+            else:
+                ratings["config"][bindings[provider]] = str(artifact)
         self.write(self.inputs / "candidate.json", ratings)
         data["projects"][0]["runs"].append({"id": "with-signals", "role": "candidate", "ratings": "candidate.json",
                                            "providers": list(providers), "provider_artifacts": artifacts,
@@ -87,6 +90,12 @@ class AblationTests(unittest.TestCase):
         row = self.effect()
         self.assertEqual(row["attribution"], "combination_only")
         self.assertEqual([item["id"] for item in row["providers"]], ["openclip", "yolo"])
+
+    def test_native_face_artifact_kind_is_distinct_from_configuration_binding(self):
+        self.candidate(("face_person",))
+        row = self.effect()
+        self.assertEqual(row["status"], "evaluated", row["reason_codes"])
+        self.assertEqual(row["providers"][0]["coverage"]["temporal_ratio"], 1)
 
     def test_empty_partial_and_low_coverage_are_not_evaluated(self):
         self.candidate()

@@ -115,7 +115,8 @@ def _provider(provider: str, run: dict[str, Any], ratings: dict[str, Any], ratin
     if artifact.get("status", "ok") != "ok":
         row["reason_codes"] = ["provider_failed_or_unavailable"]
         return row
-    if artifact.get("artifact_kind") != kind:
+    expected_kind = "face_person_presence" if kind == "face_person" else kind
+    if artifact.get("artifact_kind") != expected_kind:
         row["reason_codes"].append("artifact_kind_mismatch")
     row["binding"] = _binding(manifest, ratings_path, row["artifact_sha256"])
     if row["binding"] == "mismatch":

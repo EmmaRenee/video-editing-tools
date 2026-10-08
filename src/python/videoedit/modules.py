@@ -131,6 +131,7 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
 
 OPERATION_MODULES = {
     "inventory": "core.inventory",
+    "sample_frames": "core.inventory",
     "analyze_signals": "core.rating",
     "rate_footage": "core.rating",
     "detect_highlights_audio": "core.rating",

@@ -32,6 +32,17 @@ It checks controlled inputs, historical bindings, coverage, and model identity.
 See [provider ablations](../../docs/provider-ablations.md) for provider IDs,
 restricted candidate scopes, coverage limits, and cost/evidence requirements.
 
+### V17 Shared Frames
+
+`videoedit signals sample-frames footage/ --output analysis/frame_cache/`
+and pipeline operation `sample_frames` need only FFmpeg/ffprobe.
+Native OCR/face/AI commands accept `--frame-cache` and pipeline operations share
+one cache automatically. Match interval/maximum/format for reuse; full-resolution
+OCR/face and 336px AI entries stay distinct. Processing coverage includes negative
+frames; extraction and inference telemetry have separate scopes. See
+[shared frames](../../docs/frame-cache.md) for atomic publication, invalidation,
+strict hashes, interrupted-worker recovery, privacy, and performance limits.
+
 ### V17 Provenance And Diagnostics
 
 Signal/AI/scorer artifacts gain `videoedit.provenance.v1` model and provider

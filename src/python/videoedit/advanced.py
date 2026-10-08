@@ -15,9 +15,10 @@ import time
 from typing import Any
 
 from .diagnostics import resolve_command
-from .coverage import SCHEMA as COVERAGE_SCHEMA
+from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
 from ._version import __version__
 from .ffmpeg import has_command, probe_media, run_command, run_command_check, scan_video_files
+from .frames import FrameCache, SAMPLER, sample_timestamps
 from .manifests import atomic_json
 from .provenance import build_provenance
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
@@ -245,10 +246,11 @@ def detect_ocr_signage(
     sample_interval: float = 10.0,
     max_frames_per_file: int = 6,
     timeout: int = 180,
+    frame_cache: str | None = None,
 ) -> dict[str, Any]:
+    started = time.monotonic()
     output = os.fspath(output)
     output_dir = os.path.dirname(output) or "."
-    frames_dir = os.path.join(output_dir, "ocr_frames")
     warnings: list[str] = []
     hits: list[dict[str, Any]] = []
     if not has_command("ffmpeg") or not has_command("tesseract"):
@@ -260,51 +262,42 @@ def detect_ocr_signage(
         _write_json(output, payload)
         return {"output": output, "count": 0, "status": payload["status"]}
 
-    os.makedirs(frames_dir, exist_ok=True)
+    sampler = FrameCache(frame_cache or os.path.join(output_dir, ".frame_cache"), timeout=timeout)
+    samples, coverage = [], []
     for source in _input_files(input_path):
-        stem = _safe_slug(os.path.splitext(os.path.basename(source))[0])
-        pattern = os.path.join(frames_dir, f"{stem}_%04d.jpg")
-        try:
-            run_command_check(
-                [
-                    "ffmpeg",
-                    "-i",
-                    source,
-                    "-vf",
-                    f"fps=1/{max(1.0, float(sample_interval))}",
-                    "-frames:v",
-                    str(max(1, int(max_frames_per_file))),
-                    pattern,
-                    "-y",
-                ],
-                timeout=timeout,
-            )
-        except Exception as exc:
-            warnings.append(f"frame sampling failed for {source}: {exc}")
-            continue
-        for frame in sorted(_matching_frames(frames_dir, stem)):
-            result = run_command(["tesseract", frame, "stdout"], timeout=timeout)
-            text = result.stdout.strip()
-            if result.returncode == 0 and text:
-                hits.append({"source": source, "frame": frame, "text": text})
-            elif result.returncode != 0:
-                warnings.append(f"ocr failed for {frame}: {(result.stderr or result.stdout).strip()}")
+        sampled = sampler.sample(source, sample_interval=sample_interval, max_frames=max_frames_per_file)
+        samples.append(sampled)
+        warnings.extend(sampled["warnings"])
+        processed = []
+        for frame in sampled["frames"]:
+            try:
+                result = run_command(["tesseract", frame["path"], "stdout"], timeout=timeout)
+                if result.returncode != 0:
+                    raise RuntimeError((result.stderr or result.stdout).strip() or "tesseract failed")
+                processed.append(frame["time_seconds"])
+                text = result.stdout.strip()
+                if text:
+                    hits.append({"source": source, "frame": frame["path"], "text": text, "time_seconds": frame["time_seconds"]})
+            except Exception as exc:
+                warnings.append(f"ocr failed for {frame['path']}: {exc}")
+        expected = sample_timestamps(sampled["duration"], sample_interval, max_frames_per_file)
+        coverage.append(sample_coverage(source, sampled["duration"], expected, processed, sample_interval))
 
     payload = {
         "generated": datetime.now().isoformat(),
         "provider": "tesseract_ocr",
-        "status": "ok",
         "input": os.fspath(input_path),
         "count": len(hits),
         "hits": hits,
         "warnings": warnings,
     }
     _attach_signal_metadata(payload, "ocr_signage", payload["provider"], input_path, hits,
-                            sampling={"kind": "uniform", "interval_seconds": max(1.0, float(sample_interval)),
-                                      "max_frames_per_file": max(1, int(max_frames_per_file))},
-                            provider_version=_command_version("tesseract"))
+                            sampling={"kind": SAMPLER, "interval_seconds": float(sample_interval), "width": 0, "jpeg_quality": 3,
+                                      "max_frames_per_file": max_frames_per_file},
+                            provider_version=_command_version("tesseract"), config={"decoder": sampler.decoder})
+    _attach_frame_coverage(payload, samples, coverage, started)
     _write_json(output, payload)
-    return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
+    return {"output": output, "count": len(hits), "status": payload["status"], "warnings": warnings, "telemetry": payload["telemetry"]}
 
 
 def detect_visual_objects(
@@ -422,10 +415,11 @@ def detect_face_person_presence(
     sample_interval: float = 10.0,
     max_frames_per_file: int = 6,
     timeout: int = 180,
+    frame_cache: str | None = None,
 ) -> dict[str, Any]:
+    started = time.monotonic()
     output = os.fspath(output)
     output_dir = os.path.dirname(output) or "."
-    frames_dir = os.path.join(output_dir, "face_person_frames")
     try:
         cv2 = __import__("cv2")
     except ImportError:
@@ -445,66 +439,62 @@ def detect_face_person_presence(
         _write_json(output, payload)
         return {"output": output, "count": 0, "status": payload["status"]}
 
-    os.makedirs(frames_dir, exist_ok=True)
     warnings: list[str] = []
     hits: list[dict[str, Any]] = []
     face_detector = _opencv_face_detector(cv2, warnings)
     person_detector = _opencv_person_detector(cv2, warnings)
+    sampler = FrameCache(frame_cache or os.path.join(output_dir, ".frame_cache"), timeout=timeout)
+    samples, coverage = [], []
+    ready = face_detector is not None and person_detector is not None
+    if not ready:
+        warnings.append("face/person detector initialization incomplete")
 
     for source in _input_files(input_path):
-        stem = _safe_slug(os.path.splitext(os.path.basename(source))[0])
-        pattern = os.path.join(frames_dir, f"{stem}_%04d.jpg")
-        try:
-            run_command_check(
-                [
-                    "ffmpeg",
-                    "-i",
-                    source,
-                    "-vf",
-                    f"fps=1/{max(1.0, float(sample_interval))}",
-                    "-frames:v",
-                    str(max(1, int(max_frames_per_file))),
-                    pattern,
-                    "-y",
-                ],
-                timeout=timeout,
-            )
-        except Exception as exc:
-            warnings.append(f"frame sampling failed for {source}: {exc}")
-            continue
-
-        for frame in sorted(_matching_frames(frames_dir, stem)):
-            image = cv2.imread(frame)
-            if image is None:
-                warnings.append(f"frame read failed: {frame}")
-                continue
-            face_count = _count_faces(cv2, face_detector, image)
-            person_count = _count_people(person_detector, image)
-            if face_count or person_count:
-                hits.append(
-                    {
-                        "source": source,
-                        "frame": frame,
-                        "face_count": face_count,
-                        "person_count": person_count,
-                    }
-                )
+        sampled = sampler.sample(source, sample_interval=sample_interval, max_frames=max_frames_per_file)
+        samples.append(sampled)
+        warnings.extend(sampled["warnings"])
+        processed = []
+        for frame in sampled["frames"] if ready else []:
+            try:
+                image = cv2.imread(frame["path"])
+                if image is None:
+                    raise ValueError("frame read failed")
+                face_count = _count_faces(cv2, face_detector, image)
+                person_count = _count_people(person_detector, image)
+                processed.append(frame["time_seconds"])
+                if face_count or person_count:
+                    hits.append({"source": source, "frame": frame["path"], "time_seconds": frame["time_seconds"],
+                                 "face_count": face_count, "person_count": person_count})
+            except Exception as exc:
+                warnings.append(f"face/person detection failed for {frame['path']}: {exc}")
+        expected = sample_timestamps(sampled["duration"], sample_interval, max_frames_per_file)
+        coverage.append(sample_coverage(source, sampled["duration"], expected, processed, sample_interval))
 
     payload = {
         "generated": datetime.now().isoformat(),
         "provider": "opencv_face_person",
-        "status": "ok",
         "input": os.fspath(input_path),
         "count": len(hits),
         "hits": hits,
         "warnings": warnings,
     }
     _attach_signal_metadata(payload, "face_person_presence", payload["provider"], input_path, hits,
-                            sampling={"kind": "uniform", "interval_seconds": max(1.0, float(sample_interval)),
-                                      "max_frames_per_file": max(1, int(max_frames_per_file))},
-                            provider_version=getattr(cv2, "__version__", None), model_name="opencv_haar_hog")
+                            sampling={"kind": SAMPLER, "interval_seconds": float(sample_interval), "width": 0, "jpeg_quality": 3,
+                                      "max_frames_per_file": max_frames_per_file},
+                            provider_version=getattr(cv2, "__version__", None), model_name="opencv_haar_hog", config={"decoder": sampler.decoder})
+    _attach_frame_coverage(payload, samples, coverage, started)
     _write_json(output, payload)
-    return {"output": output, "count": len(hits), "status": "ok", "warnings": warnings}
+    return {"output": output, "count": len(hits), "status": payload["status"], "warnings": warnings, "telemetry": payload["telemetry"]}
+
+
+def _attach_frame_coverage(payload: dict[str, Any], samples: list[dict[str, Any]], coverage: list[dict[str, Any]], started: float) -> None:
+    payload["status"] = "ok" if coverage and all(row["status"] == "ok" for row in coverage) else "partial" if any(row["processed_units"] for row in coverage) else "error"
+    payload["coverage"] = {"schema_version": COVERAGE_SCHEMA, "scope": "temporal", "sources": coverage}
+    payload["sampled_sources"] = [{"source": row["source"], "signature": row["signature"], "status": row["status"]} for row in samples]
+    payload["telemetry"] = {key: sum(row["telemetry"][key] for row in samples)
+                            for key in ("cache_hits", "cache_misses", "decoded_frames", "decode_attempts", "output_size_bytes")}
+    payload["telemetry"].update(elapsed_seconds=round(time.monotonic() - started, 6),
+                                cache_scope="frame_extraction", decoded_frames_scope="successful_sample_images", output_size_scope="jpeg_images")
 
 
 def _candidate_text(clip: dict[str, Any]) -> str:

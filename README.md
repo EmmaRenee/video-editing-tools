@@ -13,6 +13,10 @@ for controlled provider scorecards, coverage checks, and quality/cost deltas.
 Read [provider ablations](docs/provider-ablations.md) for binding requirements,
 current provider limitations, and recommendation evidence gates.
 
+[Shared frame sampling](docs/frame-cache.md) adds
+`videoedit signals sample-frames` and `--frame-cache` for native OCR/face/AI
+providers, with integrity checks, measured reuse, and negative-scan coverage.
+
 [Provider provenance and execution manifests](docs/provenance-and-manifests.md)
 record model identity, input/output fingerprints, timing, cache reuse, failures,
 and handoff assumptions. Use `--manifest-paths redacted` on `rate`, `run`,
