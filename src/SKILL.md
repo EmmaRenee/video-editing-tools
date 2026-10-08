@@ -48,9 +48,10 @@ historical manifest verification, and negative scans from absent processing.
 
 Supported provider IDs are `openclip`, `yolo`, `ocr`, `face_person`, `motorsports`,
 `topics`, `clip_judge`, and `learned_scorer`. OpenCLIP emits sampled temporal
-coverage; heuristics and learned scoring disclose candidate-only coverage.
-Judge artifacts are annotation-only. Legacy vision artifacts lacking processing
-coverage are not valid ablations; native vision instrumentation is still pending.
+coverage; native OCR/face also count successfully processed negative frames.
+Heuristics and learned scoring disclose candidate-only coverage. Judge artifacts
+are annotation-only. Legacy vision artifacts lacking processing coverage are not
+valid ablations; native YOLO coverage instrumentation is still pending.
 Do not fabricate coverage from positive detections.
 
 Recommendations are evidence summaries, not automatic enablement/default changes.
@@ -58,6 +59,23 @@ Synthetic, insufficient, confounded, or unverified runs cannot prove production
 benefit. CLI success means reports were written, not that V17 gates passed.
 Consult `docs/provider-ablations.md`; no models are implicitly downloaded and
 optional dependencies stay optional.
+
+### Shared Frame Workflow
+
+Use `videoedit signals sample-frames footage/ --output analysis/frame_cache/ --max-frames-per-file 6`
+for FFmpeg-only cached samples. Native `signals ocr`, `signals face-person`, and
+`ai score-frames` accept `--frame-cache analysis/frame_cache/`; pipelines share
+`${frame_cache}` automatically. `sample_frames` is an always-enabled
+`core.inventory` operation and writes private `frames.json`.
+
+Match interval, maximum, width and decoder settings to reuse frames. OCR/face
+retain full resolution; AI uses separate 336px samples. Keep source fingerprints,
+explicit timestamps, integrity checks and failure coverage. `--no-cache` on AI
+disables score reuse, not frame reuse. Read extraction and inference counters
+separately; successful sampled images are not all internally decoded GOP frames.
+Do not commit frames or absolute-path manifests. Consult `docs/frame-cache.md`
+for interrupted locks, strict content hashing, CLI failure behavior, and honest
+performance/quality verification. Do not infer improved selections from speed alone.
 
 ### Provenance And Run Diagnostics
 

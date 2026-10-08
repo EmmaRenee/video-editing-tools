@@ -15,10 +15,11 @@ from .presets import PRESETS
 from .simple_yaml import dumps, load_mapping
 
 
-REFERENCE_ROOTS = {"input", "output", "pipeline"}
+REFERENCE_ROOTS = {"input", "output", "pipeline", "frame_cache"}
 
 OPERATION_OUTPUTS = {
     "inventory": {"inventory", "count"},
+    "sample_frames": {"manifest", "status", "sources", "frames", "telemetry"},
     "analyze_signals": {"ratings", "candidates", "run_manifest"},
     "rate_footage": {"ratings", "candidates", "run_manifest"},
     "detect_highlights_audio": {"output", "selections", "files", "count"},
@@ -48,7 +49,7 @@ OPERATION_OUTPUTS = {
     "burn_captions": {"output"},
     "normalize_audio": {"output"},
     "concatenate_videos": {"output"},
-    "detect_ocr_signage": {"output", "count", "status", "warnings"},
+    "detect_ocr_signage": {"output", "count", "status", "warnings", "telemetry"},
     "detect_visual_objects": {
         "output",
         "count",
@@ -58,7 +59,7 @@ OPERATION_OUTPUTS = {
         "status",
         "warnings",
     },
-    "detect_face_person_presence": {"output", "count", "status", "warnings"},
+    "detect_face_person_presence": {"output", "count", "status", "warnings", "telemetry"},
     "score_ai_frames": {"output", "status", "sources", "frames", "warnings", "telemetry"},
     "detect_motorsports_events": {"output", "count"},
     "cluster_transcript_topics": {"output", "count"},
@@ -73,6 +74,7 @@ OPERATION_OUTPUTS = {
 
 OPERATION_CONTEXT_OUTPUTS = {
     "inventory": {"inventory"},
+    "sample_frames": {"frame_samples", "frame_cache"},
     "analyze_signals": {"ratings", "selections"},
     "rate_footage": {"ratings", "selections"},
     "detect_highlights_audio": {"filtered_candidates", "filtered_selections"},
@@ -190,6 +192,7 @@ def run_pipeline(
         "output": output_dir,
         "pipeline": os.path.splitext(os.path.basename(path))[0],
         "manifest_paths": manifest_paths,
+        "frame_cache": os.path.join(output_dir, ".frame_cache"),
         "results": {},
         "steps": [],
     }
@@ -233,6 +236,7 @@ def plan_pipeline(path: str, input_path: str, output_dir: str) -> dict[str, Any]
         "input": input_path,
         "output": output_dir,
         "pipeline": pipeline.get("name", os.path.splitext(os.path.basename(path))[0]),
+        "frame_cache": os.path.join(output_dir, ".frame_cache"),
         "results": {},
     }
     steps = []
@@ -325,6 +329,9 @@ def _planned_result(
                 "run_manifest": os.path.join(output, "rating_run.json")}
     if operation_name == "inventory":
         return {"inventory": os.path.join(output, "inventory.json"), "count": "unknown"}
+    if operation_name == "sample_frames":
+        return {"manifest": os.path.join(output, "frames.json"), "status": "planned", "sources": "unknown",
+                "frames": "unknown", "telemetry": {}}
     if operation_name in {"detect_highlights_audio", "detect_highlights_transcript"}:
         label = params.get("label", "audio_spike" if operation_name == "detect_highlights_audio" else "transcript_hit")
         output = _filter_output_plan(output, label)
@@ -469,6 +476,9 @@ def _planned_implicit_input(operation_name: str, params: dict[str, Any], context
 def _apply_planned_context(operation_name: str, result: dict[str, Any], context: dict[str, Any]) -> None:
     if operation_name == "inventory":
         context["inventory"] = result.get("inventory")
+    elif operation_name == "sample_frames":
+        context["frame_samples"] = result.get("manifest")
+        context["frame_cache"] = os.path.dirname(result["manifest"])
     elif operation_name in {"rate_footage", "analyze_signals"}:
         ratings = result.get("ratings")
         context["ratings"] = ratings

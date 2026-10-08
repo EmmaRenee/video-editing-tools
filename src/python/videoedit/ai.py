@@ -20,6 +20,7 @@ import time
 from typing import Any, Protocol
 
 from .ffmpeg import has_command, probe_media, run_command_check, scan_video_files
+from .frames import FrameCache, SAMPLER, sample_timestamps as shared_timestamps
 from ._version import __version__
 from .manifests import atomic_json
 from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
@@ -214,6 +215,7 @@ def score_frames(
     encoder: FrameScoreEncoder | None = None,
     frame_sampler: Any | None = None,
     media_probe: Any | None = None,
+    frame_cache: str | None = None,
 ) -> dict[str, Any]:
     """Score sampled video frames against an AI profile prompt bank."""
 
@@ -247,6 +249,9 @@ def score_frames(
 
     probe = media_probe or probe_media
     sampler = frame_sampler or _sample_frame
+    shared = FrameCache(frame_cache or os.path.join(output_dir, ".frame_cache"), timeout=timeout,
+                        media_probe=media_probe) if frame_sampler is None else None
+    frame_telemetry = {key: 0 for key in ("cache_hits", "cache_misses", "decoded_frames", "decode_attempts", "output_size_bytes")}
     provenance = build_provenance(
         getattr(encoder, "provider_name", "openclip"), "ai_frame_scores",
         model_name=getattr(encoder, "model_name", model), repository=getattr(encoder, "model_repository", None),
@@ -254,8 +259,10 @@ def score_frames(
         model_checksum=getattr(encoder, "model_sha256", None), pretrained=pretrained,
         library="open_clip_torch", library_version=getattr(encoder, "provider_version", None) or library_version("open_clip_torch"),
         device=getattr(encoder, "device", None), precision=getattr(encoder, "precision", None),
-        profile=profile.to_dict(), sampling={"kind": "uniform", "interval_seconds": float(sample_interval), "max_frames_per_file": int(max_frames_per_file)},
-        random_seed=getattr(encoder, "random_seed", None), config={"model": model, "pretrained": pretrained, "min_score": min_score},
+        profile=profile.to_dict(), sampling={"kind": SAMPLER if shared else "injected", "interval_seconds": float(sample_interval),
+                                             "max_frames_per_file": int(max_frames_per_file), "width": 336, "jpeg_quality": 3},
+        random_seed=getattr(encoder, "random_seed", None), config={"model": model, "pretrained": pretrained, "min_score": min_score,
+                                                                 "decoder": shared.decoder if shared else "injected"},
     )
     for source in files:
         signature = _source_signature(source, profile.id, sample_interval, max_frames_per_file, min_score, model, pretrained)
@@ -267,32 +274,43 @@ def score_frames(
             continue
         cache_misses += 1
 
-        try:
-            asset = probe(source, timeout=min(timeout, 60))
-            duration = float(getattr(asset, "duration", 0.0) or 0.0)
-            if not math.isfinite(duration) or duration <= 0:
-                raise ValueError("media duration must be positive and finite")
-        except Exception as exc:
-            warnings.append(f"media probe failed for {source}: {exc}")
-            sources.append({"source": source, "signature": signature, "status": "error", "duration": 0.0, "frames": [],
-                            "labels": [], "top_score": 0.0, "warnings": ["media probe failed"],
-                            "coverage": sample_coverage(source, 0, [], [], sample_interval)})
-            continue
-        timestamps = sample_timestamps(duration, sample_interval, max_frames_per_file)
         frame_paths = []
         frame_rows = []
-        source_hash = hashlib.sha1(os.fspath(source).encode("utf-8")).hexdigest()[:8]
-        source_stem = f"{_safe_slug(os.path.splitext(os.path.basename(source))[0])}_{source_hash}"
-        for timestamp in timestamps:
-            frame_name = f"{source_stem}_{int(round(timestamp * 1000)):010d}.jpg"
-            frame_path = os.path.join(frames_dir, frame_name)
+        if shared:
+            sampled = shared.sample(source, sample_interval=sample_interval, max_frames=max_frames_per_file, width=336)
+            duration = sampled["duration"]
+            timestamps = shared_timestamps(duration, sample_interval, max_frames_per_file)
+            warnings.extend(sampled["warnings"])
+            for key in frame_telemetry:
+                frame_telemetry[key] += sampled["telemetry"][key]
+            for frame in sampled["frames"]:
+                frame_paths.append(frame["path"])
+                frame_rows.append({"time_seconds": frame["time_seconds"], "frame": os.path.relpath(frame["path"], output_dir)})
+        else:
             try:
-                sampler(source, timestamp, frame_path, timeout=timeout)
+                asset = probe(source, timeout=min(timeout, 60))
+                duration = float(getattr(asset, "duration", 0.0) or 0.0)
+                if not math.isfinite(duration) or duration <= 0:
+                    raise ValueError("media duration must be positive and finite")
             except Exception as exc:
-                warnings.append(f"frame sampling failed for {source} at {timestamp:.3f}s: {exc}")
+                warnings.append(f"media probe failed for {source}: {exc}")
+                sources.append({"source": source, "signature": signature, "status": "error", "duration": 0.0, "frames": [],
+                                "labels": [], "top_score": 0.0, "warnings": ["media probe failed"],
+                                "coverage": sample_coverage(source, 0, [], [], sample_interval)})
                 continue
-            frame_paths.append(frame_path)
-            frame_rows.append({"time_seconds": round(timestamp, 3), "frame": os.path.relpath(frame_path, output_dir)})
+            timestamps = sample_timestamps(duration, sample_interval, max_frames_per_file)
+            source_hash = hashlib.sha1(os.fspath(source).encode("utf-8")).hexdigest()[:8]
+            source_stem = f"{_safe_slug(os.path.splitext(os.path.basename(source))[0])}_{source_hash}"
+            for timestamp in timestamps:
+                frame_name = f"{source_stem}_{int(round(timestamp * 1000)):010d}.jpg"
+                frame_path = os.path.join(frames_dir, frame_name)
+                try:
+                    sampler(source, timestamp, frame_path, timeout=timeout)
+                except Exception as exc:
+                    warnings.append(f"frame sampling failed for {source} at {timestamp:.3f}s: {exc}")
+                    continue
+                frame_paths.append(frame_path)
+                frame_rows.append({"time_seconds": round(timestamp, 3), "frame": os.path.relpath(frame_path, output_dir)})
 
         if not frame_paths:
             sources.append(
@@ -348,7 +366,10 @@ def score_frames(
         "profile": profile.to_dict(),
         "provider": "openclip",
         "provenance": provenance,
-        "telemetry": {"cache_hits": cache_hits, "cache_misses": cache_misses, "elapsed_seconds": round(time.monotonic() - started, 6)},
+        "telemetry": {"cache_hits": cache_hits, "cache_misses": cache_misses, "cache_scope": "inference",
+                      "elapsed_seconds": round(time.monotonic() - started, 6),
+                      "frame_sampling": {**frame_telemetry, "status": "measured" if shared else "not_instrumented",
+                                         "decoded_frames_scope": "successful_sample_images", "output_size_scope": "jpeg_images"}},
         "provider_metadata": {
             "name": getattr(encoder, "provider_name", "openclip"),
             "model": getattr(encoder, "model_name", model),
@@ -1185,7 +1206,7 @@ def _source_signature(
 ) -> dict[str, Any]:
     try:
         stat = os.stat(os.fspath(source))
-        file_sig = {"size": stat.st_size, "mtime": stat.st_mtime}
+        file_sig = {"source": os.path.realpath(source), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
     except OSError:
         file_sig = {"missing": os.fspath(source)}
     file_sig.update(

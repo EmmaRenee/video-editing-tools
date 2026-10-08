@@ -77,9 +77,11 @@ continuous inference. A capped scan of a long source does not cover its full
 duration. Invalid encoder dimensions/nonfinite scores and partial sampling are
 not successful processing or reusable successful cache entries.
 
-OpenCLIP, motorsports, and topics now emit coverage. YOLO/OCR/face-person artifacts
-lacking it remain compatible with rating but are **not evaluated** as production
-ablations. Native vision coverage instrumentation is still pending. Do not infer
+OpenCLIP, native OCR/face-person, motorsports, and topics now emit coverage.
+Legacy vision artifacts lacking it remain compatible with rating but are
+**not evaluated** as production ablations. Native YOLO coverage instrumentation
+is still pending. See [shared frames](frame-cache.md) for extraction reuse and
+negative-frame accounting. Do not infer
 full processing from detections or manually declare it. Missing dependencies
 remain optional; diagnostics name generation commands and `videoedit modules doctor`.
 

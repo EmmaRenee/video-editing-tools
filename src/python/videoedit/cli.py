@@ -39,6 +39,7 @@ from .config import AnalysisConfig
 from .content import generate_content_map, generate_quote_mining, list_series_templates, plan_content_series
 from .diagnostics import format_diagnostics, run_diagnostics
 from .edl import export_selection_file
+from .frames import sample_frames
 from .inventory import build_inventory, write_inventory_outputs
 from .learning import build_review_dataset, train_local_scorer
 from .modules import (
@@ -165,8 +166,16 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_compare.add_argument("--output", "-o", required=True)
     benchmark_compare.set_defaults(func=cmd_benchmark_compare)
 
-    signals = sub.add_parser("signals", help="Run or validate optional signal providers")
+    signals = sub.add_parser("signals", help="Sample frames, run optional providers, or validate artifacts")
     signals_sub = signals.add_subparsers(dest="signals_command", required=True)
+    signals_frames = signals_sub.add_parser("sample-frames", help="Cache reusable FFmpeg frame samples")
+    signals_frames.add_argument("input")
+    signals_frames.add_argument("--output", "-o", required=True)
+    signals_frames.add_argument("--sample-interval", type=float, default=10.0)
+    signals_frames.add_argument("--max-frames-per-file", type=int, default=8)
+    signals_frames.add_argument("--width", type=int, default=0)
+    signals_frames.add_argument("--source-hash", choices=("metadata", "sha256"), default="metadata")
+    signals_frames.set_defaults(func=cmd_signals_sample_frames)
     signals_objects = signals_sub.add_parser("objects", help="Run visual object detection")
     signals_objects.add_argument("input")
     signals_objects.add_argument("--output", "-o", required=True)
@@ -180,12 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
     signals_ocr.add_argument("--output", "-o", required=True)
     signals_ocr.add_argument("--sample-interval", type=float, default=10.0)
     signals_ocr.add_argument("--max-frames-per-file", type=int, default=6)
+    signals_ocr.add_argument("--frame-cache", help="Shared frame cache directory")
     signals_ocr.set_defaults(func=cmd_signals_ocr)
     signals_face = signals_sub.add_parser("face-person", help="Run face/person presence detection")
     signals_face.add_argument("input")
     signals_face.add_argument("--output", "-o", required=True)
     signals_face.add_argument("--sample-interval", type=float, default=10.0)
     signals_face.add_argument("--max-frames-per-file", type=int, default=6)
+    signals_face.add_argument("--frame-cache", help="Shared frame cache directory")
     signals_face.set_defaults(func=cmd_signals_face_person)
     signals_motorsports = signals_sub.add_parser("motorsports", help="Infer motorsports events from ratings")
     signals_motorsports.add_argument("ratings")
@@ -236,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     ai_score_frames.add_argument("--model", default="ViT-B-32")
     ai_score_frames.add_argument("--pretrained", default="laion2b_s34b_b79k")
     ai_score_frames.add_argument("--no-cache", action="store_true")
+    ai_score_frames.add_argument("--frame-cache", help="Shared 336px frame cache; independent of inference cache")
     ai_score_frames.set_defaults(func=cmd_ai_score_frames)
     ai_find_missed = ai_sub.add_parser("find-missed", help="Find likely missed moments from AI frame scores")
     ai_find_missed.add_argument("ratings")
@@ -611,6 +623,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if report["status"] == "ok" else 1
 
 
+def cmd_signals_sample_frames(args: argparse.Namespace) -> int:
+    result = sample_frames(args.input, args.output, sample_interval=args.sample_interval,
+                           max_frames_per_file=args.max_frames_per_file, width=args.width, source_hash=args.source_hash)
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] == "ok" else 1
+
+
 def cmd_signals_objects(args: argparse.Namespace) -> int:
     require_module_enabled("advanced.vision")
     result = detect_visual_objects(
@@ -632,9 +651,10 @@ def cmd_signals_ocr(args: argparse.Namespace) -> int:
         args.output,
         sample_interval=args.sample_interval,
         max_frames_per_file=args.max_frames_per_file,
+        frame_cache=args.frame_cache,
     )
     print(json.dumps(result, indent=2))
-    return 0
+    return 0 if result.get("status") == "ok" else 1
 
 
 def cmd_signals_face_person(args: argparse.Namespace) -> int:
@@ -644,9 +664,10 @@ def cmd_signals_face_person(args: argparse.Namespace) -> int:
         args.output,
         sample_interval=args.sample_interval,
         max_frames_per_file=args.max_frames_per_file,
+        frame_cache=args.frame_cache,
     )
     print(json.dumps(result, indent=2))
-    return 0
+    return 0 if result.get("status") == "ok" else 1
 
 
 def cmd_signals_motorsports(args: argparse.Namespace) -> int:
@@ -738,6 +759,7 @@ def cmd_ai_score_frames(args: argparse.Namespace) -> int:
         cache=not args.no_cache,
         model=args.model,
         pretrained=args.pretrained,
+        frame_cache=args.frame_cache,
     )
     print(json.dumps(result, indent=2))
     return 0 if result.get("status") == "ok" else 1

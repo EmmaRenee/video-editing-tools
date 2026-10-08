@@ -162,6 +162,68 @@ evidence and design rulings, not a second backlog.
   artifacts with no input units reported `ok`. A failing regression reproduced
   both providers; empty processing is now `partial`. Final suite: 178 tests.
 
+## Shared Frame And Vision Coverage Slice
+
+- Previous goal turn: verified progress, PR #91 / `acfb974`, 178 local tests,
+  clean-wheel workflow, CodeRabbit fix, and four CI jobs passed. Refreshed #66,
+  milestone 13, #77, and prerequisite review feedback before starting.
+- Isolated `codex/v17-shared-frame-cache` from #91; primary experiments and media
+  remain untouched. GitHub remains the backlog; this is an execution ledger.
+- Pre-flight: #77's shared decoded samples feed optional providers and #76's
+  processing-coverage contract. Frame identity must exclude model/prompt identity
+  (so providers can reuse decoding), while inference identity must include it.
+- Ruling: retain full-resolution OCR/face samples and 336px OpenCLIP samples as
+  distinct cache formats. Reuse only compatible sampling/format settings; forcing
+  OCR into AI-sized thumbnails would risk reducing signage detection quality.
+- Ruling: cache entries are atomically published only after all requested samples
+  complete and pass integrity checks. Interrupted/partial outputs are diagnostics,
+  never reusable successful entries. Cache paths include source and decoder/config
+  fingerprints, not only basenames; private frames and source paths stay local.
+- Work: shared sampler/CLI/operation and measurable cache behavior; integrate
+  OCR/face/AI consumers and truthful vision coverage; measure actual cold/warm
+  reuse and selection parity before claiming performance improvement.
+- Independent real-footage annotations and final editor/RC evidence remain
+  required. Existing shortlist review cannot substitute for full-window recall.
+- Implemented `signals sample-frames` / `sample_frames`, atomic complete-entry
+  publication, concurrent repair locking, source/decoder/format keys, integrity
+  checks, optional strict SHA-256, explicit timestamps, and scoped cache telemetry.
+  Source changes during warm verification are rejected, not silently reused.
+- Native OCR/face/AI consumers share compatible images; OCR/face emit negative
+  processing coverage and explicit hit times. Failed inference/classifier setup
+  cannot masquerade as zero detections. AI separates frame and inference counters;
+  model initialization still occurs once per invocation even on a warm run.
+- Fixed native `face_person_presence` artifact validation independently of the
+  `face_person` configuration binding. Existing OCR/face source-wide scoring
+  remains unchanged; no defaults or production recommendations were changed.
+- Test-first regressions reproduced missing sampling, stale/foreign frame paths,
+  incomplete inference, concurrent repair failure, source mutation during warm
+  verification, and incorrect face-artifact ablation exclusion. Compatible pipeline
+  prewarming requires matching quotas (six for default OCR/face, eight for AI).
+- Actual private interview derivative, 300.033 seconds, two samples at 5/15
+  seconds: FFmpeg 9.0.1 independently confirmed 4096x2160 full-resolution JPEGs.
+  Fresh and reused JPEG checksums matched; storage was 1,427,112 JPEG bytes.
+  OCR cold total 16.01s, a hydrated-source fresh extraction 4.37s, shared reuse
+  0.67s; OCR hits and coverage matched exactly. Single-run timings include
+  OS/cloud cache effects and do not establish general performance guarantees.
+- Native OpenCV 4.13.0 face/person processing reused both images without decoding,
+  emitted complete two-unit sampling coverage and two positive frames, but took
+  175.00s. Full-resolution detector cost/budgets remain unresolved; detection
+  accuracy and counts have not been independently validated.
+- Actual OpenCLIP 3.3.0, verified local checkpoint, fully offline: cold extraction
+  plus inference 8.98s, frame-reuse with inference deliberately recomputed 4.33s.
+  Scored source payloads and coverage matched exactly. Two 336px images used
+  31,051 JPEG bytes, distinct from the full-resolution cache format.
+- These are runtime/image/provider-output parity checks on a preselected private
+  clip, not independent selection-quality/recall benchmarks. #75/#77 remain open
+  until representative quality and remaining provider/lifecycle evidence exist.
+- CodeRabbit reviewed 17 files and raised one minor cleanup issue. A failing
+  regression proved staging cleanup could mask `KeyboardInterrupt`; best-effort
+  cleanup now preserves the original interrupt and never publishes the stage.
+- Final verification: 196 Python 3.12 tests, whitespace check, wheel/source build,
+  clean core-only wheel doctor/operations/modules, and real JPEG cold/warm sampling.
+  Core import loaded no Torch, OpenCLIP, OpenCV, Ultralytics, or Whisper modules.
+  All private runtime artifacts stayed outside Git and the primary checkout.
+
 ## Remaining Execution Order
 
 Follow the dependencies recorded on GitHub: protocol and runner (#73/#74),

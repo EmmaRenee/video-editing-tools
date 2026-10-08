@@ -27,6 +27,7 @@ from .content import generate_content_map, generate_quote_mining, plan_content_s
 from .diagnostics import resolve_command
 from .edl import export_selection_file
 from .ffmpeg import run_command_check
+from .frames import sample_frames
 from .inventory import build_inventory, write_inventory_outputs
 from .learning import build_review_dataset, train_local_scorer
 from .modules import all_modules, is_module_enabled, load_module_config, module_for_operation, operation_enabled
@@ -89,6 +90,7 @@ class OperationRegistry:
 def default_registry(enabled_only: bool = True, cwd: str | None = None) -> OperationRegistry:
     registry = OperationRegistry()
     _register(registry, enabled_only, cwd, "inventory", "Scan footage and write inventory artifacts", op_inventory)
+    _register(registry, enabled_only, cwd, "sample_frames", "Cache reusable, integrity-checked FFmpeg frame samples", op_sample_frames)
     _register(registry, enabled_only, cwd, "analyze_signals", "Analyze footage signals and write ratings artifacts", op_rate_footage)
     _register(registry, enabled_only, cwd, "rate_footage", "Inventory, score, and rank candidate clips", op_rate_footage)
     _register(registry, enabled_only, cwd, "detect_highlights_audio", "Filter rating candidates with audio labels", op_filter_audio_candidates)
@@ -152,6 +154,20 @@ def _register(
     if enabled_only and not operation_enabled(name, cwd):
         return
     registry.register(name, description, func)
+
+
+def op_sample_frames(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    result = sample_frames(os.fspath(params.get("input") or context["input"]),
+                           os.fspath(params.get("output") or context["output"]),
+                           sample_interval=float(params.get("sample_interval", 10)),
+                           max_frames_per_file=int(params.get("max_frames_per_file", 8)),
+                           width=int(params.get("width", 0)), source_hash=params.get("source_hash", "metadata"),
+                           timeout=int(params.get("timeout", 180)))
+    context["frame_samples"] = result["manifest"]
+    context["frame_cache"] = os.path.dirname(result["manifest"])
+    if result["status"] != "ok":
+        raise ValueError("frame sampling incomplete; inspect frames.json")
+    return result
 
 
 def op_run_benchmark(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -491,6 +507,7 @@ def op_detect_ocr(context: dict[str, Any], params: dict[str, Any]) -> dict[str, 
         sample_interval=float(params.get("sample_interval", 10.0)),
         max_frames_per_file=int(params.get("max_frames_per_file", 6)),
         timeout=int(params.get("timeout", 180)),
+        frame_cache=params.get("frame_cache") or context.get("frame_cache"),
     )
     context["ocr_signage"] = output
     return result
@@ -527,6 +544,7 @@ def op_score_ai_frames(context: dict[str, Any], params: dict[str, Any]) -> dict[
         model=params.get("model", "ViT-B-32"),
         pretrained=params.get("pretrained", "laion2b_s34b_b79k"),
         timeout=int(params.get("timeout", 180)),
+        frame_cache=params.get("frame_cache") or context.get("frame_cache"),
     )
     context["ai_frame_scores"] = output
     return result
@@ -541,6 +559,7 @@ def op_face_person(context: dict[str, Any], params: dict[str, Any]) -> dict[str,
         sample_interval=float(params.get("sample_interval", 10.0)),
         max_frames_per_file=int(params.get("max_frames_per_file", 6)),
         timeout=int(params.get("timeout", 180)),
+        frame_cache=params.get("frame_cache") or context.get("frame_cache"),
     )
     context["face_person_presence"] = output
     return result
