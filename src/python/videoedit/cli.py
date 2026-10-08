@@ -32,6 +32,7 @@ from .calibration import (
     tune_scoring,
 )
 from .benchmark import compare_benchmarks, run_benchmark, validate_manifest
+from .ablation import evaluate_ablations
 from .captions import burn_captions, list_caption_styles
 from .cloud import cloud_diagnostics, list_cloud_adapters, plan_cloud_job
 from .config import AnalysisConfig
@@ -154,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run.add_argument("manifest")
     benchmark_run.add_argument("--output", "-o", required=True)
     benchmark_run.set_defaults(func=cmd_benchmark_run)
+    benchmark_ablate = benchmark_sub.add_parser("ablate", help="Compare controlled optional-provider additions")
+    benchmark_ablate.add_argument("manifest")
+    benchmark_ablate.add_argument("--output", "-o", required=True)
+    benchmark_ablate.set_defaults(func=cmd_benchmark_ablate)
     benchmark_compare = benchmark_sub.add_parser("compare", help="Compare reports with identical review basis")
     benchmark_compare.add_argument("baseline")
     benchmark_compare.add_argument("candidate")
@@ -482,6 +487,12 @@ def cmd_benchmark_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark_ablate(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    print(json.dumps(evaluate_ablations(args.manifest, args.output), indent=2))
+    return 0
+
+
 def cmd_rate(args: argparse.Namespace) -> int:
     require_module_enabled("core.rating")
     report = run_rating(args.footage, args.output, config=config_from_args(args), manifest_paths=args.manifest_paths)
@@ -729,7 +740,7 @@ def cmd_ai_score_frames(args: argparse.Namespace) -> int:
         pretrained=args.pretrained,
     )
     print(json.dumps(result, indent=2))
-    return 0 if result.get("status") != "unavailable" else 1
+    return 0 if result.get("status") == "ok" else 1
 
 
 def cmd_ai_find_missed(args: argparse.Namespace) -> int:

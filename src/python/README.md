@@ -15,6 +15,7 @@ For a complete user-facing walkthrough of every feature, command, output artifac
 ```bash
 videoedit benchmark validate benchmark.json
 videoedit benchmark run benchmark.json --output analysis/benchmark/
+videoedit benchmark ablate benchmark.json --output analysis/ablations/
 videoedit benchmark compare baseline/benchmark_report.json candidate/benchmark_report.json --output analysis/comparison/
 ```
 
@@ -24,6 +25,12 @@ The always-enabled `core.calibration` module exposes `run_benchmark` and
 [benchmark protocol](../../docs/benchmarking.md) before interpreting quality
 metrics; independent human review, sufficient sampling, and compatible
 review bases are required for production conclusions.
+
+`evaluate_provider_ablations` adds `ablation_report.json`, `ablation_report.md`,
+and `provider_scorecards.csv` without enabling providers or changing defaults.
+It checks controlled inputs, historical bindings, coverage, and model identity.
+See [provider ablations](../../docs/provider-ablations.md) for provider IDs,
+restricted candidate scopes, coverage limits, and cost/evidence requirements.
 
 ### V17 Provenance And Diagnostics
 

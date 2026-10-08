@@ -8,6 +8,11 @@ V17 adds [scoped footage benchmarking](docs/benchmarking.md) with
 `videoedit benchmark validate`, `run`, and `compare`. Compare scoring against
 independent human review before selecting optional providers or tuning defaults.
 
+Use `videoedit benchmark ablate benchmark.json --output analysis/ablations/`
+for controlled provider scorecards, coverage checks, and quality/cost deltas.
+Read [provider ablations](docs/provider-ablations.md) for binding requirements,
+current provider limitations, and recommendation evidence gates.
+
 [Provider provenance and execution manifests](docs/provenance-and-manifests.md)
 record model identity, input/output fingerprints, timing, cache reuse, failures,
 and handoff assumptions. Use `--manifest-paths redacted` on `rate`, `run`,

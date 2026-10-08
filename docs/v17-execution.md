@@ -104,6 +104,64 @@ evidence and design rulings, not a second backlog.
   Primary checkout remains untouched. No footage, weights, private manifests,
   review decisions, or annotations were added to Git.
 
+## Provider Ablation Slice
+
+- Previous goal turn: verified progress, PR #90 / commit `268736e`, 150 local
+  tests and four CI jobs passed; no merge. Refreshed milestone 13, #66, #76,
+  #77 and prerequisite PR feedback before starting this branch.
+- Reusing the isolated checkout on `codex/v17-provider-ablations`; the primary
+  experimental checkout remains untouched. GitHub remains the backlog.
+- Pre-flight: #76 consumes #74 benchmark metrics and #78/#80 provenance/input
+  hashes. Coverage must distinguish scanned negative results from no processing,
+  and must align to the same independently reviewed source/time windows.
+- Ruling: new `benchmark ablate` evaluates declared baseline, individual-provider
+  and combination runs using the existing benchmark runner; no model download or
+  provider enablement is implicit. Coverage failures are not valid ablations.
+- Ruling: sparse frame processing must report temporal coverage, not just claim
+  full source coverage from one frame. Candidate-scoped learned/judge/heuristic
+  providers must disclose their restricted scope; clip judging is annotation-only
+  in the current scorer and cannot claim selection improvement.
+- Ruling: default/profile recommendations require real independent, sufficiently
+  sampled, controlled evidence. Synthetic evidence remains experimental; missing
+  provenance/binding/costs are explicit limits, never fabricated measurements.
+- Requested the missing benchmark project paths and independent annotations
+  asynchronously; implementation can continue while production evidence is
+  being gathered. Existing shortlist decisions do not establish full recall.
+
+- #76 implementation: `benchmark ablate` / `evaluate_provider_ablations` writes
+  identity-separated scorecards with quality/candidate deltas, cost scope,
+  dependency diagnostics, source/unit/time coverage, and explicit confounds.
+  Historical manifests must bind artifact inputs and ratings outputs; legacy
+  config-only bindings remain provisional. Changed thresholds, undeclared inputs,
+  failed providers, partial/empty/low coverage, and source changes cannot earn
+  causal credit. No defaults are applied.
+- Default/profile/removal evidence rules are deterministic and tested, including
+  harmful quality-failed candidates and conflicting results within one profile.
+  Clip judging is annotation-only. Learned scoring measures baseline candidate
+  windows only; it cannot claim raw-footage discovery coverage.
+- OpenCLIP now emits sampling-support coverage, rejects invalid encoder matrices,
+  and never caches incomplete/failed inference as successful. Motorsports/topics
+  record all inspected candidate/transcript-hit units, including negative results.
+  YOLO/OCR/face-person native coverage instrumentation remains pending; old
+  artifacts still work for rating but are not valid production ablations.
+- Test-first evidence reproduced missing CLI/coverage, config/binding confounds,
+  mixed-revision scorecards, premature recommendations, malformed policy counts,
+  absent negative-scan evidence, incomplete inference caching, and missing
+  generated-run telemetry. Actual runtime testing also exposed review windows
+  beyond known media duration; a failing regression now rejects these.
+- Python 3.12: 177 tests passed (27 added to the previous 150). Whitespace,
+  structural schema policy checks, wheel/source build, and core-only wheel
+  doctor/operations/modules checks passed. Import did not load optional libraries.
+- Installed OpenCLIP 3.3.0 ran entirely offline with the existing local checkpoint:
+  4.25 seconds cold, 2.51 seconds warm, one actual source-cache hit. The complete
+  artifact -> rating -> ablation path verified input/output hashes and full
+  sampling-support coverage for a one-second synthetic fixture; F1 delta was 0,
+  correctly classified experimental. This is compatibility evidence, not
+  real-footage quality or an optimization claim.
+- CodeRabbit reviewed all 20 changed files and raised one minor issue: heuristic
+  artifacts with no input units reported `ok`. A failing regression reproduced
+  both providers; empty processing is now `partial`. Final suite: 178 tests.
+
 ## Remaining Execution Order
 
 Follow the dependencies recorded on GitHub: protocol and runner (#73/#74),

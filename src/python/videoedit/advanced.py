@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import math
 import os
 import re
+import time
 from typing import Any
 
 from .diagnostics import resolve_command
+from .coverage import SCHEMA as COVERAGE_SCHEMA
 from ._version import __version__
 from .ffmpeg import has_command, probe_media, run_command, run_command_check, scan_video_files
 from .manifests import atomic_json
@@ -128,6 +131,7 @@ SIGNAL_SCHEMA_VERSION = "videoedit.signal.v1"
 
 
 def detect_motorsports_events(ratings_json: str, output: str, min_confidence: float = 0.2) -> dict[str, Any]:
+    started = time.monotonic()
     data = _read_json(ratings_json)
     events = []
     for clip in data.get("candidates", []):
@@ -157,11 +161,13 @@ def detect_motorsports_events(ratings_json: str, output: str, min_confidence: fl
     _attach_signal_metadata(payload, "motorsports_events", payload["provider"], ratings_json, events,
                             sampling={"kind": "ratings_candidates"}, provider_version=__version__,
                             config={"keywords": MOTORSPORTS_EVENTS, "min_confidence": min_confidence})
+    _attach_input_coverage(payload, data.get("candidates", []), started)
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(events)}
 
 
 def cluster_transcript_topics(ratings_json: str, output: str) -> dict[str, Any]:
+    started = time.monotonic()
     data = _read_json(ratings_json)
     clusters: dict[str, dict[str, Any]] = {
         topic: {"topic": topic, "keywords": [], "hits": []} for topic in TRANSCRIPT_TOPICS
@@ -206,8 +212,31 @@ def cluster_transcript_topics(ratings_json: str, output: str) -> dict[str, Any]:
     }
     _attach_signal_metadata(payload, "topic_clusters", payload["provider"], ratings_json, _topic_records(topics),
                             sampling={"kind": "transcript_hits"}, provider_version=__version__, config=TRANSCRIPT_TOPICS)
+    _attach_input_coverage(payload, [{**hit, "source": signal.get("asset", {}).get("filepath")}
+                                   for signal in data.get("signals", []) for hit in signal.get("transcript_hits", [])], started)
     _write_json(output, payload)
     return {"output": os.fspath(output), "count": len(topics)}
+
+
+def _attach_input_coverage(payload: dict[str, Any], records: list[dict[str, Any]], started: float) -> None:
+    rows = {}
+    for record in records:
+        source = record.get("source") or "unknown"
+        row = rows.setdefault(source, {"source": source, "expected_units": 0, "processed_units": 0, "intervals": []})
+        row["expected_units"] += 1
+        try:
+            start, end = _clip_seconds(record, "start", "start_seconds"), _clip_seconds(record, "end", "end_seconds")
+            if not record.get("source") or not 0 <= start < end or not math.isfinite(end):
+                raise ValueError("invalid input interval")
+        except (ValueError, TypeError):
+            continue
+        row["processed_units"] += 1
+        row["intervals"].append([start, end])
+    for row in rows.values():
+        row["status"] = "ok" if row["expected_units"] == row["processed_units"] else "partial"
+    payload["coverage"] = {"schema_version": COVERAGE_SCHEMA, "scope": "candidate", "sources": list(rows.values())}
+    payload["status"] = "partial" if not rows or any(row["status"] != "ok" for row in rows.values()) else "ok"
+    payload["telemetry"] = {"elapsed_seconds": round(time.monotonic() - started, 6)}
 
 
 def detect_ocr_signage(
