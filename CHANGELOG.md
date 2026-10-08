@@ -9,6 +9,11 @@ This project uses semantic versioning for the Python `videoedit` package once pu
 - Added scoped footage benchmark validation, execution, comparison reports,
   pipeline operations, privacy-safe summaries, and synthetic contract tests.
 - Documented V17 experimental-component dispositions and production evidence gates.
+- Added shared, validated provider provenance with legacy migration warnings,
+  revision-aware AI cache identities, and benchmark provider-change reports.
+- Added atomic pipeline/rating/review/planning/assembly/handoff diagnostics,
+  relative/redacted path modes, partial and interrupted states, fingerprints,
+  observed cache counters, and explicit legacy editor-export limitations.
 
 - Added local-first footage inventory, rating, calibration, review, rough-cut, signal fusion, AI scoring, community module, cloud adapter, and release-hardening workflows.
 - Added CI and package-build verification for the Python `videoedit` package.

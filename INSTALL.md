@@ -29,6 +29,13 @@ the core install. Footage invocation uses FFmpeg/ffprobe; AI providers use
 the optional extras described below. See [docs/benchmarking.md](docs/benchmarking.md)
 for human annotation requirements and report statuses.
 
+Execution sidecars and provider provenance also require no additional core
+dependencies. Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`,
+`roughcut plan`, `assemble`, or `export-edl` before sharing diagnostics. This does
+not redact footage, ratings, selections, or review content. See
+[provenance and manifests](docs/provenance-and-manifests.md) for compatibility,
+unknown-model warnings, portable paths, cache metadata, and handoff limits.
+
 `videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for this repository's full local setup. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
 ## macOS Setup

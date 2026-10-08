@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-import json
 import os
 import re
 import time
@@ -11,6 +9,8 @@ from typing import Any
 
 from .modules import PRESET_MODULES, all_modules, assert_modules_available, is_module_enabled, load_module_config
 from .operations import OperationRegistry, default_registry
+from .manifests import RunManifest
+from .provenance import canonical_hash
 from .presets import PRESETS
 from .simple_yaml import dumps, load_mapping
 
@@ -19,8 +19,8 @@ REFERENCE_ROOTS = {"input", "output", "pipeline"}
 
 OPERATION_OUTPUTS = {
     "inventory": {"inventory", "count"},
-    "analyze_signals": {"ratings", "candidates"},
-    "rate_footage": {"ratings", "candidates"},
+    "analyze_signals": {"ratings", "candidates", "run_manifest"},
+    "rate_footage": {"ratings", "candidates", "run_manifest"},
     "detect_highlights_audio": {"output", "selections", "files", "count"},
     "detect_highlights_transcript": {"output", "selections", "files", "count"},
     "transcribe_whisper": {"output", "count"},
@@ -38,11 +38,11 @@ OPERATION_OUTPUTS = {
         "metrics",
     },
     "extract_segments": {"output", "files"},
-    "generate_edl": {"output", "files"},
-    "generate_review_assets": {"manifest", "contact_sheet", "decisions", "clips", "thumbnails", "proxies", "warnings"},
+    "generate_edl": {"output", "files", "run_manifests"},
+    "generate_review_assets": {"manifest", "contact_sheet", "decisions", "clips", "thumbnails", "proxies", "warnings", "run_manifest"},
     "approve_candidates": {"approved"},
-    "plan_roughcut": {"plan", "report", "clips", "duration"},
-    "assemble_rough_cut": {"output"},
+    "plan_roughcut": {"plan", "report", "clips", "duration", "run_manifest"},
+    "assemble_rough_cut": {"output", "run_manifest"},
     "format_video": {"output"},
     "burn_captions": {"output"},
     "normalize_audio": {"output"},
@@ -58,7 +58,7 @@ OPERATION_OUTPUTS = {
         "warnings",
     },
     "detect_face_person_presence": {"output", "count", "status", "warnings"},
-    "score_ai_frames": {"output", "status", "sources", "frames", "warnings"},
+    "score_ai_frames": {"output", "status", "sources", "frames", "warnings", "telemetry"},
     "detect_motorsports_events": {"output", "count"},
     "cluster_transcript_topics": {"output", "count"},
     "find_ai_missed_moments": {"output", "count"},
@@ -177,71 +177,48 @@ def run_pipeline(
     input_path: str,
     output_dir: str,
     registry: OperationRegistry | None = None,
+    manifest_paths: str = "absolute",
 ) -> dict[str, Any]:
     path = os.fspath(path)
     input_path = os.fspath(input_path)
     output_dir = os.fspath(output_dir)
-    pipeline = load_pipeline(path)
     registry = registry or default_registry(enabled_only=False)
     os.makedirs(output_dir, exist_ok=True)
-    started = datetime.now()
-    started_monotonic = time.monotonic()
     context: dict[str, Any] = {
         "input": input_path,
         "output": output_dir,
-        "pipeline": pipeline.get("name", os.path.splitext(os.path.basename(path))[0]),
+        "pipeline": os.path.splitext(os.path.basename(path))[0],
+        "manifest_paths": manifest_paths,
         "results": {},
         "steps": [],
     }
     manifest_path = os.path.join(output_dir, "pipeline_run.json")
-    try:
+    context["manifest"] = manifest_path
+    with RunManifest(manifest_path, "pipeline", inputs=[path, input_path], path_mode=manifest_paths) as manifest:
+        context["steps"] = manifest.data["steps"]
+        manifest.legacy(input=input_path, output=output_dir, pipeline=context["pipeline"], results=context["results"])
+        pipeline = load_pipeline(path)
+        context["pipeline"] = pipeline.get("name", context["pipeline"])
+        manifest.legacy(pipeline=context["pipeline"], description=pipeline.get("description"), config_sha256=canonical_hash(pipeline))
         for step in pipeline["steps"]:
             operation = registry.get(step["operation"])
             step_name = step.get("name", operation.name)
             step_start = time.monotonic()
-            params = _resolve_value(dict(step.get("params") or {}), context)
-            if "input" in step:
-                params.setdefault("input", _resolve_value(step["input"], context))
-            step_output = os.path.join(output_dir, step_name)
-            if operation.name not in {"generate_edl", "extract_segments"}:
-                params.setdefault("output", step_output)
+            params = {}
             try:
+                params = _resolve_value(dict(step.get("params") or {}), context)
+                if "input" in step:
+                    params.setdefault("input", _resolve_value(step["input"], context))
+                step_output = os.path.join(output_dir, step_name)
+                if operation.name not in {"generate_edl", "extract_segments"}:
+                    params.setdefault("output", step_output)
                 result = operation.func(context, params)
-            except Exception as exc:
-                context["steps"].append(
-                    {
-                        "name": step_name,
-                        "operation": operation.name,
-                        "status": "error",
-                        "duration_seconds": round(time.monotonic() - step_start, 3),
-                        "error": str(exc),
-                    }
-                )
-                _write_run_manifest(
-                    manifest_path,
-                    pipeline,
-                    context,
-                    started,
-                    started_monotonic,
-                    status="error",
-                    error=str(exc),
-                )
+            except BaseException as exc:
+                manifest.record_step(step_name, operation.name, params, {}, time.monotonic() - step_start,
+                                     status="interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error", error=exc)
                 raise
             context["results"][step_name] = result
-            context["steps"].append(
-                {
-                    "name": step_name,
-                    "operation": operation.name,
-                    "status": "ok",
-                    "duration_seconds": round(time.monotonic() - step_start, 3),
-                    "result": result,
-                }
-            )
-        _write_run_manifest(manifest_path, pipeline, context, started, started_monotonic, status="ok")
-        context["manifest"] = manifest_path
-    except Exception:
-        context["manifest"] = manifest_path
-        raise
+            manifest.record_step(step_name, operation.name, params, result, time.monotonic() - step_start)
     return context
 
 
@@ -343,7 +320,8 @@ def _planned_result(
 ) -> dict[str, Any]:
     output = os.fspath(params.get("output") or step_output)
     if operation_name in {"rate_footage", "analyze_signals"}:
-        return {"ratings": os.path.join(output, "ratings.json"), "candidates": "unknown"}
+        return {"ratings": os.path.join(output, "ratings.json"), "candidates": "unknown",
+                "run_manifest": os.path.join(output, "rating_run.json")}
     if operation_name == "inventory":
         return {"inventory": os.path.join(output, "inventory.json"), "count": "unknown"}
     if operation_name in {"detect_highlights_audio", "detect_highlights_transcript"}:
@@ -364,14 +342,19 @@ def _planned_result(
             "thumbnails": "unknown",
             "proxies": "unknown",
             "warnings": [],
+            "run_manifest": os.path.join(output, "review_run.json"),
         }
     if operation_name == "approve_candidates":
         return {"approved": output}
     if operation_name == "plan_roughcut":
         root, _ext = os.path.splitext(output)
-        return {"plan": output, "report": f"{root}_report.md", "clips": "unknown", "duration": "unknown"}
+        return {"plan": output, "report": params.get("report_output") or f"{root}_report.md", "clips": "unknown",
+                "duration": "unknown", "run_manifest": f"{root}_run.json"}
     if operation_name in {"generate_edl", "extract_segments"}:
-        return {"output": output, "files": []}
+        result = {"output": output, "files": []}
+        if operation_name == "generate_edl":
+            result["run_manifests"] = []
+        return result
     if operation_name == "transcribe_whisper":
         return {"output": output, "count": "unknown"}
     if operation_name == "evaluate_ratings":
@@ -402,7 +385,7 @@ def _planned_result(
             "metrics": {},
         }
     if operation_name == "assemble_rough_cut":
-        return {"output": output}
+        return {"output": output, "run_manifest": os.path.splitext(output)[0] + "_assembly.json"}
     if operation_name in {"format_video", "burn_captions", "normalize_audio", "concatenate_videos"}:
         return {"output": output}
     if operation_name == "detect_ocr_signage":
@@ -426,6 +409,7 @@ def _planned_result(
             "sources": "unknown",
             "frames": "unknown",
             "warnings": [],
+            "telemetry": {},
         }
     if operation_name == "detect_motorsports_events":
         return {"output": _json_output_plan(output, "motorsports_events.json"), "count": "unknown"}
@@ -538,33 +522,6 @@ def _filter_output_plan(value: str, label: str) -> str:
 
 def _safe_slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_") or "item"
-
-
-def _write_run_manifest(
-    path: str,
-    pipeline: dict[str, Any],
-    context: dict[str, Any],
-    started: datetime,
-    started_monotonic: float,
-    status: str,
-    error: str | None = None,
-) -> None:
-    payload = {
-        "pipeline": context.get("pipeline"),
-        "description": pipeline.get("description"),
-        "status": status,
-        "started": started.isoformat(),
-        "finished": datetime.now().isoformat(),
-        "duration_seconds": round(time.monotonic() - started_monotonic, 3),
-        "input": context.get("input"),
-        "output": context.get("output"),
-        "steps": context.get("steps", []),
-        "results": context.get("results", {}),
-    }
-    if error:
-        payload["error"] = error
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, indent=2))
 
 
 def _validate_references(

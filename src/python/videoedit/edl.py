@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import time
 
+from .manifests import RunManifest, fingerprint
 from .selections import load_selection
 from .timecode import seconds_to_timecode, timecode_to_seconds
 
@@ -120,12 +122,10 @@ def _time_arg(seconds: float) -> str:
     return f"{base}.{milliseconds:03d}".rstrip("0").rstrip(".") if milliseconds else base
 
 
-def export_selection_file(selection_path: str, output_dir: str, fps: float | None = None) -> list[str]:
+def export_selection_file(selection_path: str, output_dir: str, fps: float | None = None,
+                          manifest_paths: str = "absolute") -> list[str]:
     selection_path = os.fspath(selection_path)
     output_dir = os.fspath(output_dir)
-    selection = load_selection(selection_path, fps=fps)
-    source = selection.source or "mixed"
-    clips = selection.clips
     os.makedirs(output_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(selection_path))[0]
     paths = [
@@ -134,14 +134,42 @@ def export_selection_file(selection_path: str, output_dir: str, fps: float | Non
         os.path.join(output_dir, f"{stem}.m3u"),
         os.path.join(output_dir, f"{stem}_extract.sh"),
     ]
-    payloads = [
-        generate_edl(clips, source, fps=selection.fps),
-        generate_xml(clips, source, fps=selection.fps),
-        generate_m3u(clips, source),
-        generate_extract_script(clips, source, os.path.join(output_dir, f"{stem}_clips")),
-    ]
-    for path, payload in zip(paths, payloads):
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-    os.chmod(paths[3], 0o755)
+    with RunManifest(os.path.join(output_dir, f"{stem}_handoff.json"), "generate_edl",
+                     inputs=[selection_path], config={"fps_override": fps}, path_mode=manifest_paths) as manifest:
+        selection = load_selection(selection_path, fps=fps)
+        source = selection.source or "mixed"
+        clips = selection.clips
+        manifest.data["inputs"].extend(fingerprint(source, content=False) for source in sorted({clip["source"] for clip in clips}))
+        manifest.data["handoff"] = handoff_metadata(clips, selection.fps)
+        before = time.monotonic()
+        payloads = [
+            generate_edl(clips, source, fps=selection.fps),
+            generate_xml(clips, source, fps=selection.fps),
+            generate_m3u(clips, source),
+            generate_extract_script(clips, source, os.path.join(output_dir, f"{stem}_clips")),
+        ]
+        for path, payload in zip(paths, payloads):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+        os.chmod(paths[3], 0o755)
+        manifest.record_step("handoff", "generate_edl", {"fps": selection.fps}, {"files": paths}, time.monotonic() - before)
     return paths
+
+
+def handoff_metadata(clips: list[dict], fps: float, handles: float = 0.0) -> dict:
+    sources = []
+    timeline = 0.0
+    for index, clip in enumerate(clips, 1):
+        start, end = timecode_to_seconds(clip["start"]), timecode_to_seconds(clip["end"])
+        sources.append({"source": clip["source"], "reel": clip.get("label") or f"Clip_{index:03d}",
+                        "event": index, "start_seconds": start, "end_seconds": end,
+                        "edl_in": seconds_to_timecode(start, fps), "edl_out": seconds_to_timecode(end, fps),
+                        "xml_in_frames": int(start * fps), "xml_out_frames": int(end * fps),
+                        "timeline_start_seconds": timeline, "assumed_source_fps": fps})
+        timeline += max(0.0, end - start)
+    return {"timeline_fps": fps, "sources": sources, "handles": handles,
+            "rounding": {"edl": "legacy_nearest_frame_formatter", "xml": "floor_frames"},
+            "fps_assumption": "one_nominal_rate_for_all_sources", "editor_verified": False,
+            "omitted_features": ["audio_tracks_not_exported", "source_start_timecode_not_applied", "transitions_not_exported"],
+            "limitations": ["legacy_edl_frame_carry", "legacy_xml_generatoritems", "mixed_rate_relink_unverified"] +
+                           (["fractional_rate_legacy_formatting"] if fps != int(fps) else [])}

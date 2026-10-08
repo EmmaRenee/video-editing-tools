@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from .models import ObjectHit
+from .provenance import ensure_compatible, validate_artifact
 from .timecode import timecode_to_seconds
 
 
@@ -27,6 +28,7 @@ SIGNAL_SCHEMA_VERSION = "videoedit.signal.v1"
 class SignalArtifactBundle:
     object_hits: dict[str, list[ObjectHit]] = field(default_factory=dict)
     advanced_hits: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
     def objects_for(self, source: str) -> list[ObjectHit]:
         return list(_lookup(self.object_hits, source))
@@ -64,6 +66,11 @@ def load_signal_artifacts(config: Any) -> SignalArtifactBundle:
     index = SourceIndex()
     raw_objects: dict[str, list[ObjectHit]] = {}
     raw_advanced: dict[str, list[dict[str, Any]]] = {}
+    warnings = []
+    for path in paths.values():
+        data = _read_optional_json(path)
+        if data:
+            warnings.extend(ensure_compatible(data)["warnings"])
 
     for source, hits in _load_visual_objects(paths.get("visual_objects")).items():
         canonical = index.add(source)
@@ -78,6 +85,7 @@ def load_signal_artifacts(config: Any) -> SignalArtifactBundle:
     return SignalArtifactBundle(
         object_hits=_expand_index(raw_objects, index),
         advanced_hits=_expand_index(raw_advanced, index),
+        warnings=sorted(set(warnings)),
     )
 
 
@@ -109,8 +117,9 @@ def validate_signal_artifact(path: str) -> dict[str, Any]:
     if kind == "unknown":
         errors.append("could not infer signal artifact kind")
     schema_version = data.get("schema_version")
-    if schema_version and schema_version != SIGNAL_SCHEMA_VERSION:
-        warnings.append(f"unexpected schema_version: {schema_version}")
+    validation = validate_artifact(data)
+    errors.extend(validation["errors"])
+    warnings.extend(validation["warnings"])
     if not data.get("provider"):
         warnings.append("provider is missing")
     if kind == "visual_objects" and not isinstance(data.get("sources", []), list):

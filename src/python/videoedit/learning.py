@@ -11,6 +11,8 @@ import re
 from typing import Any
 
 from .models import CandidateClip
+from ._version import __version__
+from .provenance import build_provenance, ensure_compatible, file_sha256
 
 
 REVIEW_DATASET_SCHEMA_VERSION = "videoedit.review_dataset.v1"
@@ -111,6 +113,10 @@ def train_local_scorer(dataset_jsonl: str, output: str) -> dict[str, Any]:
         "positive_actions": sorted(POSITIVE_DECISIONS),
         "negative_actions": sorted(NEGATIVE_DECISIONS),
         "training_metrics": _training_metrics(train_rows, weights, threshold),
+        "provenance": build_provenance("videoedit_linear_delta", "learned_scorer", model_name="linear_feature_delta",
+                                        revision=file_sha256(dataset_jsonl), library="videoedit", library_version=__version__,
+                                        device="cpu", precision="float64", sampling={"kind": "feature_rows", "records": len(train_rows)},
+                                        config={"dataset_sha256": file_sha256(dataset_jsonl), "features": feature_names}),
     }
     _write_json(output, model)
     return {"output": os.fspath(output), "records": len(train_rows), "features": len(weights), "metrics": model["training_metrics"]}
@@ -120,6 +126,7 @@ def load_learned_scorer(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
     model = _read_json(path)
+    ensure_compatible(model)
     if model.get("schema_version") != LEARNED_SCORER_SCHEMA_VERSION:
         raise ValueError(f"unsupported learned scorer schema: {model.get('schema_version')}")
     return model

@@ -14,6 +14,12 @@ videoedit benchmark compare baseline/benchmark_report.json candidate/benchmark_r
 Benchmark reports require declared review windows and human provenance.
 Synthetic and insufficient-sample results cannot qualify a production release.
 
+For model identity, cache reuse, output fingerprints, and failure diagnostics,
+read [provenance and manifests](provenance-and-manifests.md). Use
+`--manifest-paths redacted` on `rate`, `run`, `review-assets`, `roughcut plan`,
+`assemble`, and `export-edl` for shareable sidecars. This does not redact
+footage, ratings, selections, or review decisions.
+
 This guide is the user-facing map for the `videoedit` toolkit. It explains what each major feature does, when to use it, the commands to run, and the artifacts to expect. For install steps, start with [INSTALL.md](../INSTALL.md). For maintainer ownership and module internals, see [docs/components.md](components.md).
 
 ## The Workflow In One Pass

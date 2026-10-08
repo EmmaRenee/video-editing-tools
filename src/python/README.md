@@ -25,6 +25,23 @@ The always-enabled `core.calibration` module exposes `run_benchmark` and
 metrics; independent human review, sufficient sampling, and compatible
 review bases are required for production conclusions.
 
+### V17 Provenance And Diagnostics
+
+Signal/AI/scorer artifacts gain `videoedit.provenance.v1` model and provider
+identity without changing existing content schemas. Execution workflows write
+versioned sidecars with input/output fingerprints, timing, cache origin,
+warnings, failure/interruption status, and handoff assumptions. Legacy supported
+artifacts remain readable with warnings; unsupported future versions fail with
+re-generation guidance.
+
+Use `--manifest-paths absolute|relative|redacted` on `rate`, `run`,
+`review-assets`, `roughcut plan`, `assemble`, and `export-edl`. Absolute is the
+backward-compatible default. Redaction applies only to diagnostic sidecars,
+not operational review/selection artifacts. See
+[provenance and manifests](../../docs/provenance-and-manifests.md) for sidecar
+names, pipeline references, migration, fingerprint methods, and unverified
+editor/model limitations.
+
 ### Quick Start
 
 ```bash

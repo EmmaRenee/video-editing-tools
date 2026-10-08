@@ -20,6 +20,7 @@ from .calibration import (
 from .config import AnalysisConfig
 from .rating import run_rating
 from .timecode import timecode_to_seconds
+from .provenance import ensure_compatible, public_provenance
 
 MANIFEST_SCHEMA = "videoedit.benchmark.v1"
 REPORT_SCHEMA = "videoedit.benchmark_report.v1"
@@ -219,12 +220,15 @@ def _acceptance(decisions: dict[str, Any] | None, candidate_ids: set[str]) -> fl
 
 def _telemetry(run: dict[str, Any], manifest: dict[str, Any] | None, measured: float | None) -> dict[str, Any]:
     values = dict(run.get("telemetry", {}))
+    storage_scope = "unknown"
     if manifest:
         if manifest.get("status") not in {"ok", "completed"}:
             raise ValueError("input run manifest is not successful")
         if not isinstance(manifest.get("telemetry", {}), dict):
             raise ValueError("input manifest telemetry must be an object")
         imported = dict(manifest.get("telemetry", {}))
+        if imported.get("storage_scope") == "tracked_output_files":
+            storage_scope = "tracked_output_files"
         if "elapsed_seconds" not in imported and manifest.get("duration_seconds") is not None:
             imported["elapsed_seconds"] = manifest["duration_seconds"]
         for key in ("elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes"):
@@ -238,6 +242,7 @@ def _telemetry(run: dict[str, Any], manifest: dict[str, Any] | None, measured: f
     hits, misses = values.get("cache_hits"), values.get("cache_misses")
     rate = hits / (hits + misses) if hits is not None and misses is not None and hits + misses > 0 else None
     return {**{key: values.get(key) for key in ("elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes")},
+            "storage_scope": storage_scope,
             "cache_hit_rate": round(rate, 4) if rate is not None else None,
             "origin": "measured" if measured is not None else "run_manifest" if manifest else "declared" if values else "unavailable"}
 
@@ -264,8 +269,14 @@ def _provider_metadata(run: dict[str, Any], base: Path) -> list[dict[str, Any]]:
         if not isinstance(version, str) or not re.fullmatch(r"videoedit\.[a-z_]+\.v[0-9]+", version):
             raise BenchmarkRunError("provider_schema_invalid")
         metadata = data.get("provider_metadata", data.get("provider", {}))
+        try:
+            validation = ensure_compatible(data)
+            provenance = public_provenance(data)
+        except ValueError:
+            raise BenchmarkRunError("provider_schema_invalid") from None
         rows.append({"id": provider, "schema_version": version, "artifact_sha256": _file_digest(artifact_path),
-                     "provider_metadata_sha256": _digest(metadata)})
+                     "provider_metadata_sha256": _digest(metadata), "provenance": provenance,
+                     "provenance_warnings": validation["warnings"]})
     return rows
 
 
@@ -516,7 +527,8 @@ def compare_benchmarks(baseline_json: str, candidate_json: str, output_dir: str)
                 continue
             delta = {key: round(run["metrics"][key] - base["metrics"][key], 4) for key in ("precision", "recall", "f1", "recall_at_review_limit", "candidate_count")}
             comparisons.append({"project": project["id"], "baseline": base["id"], "candidate": run["id"],
-                                "baseline_status": base["status"], "candidate_status": run["status"], "delta": delta})
+                                "baseline_status": base["status"], "candidate_status": run["status"], "delta": delta,
+                                "provider_changes": _provider_changes(base, run)})
     payload = {"schema_version": COMPARE_SCHEMA, "comparisons": comparisons}
     output = Path(output_dir)
     report = output / "benchmark_compare.json"
@@ -528,3 +540,16 @@ def compare_benchmarks(baseline_json: str, candidate_json: str, output_dir: str)
         lines.append(f"| {row['project']} | {row['candidate']} | {row['delta']['precision']} | {row['delta']['recall']} | {row['delta']['f1']} |")
     markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"report": str(report), "markdown": str(markdown), "comparisons": len(comparisons)}
+
+
+def _provider_changes(baseline: dict[str, Any], candidate: dict[str, Any]) -> list[dict[str, Any]]:
+    before = {item["id"]: item.get("provenance") for item in baseline.get("provider_metadata", [])}
+    after = {item["id"]: item.get("provenance") for item in candidate.get("provider_metadata", [])}
+    rows = []
+    for provider in sorted(set(before) | set(after)):
+        left, right = before.get(provider), after.get(provider)
+        verified = all(isinstance(value, dict) and (value.get("model", {}).get("revision") or value.get("model", {}).get("sha256")) for value in (left, right))
+        equivalent = bool(verified and left["identity_sha256"] == right["identity_sha256"])
+        rows.append({"id": provider, "baseline": left, "candidate": right, "equivalent": equivalent,
+                     "reason": "identity_unverified" if not verified else "same_identity" if equivalent else "identity_changed"})
+    return rows
