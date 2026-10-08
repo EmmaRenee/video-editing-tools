@@ -10,6 +10,21 @@ Local-first video editing analysis package. V1 inventories footage, scores it, a
 
 For a complete user-facing walkthrough of every feature, command, output artifact, and recommended workflow, see the [Videoedit User Guide](../../docs/user-guide.md). This README focuses on package usage and API details.
 
+### V17 Benchmarks
+
+```bash
+videoedit benchmark validate benchmark.json
+videoedit benchmark run benchmark.json --output analysis/benchmark/
+videoedit benchmark compare baseline/benchmark_report.json candidate/benchmark_report.json --output analysis/comparison/
+```
+
+The always-enabled `core.calibration` module exposes `run_benchmark` and
+`compare_benchmarks` operations. Outputs include `benchmark_report.json`,
+`benchmark_report.md`, `per_source.csv`, and comparison reports. Read the
+[benchmark protocol](../../docs/benchmarking.md) before interpreting quality
+metrics; independent human review, sufficient sampling, and compatible
+review bases are required for production conclusions.
+
 ### Quick Start
 
 ```bash

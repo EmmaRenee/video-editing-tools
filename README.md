@@ -4,6 +4,10 @@ Portable video editing toolkit for racing footage, social media reels, and docum
 
 **Status:** Active | **Package Version:** 0.5.0
 
+V17 adds [scoped footage benchmarking](docs/benchmarking.md) with
+`videoedit benchmark validate`, `run`, and `compare`. Compare scoring against
+independent human review before selecting optional providers or tuning defaults.
+
 ---
 
 ## Overview

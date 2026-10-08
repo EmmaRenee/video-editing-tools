@@ -25,6 +25,8 @@ OPERATION_OUTPUTS = {
     "detect_highlights_transcript": {"output", "selections", "files", "count"},
     "transcribe_whisper": {"output", "count"},
     "evaluate_ratings": {"report", "markdown", "missed", "false_positives", "metrics"},
+    "run_benchmark": {"report", "markdown", "per_source", "status", "projects"},
+    "compare_benchmarks": {"report", "markdown", "comparisons"},
     "calibrate_scoring": {
         "report",
         "markdown",
@@ -380,6 +382,14 @@ def _planned_result(
             "false_positives": os.path.join(output, "false_positives.csv"),
             "metrics": {},
         }
+    if operation_name == "run_benchmark":
+        return {"report": os.path.join(output, "benchmark_report.json"),
+                "markdown": os.path.join(output, "benchmark_report.md"),
+                "per_source": os.path.join(output, "per_source.csv"),
+                "status": "planned", "projects": "unknown"}
+    if operation_name == "compare_benchmarks":
+        return {"report": os.path.join(output, "benchmark_compare.json"),
+                "markdown": os.path.join(output, "benchmark_compare.md"), "comparisons": "unknown"}
     if operation_name == "calibrate_scoring":
         return {
             "report": os.path.join(output, "calibration_report.json"),

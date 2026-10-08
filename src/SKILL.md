@@ -23,6 +23,19 @@ AI-assisted video editing for cutting real footage, not generating from scratch.
 
 ---
 
+## V17 Benchmark Validation
+
+Use `videoedit benchmark validate benchmark.json`, then
+`videoedit benchmark run benchmark.json --output analysis/benchmark/`
+to measure rated selections within independently reviewed time windows.
+Compare compatible runs with `videoedit benchmark compare baseline/benchmark_report.json candidate/benchmark_report.json --output analysis/comparison/`.
+Read `docs/benchmarking.md` for the manifest, sampling requirements, privacy
+rules, metrics, and provisional quality gates. Use the existing
+`core.calibration` module and `run_benchmark` / `compare_benchmarks` pipeline
+operations. A `synthetic` or `insufficient_evidence` report does not prove
+real-footage quality. Preserve source footage and keep real manifests,
+annotations, decisions, and intermediate `.private/` outputs out of Git.
+
 ## When to Use
 
 ```

@@ -2,6 +2,18 @@
 
 Current package version: `0.5.0`.
 
+For scoped comparisons across footage projects, use the
+[benchmark protocol](benchmarking.md):
+
+```bash
+videoedit benchmark validate benchmark.json
+videoedit benchmark run benchmark.json --output analysis/benchmark/
+videoedit benchmark compare baseline/benchmark_report.json candidate/benchmark_report.json --output analysis/comparison/
+```
+
+Benchmark reports require declared review windows and human provenance.
+Synthetic and insufficient-sample results cannot qualify a production release.
+
 This guide is the user-facing map for the `videoedit` toolkit. It explains what each major feature does, when to use it, the commands to run, and the artifacts to expect. For install steps, start with [INSTALL.md](../INSTALL.md). For maintainer ownership and module internals, see [docs/components.md](components.md).
 
 ## The Workflow In One Pass

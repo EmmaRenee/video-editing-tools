@@ -2,6 +2,12 @@
 
 Current package version: `0.5.0`.
 
+V17 benchmarking is documented in [benchmarking.md](benchmarking.md).
+`videoedit benchmark validate`, `run`, and `compare` use the existing core
+calibration module and produce redacted metrics and reproducibility hashes.
+Experimental-code dispositions are recorded in
+[v17-experimental-inventory.md](v17-experimental-inventory.md).
+
 This page maps the supported repository components. It documents the tracked, releaseable surface of the project; local experiments should be promoted here only after they are committed with tests and user-facing docs.
 
 ## Python Package

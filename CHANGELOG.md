@@ -6,6 +6,10 @@ This project uses semantic versioning for the Python `videoedit` package once pu
 
 ## Unreleased
 
+- Added scoped footage benchmark validation, execution, comparison reports,
+  pipeline operations, privacy-safe summaries, and synthetic contract tests.
+- Documented V17 experimental-component dispositions and production evidence gates.
+
 - Added local-first footage inventory, rating, calibration, review, rough-cut, signal fusion, AI scoring, community module, cloud adapter, and release-hardening workflows.
 - Added CI and package-build verification for the Python `videoedit` package.
 - Added a component reference and version-consistency checks for README/install docs.

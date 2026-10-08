@@ -1,0 +1,13 @@
+{
+  "schema_version": "videoedit.benchmark.v1",
+  "suite": "synthetic-contract",
+  "review_limit": 1,
+  "quality_gates": {"min_reviewed_seconds": 30, "min_positive_annotations": 2, "min_negative_annotations": 1, "min_sources": 1, "min_precision": 0.5, "min_recall": 0.5, "min_f1": 0.5},
+  "projects": [{
+    "id": "dialogue",
+    "profile": "interview",
+    "annotations": "annotations.json",
+    "review": {"reviewer": "editor-a", "origin": "synthetic", "independent": true, "windows": [{"source": "source_a.mp4", "start": 0, "end": 30}]},
+    "runs": [{"id": "baseline", "role": "baseline", "ratings": "ratings.json", "providers": [], "telemetry": {"elapsed_seconds": 2.0, "cache_hits": 1, "cache_misses": 1, "storage_bytes": 1024}}]
+  }]
+}
