@@ -138,6 +138,8 @@ OPERATION_MODULES = {
     "transcribe_whisper": "core.rating",
     "evaluate_ratings": "core.calibration",
     "calibrate_scoring": "core.calibration",
+    "run_benchmark": "core.calibration",
+    "compare_benchmarks": "core.calibration",
     "extract_segments": "core.handoff",
     "generate_edl": "core.handoff",
     "generate_review_assets": "core.review",

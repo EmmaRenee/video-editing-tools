@@ -1,0 +1,9 @@
+{
+  "project": "Synthetic dialogue",
+  "source_root": "footage",
+  "clips": [
+    {"id": "a", "source": "source_a.mp4", "start": 1, "end": 4, "rating": "select", "tags": ["quote"]},
+    {"id": "b", "source": "source_a.mp4", "start": 10, "end": 14, "rating": "broll", "tags": ["detail"]},
+    {"id": "c", "source": "source_a.mp4", "start": 20, "end": 24, "rating": "reject", "tags": []}
+  ]
+}

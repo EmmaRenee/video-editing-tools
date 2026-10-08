@@ -31,6 +31,7 @@ from .calibration import (
     init_annotation_file,
     tune_scoring,
 )
+from .benchmark import compare_benchmarks, run_benchmark, validate_manifest
 from .captions import burn_captions, list_caption_styles
 from .cloud import cloud_diagnostics, list_cloud_adapters, plan_cloud_job
 from .config import AnalysisConfig
@@ -142,6 +143,21 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Check required and optional local dependencies")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable diagnostics")
     doctor.set_defaults(func=cmd_doctor)
+
+    benchmark = sub.add_parser("benchmark", help="Validate, run, or compare scoped footage benchmarks")
+    benchmark_sub = benchmark.add_subparsers(dest="benchmark_command", required=True)
+    benchmark_validate = benchmark_sub.add_parser("validate", help="Validate a benchmark manifest")
+    benchmark_validate.add_argument("manifest")
+    benchmark_validate.set_defaults(func=cmd_benchmark_validate)
+    benchmark_run = benchmark_sub.add_parser("run", help="Evaluate rating runs with independent review evidence")
+    benchmark_run.add_argument("manifest")
+    benchmark_run.add_argument("--output", "-o", required=True)
+    benchmark_run.set_defaults(func=cmd_benchmark_run)
+    benchmark_compare = benchmark_sub.add_parser("compare", help="Compare reports with identical review basis")
+    benchmark_compare.add_argument("baseline")
+    benchmark_compare.add_argument("candidate")
+    benchmark_compare.add_argument("--output", "-o", required=True)
+    benchmark_compare.set_defaults(func=cmd_benchmark_compare)
 
     signals = sub.add_parser("signals", help="Run or validate optional signal providers")
     signals_sub = signals.add_subparsers(dest="signals_command", required=True)
@@ -440,6 +456,26 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     items = build_inventory(args.footage)
     write_inventory_outputs(items, os.path.join(args.output, "inventory"))
     print(f"Inventory written to {args.output}")
+    return 0
+
+
+def cmd_benchmark_validate(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = validate_manifest(args.manifest)
+    print(json.dumps(result, indent=2))
+    return 0 if result["valid"] else 1
+
+
+def cmd_benchmark_run(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    result = run_benchmark(args.manifest, args.output)
+    print(json.dumps(result, indent=2))
+    return 1 if result["status"] == "failed" else 0
+
+
+def cmd_benchmark_compare(args: argparse.Namespace) -> int:
+    require_module_enabled("core.calibration")
+    print(json.dumps(compare_benchmarks(args.baseline, args.candidate, args.output), indent=2))
     return 0
 
 

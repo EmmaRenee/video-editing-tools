@@ -18,6 +18,7 @@ from .advanced import (
 )
 from .ai import find_missed_moments, generate_missed_review, judge_review_clips, score_frames
 from .calibration import evaluate_ratings, tune_scoring
+from .benchmark import compare_benchmarks, run_benchmark
 from .captions import burn_captions
 from .cloud import plan_cloud_job
 from .config import AnalysisConfig
@@ -101,6 +102,8 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "transcribe_whisper", "Run Whisper transcription for a single video or folder", op_transcribe_whisper)
     _register(registry, enabled_only, cwd, "evaluate_ratings", "Evaluate ratings against human annotation JSON", op_evaluate_ratings)
     _register(registry, enabled_only, cwd, "calibrate_scoring", "Tune scoring config candidates against annotations", op_calibrate_scoring)
+    _register(registry, enabled_only, cwd, "run_benchmark", "Evaluate a scoped, reproducible footage benchmark", op_run_benchmark)
+    _register(registry, enabled_only, cwd, "compare_benchmarks", "Compare benchmark reports with identical review basis", op_compare_benchmarks)
     _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
@@ -147,6 +150,19 @@ def _register(
     if enabled_only and not operation_enabled(name, cwd):
         return
     registry.register(name, description, func)
+
+
+def op_run_benchmark(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    result = run_benchmark(os.fspath(params.get("input") or context["input"]),
+                           os.fspath(params.get("output") or context["output"]))
+    if result["status"] == "failed":
+        raise ValueError("benchmark run failed; inspect benchmark_report.json error codes")
+    return result
+
+
+def op_compare_benchmarks(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    return compare_benchmarks(os.fspath(params["baseline"]), os.fspath(params.get("candidate") or context["input"]),
+                              os.fspath(params.get("output") or context["output"]))
 
 
 def op_inventory(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:

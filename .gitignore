@@ -12,6 +12,9 @@ wheelhouse/
 *.psm1~
 
 # Environment files
+.claude/
+.mcp.json
+.superpowers/
 .env
 .env.local
 .env.*.local

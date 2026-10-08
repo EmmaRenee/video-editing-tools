@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Videoedit benchmark manifest v1",
+  "type": "object",
+  "required": ["schema_version", "suite", "projects"],
+  "properties": {
+    "schema_version": {"const": "videoedit.benchmark.v1"},
+    "suite": {"$ref": "#/$defs/id"},
+    "review_limit": {"type": "integer", "minimum": 1},
+    "quality_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_reviewed_seconds": {"$ref": "#/$defs/nonnegative"},
+        "min_positive_annotations": {"$ref": "#/$defs/nonnegative"},
+        "min_negative_annotations": {"$ref": "#/$defs/nonnegative"},
+        "min_sources": {"$ref": "#/$defs/nonnegative"},
+        "min_precision": {"$ref": "#/$defs/ratio"},
+        "min_recall": {"$ref": "#/$defs/ratio"},
+        "min_f1": {"$ref": "#/$defs/ratio"}
+      }
+    },
+    "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "path": {"type": "string", "pattern": "\\S"},
+    "nonnegative": {"type": "number", "minimum": 0},
+    "ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    "time": {"oneOf": [{"$ref": "#/$defs/nonnegative"}, {"type": "string", "minLength": 1}]},
+    "window": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {"$ref": "#/$defs/path"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "start_seconds": {"$ref": "#/$defs/nonnegative"},
+        "end_seconds": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["id", "profile", "annotations", "review", "runs"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "profile": {"enum": ["interview", "motion_event", "general_broll", "shop_build", "documentary", "social"]},
+        "annotations": {"$ref": "#/$defs/path"},
+        "review": {
+          "type": "object",
+          "required": ["reviewer", "origin", "independent", "windows"],
+          "properties": {
+            "reviewer": {"$ref": "#/$defs/path"},
+            "origin": {"enum": ["human", "synthetic"]},
+            "independent": {"type": "boolean"},
+            "windows": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/window"}}
+          }
+        },
+        "runs": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/run"},
+          "contains": {"type": "object", "required": ["role"], "properties": {"role": {"const": "baseline"}}},
+          "minContains": 1, "maxContains": 1
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["id"],
+      "oneOf": [
+        {"required": ["ratings"], "not": {"required": ["footage"]}},
+        {"required": ["footage"], "not": {"required": ["ratings"]}}
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "role": {"enum": ["baseline", "candidate"]},
+        "ratings": {"$ref": "#/$defs/path"},
+        "footage": {"$ref": "#/$defs/path"},
+        "config": {"$ref": "#/$defs/path"},
+        "decisions": {"$ref": "#/$defs/path"},
+        "run_manifest": {"$ref": "#/$defs/path"},
+        "providers": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "provider_artifacts": {"type": "object", "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"$ref": "#/$defs/path"}},
+        "telemetry": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "elapsed_seconds": {"$ref": "#/$defs/nonnegative"},
+            "cache_hits": {"$ref": "#/$defs/nonnegative"},
+            "cache_misses": {"$ref": "#/$defs/nonnegative"},
+            "storage_bytes": {"$ref": "#/$defs/nonnegative"}
+          }
+        }
+      }
+    }
+  }
+}

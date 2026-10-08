@@ -22,6 +22,13 @@ Canonical setup for the Video Editing Tools repository, the `videoedit` Python p
 
 The deterministic pipeline works with only Python, FFmpeg, and ffprobe. The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library; install extras only when you need Whisper, YOLO/OpenCV, OpenCLIP/Torch, UI, or cloud providers.
 
+V17 benchmark validation and artifact evaluation require no additional Python
+dependencies. Use `videoedit benchmark validate benchmark.json` and
+`videoedit benchmark run benchmark.json --output analysis/benchmark/` after
+the core install. Footage invocation uses FFmpeg/ffprobe; AI providers use
+the optional extras described below. See [docs/benchmarking.md](docs/benchmarking.md)
+for human annotation requirements and report statuses.
+
 `videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for this repository's full local setup. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
 ## macOS Setup

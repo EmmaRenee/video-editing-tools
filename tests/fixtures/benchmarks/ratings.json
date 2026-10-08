@@ -1,0 +1,11 @@
+{
+  "root": "footage",
+  "config": {},
+  "inventory": [{"path": "source_a.mp4", "duration": 45, "status": "ok"}],
+  "signals": [],
+  "candidates": [
+    {"id": "clip_a", "source": "source_a.mp4", "start": 1, "end": 4, "score": 90, "action": "select", "labels": ["quote"], "signals": {}, "reasons": []},
+    {"id": "clip_c", "source": "source_a.mp4", "start": 20, "end": 24, "score": 80, "action": "review", "labels": [], "signals": {}, "reasons": []},
+    {"id": "outside", "source": "source_a.mp4", "start": 35, "end": 40, "score": 95, "action": "review", "labels": [], "signals": {}, "reasons": []}
+  ]
+}
