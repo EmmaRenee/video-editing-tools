@@ -11,6 +11,7 @@ from datetime import datetime
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import shlex
@@ -21,6 +22,7 @@ from typing import Any, Protocol
 from .ffmpeg import has_command, probe_media, run_command_check, scan_video_files
 from ._version import __version__
 from .manifests import atomic_json
+from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
 from .provenance import build_provenance, canonical_hash, ensure_compatible, file_sha256, library_version, public_provenance
 from .timecode import seconds_to_hhmmss, timecode_to_seconds
 
@@ -259,14 +261,23 @@ def score_frames(
         signature = _source_signature(source, profile.id, sample_interval, max_frames_per_file, min_score, model, pretrained)
         signature["provenance_sha256"] = provenance["identity_sha256"]
         cached = existing_sources.get(source)
-        if cached and cached.get("signature") == signature:
+        if cached and cached.get("signature") == signature and cached.get("status") == "ok" and cached.get("coverage"):
             sources.append({**cached, "cache_status": "cached"})
             cache_hits += 1
             continue
         cache_misses += 1
 
-        asset = probe(source, timeout=min(timeout, 60))
-        duration = float(getattr(asset, "duration", 0.0) or 0.0)
+        try:
+            asset = probe(source, timeout=min(timeout, 60))
+            duration = float(getattr(asset, "duration", 0.0) or 0.0)
+            if not math.isfinite(duration) or duration <= 0:
+                raise ValueError("media duration must be positive and finite")
+        except Exception as exc:
+            warnings.append(f"media probe failed for {source}: {exc}")
+            sources.append({"source": source, "signature": signature, "status": "error", "duration": 0.0, "frames": [],
+                            "labels": [], "top_score": 0.0, "warnings": ["media probe failed"],
+                            "coverage": sample_coverage(source, 0, [], [], sample_interval)})
+            continue
         timestamps = sample_timestamps(duration, sample_interval, max_frames_per_file)
         frame_paths = []
         frame_rows = []
@@ -288,24 +299,38 @@ def score_frames(
                 {
                     "source": source,
                     "signature": signature,
+                    "status": "error",
                     "duration": duration,
                     "frames": [],
                     "labels": [],
                     "top_score": 0.0,
                     "warnings": ["no frames sampled"],
+                    "coverage": sample_coverage(source, duration, timestamps, [], max(0.5, float(sample_interval))),
                 }
             )
             continue
 
-        score_rows = encoder.score_images(frame_paths, prompt_texts)
         scored_frames = []
-        for frame, scores in zip(frame_rows, score_rows):
-            scored_frames.append(_frame_payload(frame, scores, profile, min_score))
+        try:
+            score_rows = encoder.score_images(frame_paths, prompt_texts)
+            if len(score_rows) != len(frame_paths):
+                raise ValueError("encoder row count does not match sampled frames")
+            for scores in score_rows:
+                if len(scores) != len(prompt_texts) or any(isinstance(value, bool) or not math.isfinite(float(value)) for value in scores):
+                    raise ValueError("encoder prompt scores have invalid dimensions or nonfinite values")
+            for frame, scores in zip(frame_rows, score_rows):
+                scored_frames.append(_frame_payload(frame, scores, profile, min_score))
+        except Exception as exc:
+            warnings.append(f"frame scoring failed for {source}: {exc}")
+            scored_frames = []
+        coverage = sample_coverage(source, duration, timestamps, [row["time_seconds"] for row in scored_frames], max(0.5, float(sample_interval)))
         labels = sorted({label for frame in scored_frames for label in frame.get("labels", [])})
         sources.append(
             {
                 "source": source,
                 "signature": signature,
+                "status": coverage["status"],
+                "coverage": coverage,
                 "duration": duration,
                 "frame_count": len(scored_frames),
                 "labels": labels,
@@ -336,7 +361,8 @@ def score_frames(
             "min_score": float(min_score),
             "cache": bool(cache),
         },
-        "status": "ok",
+        "status": "ok" if sources and all(row.get("status") == "ok" for row in sources) else "partial" if any(row.get("frames") for row in sources) else "error",
+        "coverage": {"schema_version": COVERAGE_SCHEMA, "scope": "temporal", "sources": [row["coverage"] for row in sources]},
         "source_count": len(sources),
         "frame_count": sum(len(row.get("frames", [])) for row in sources),
         "source_summaries": _source_summaries(sources),
@@ -346,7 +372,7 @@ def score_frames(
     for source in sources:
         source.setdefault("cache_status", "computed")
     _write_json(output, payload)
-    return {"output": output, "status": "ok", "sources": len(sources), "frames": payload["frame_count"], "warnings": warnings, "telemetry": payload["telemetry"]}
+    return {"output": output, "status": payload["status"], "sources": len(sources), "frames": payload["frame_count"], "warnings": warnings, "telemetry": payload["telemetry"]}
 
 
 def find_missed_moments(

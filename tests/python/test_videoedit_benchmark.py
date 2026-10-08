@@ -304,6 +304,35 @@ class BenchmarkTests(unittest.TestCase):
         run_pipeline(str(pipeline_path), str(self.manifest), str(self.output))
         self.assertTrue((self.output / "benchmark_report.json").is_file())
 
+    def test_invoked_rating_imports_generated_run_telemetry(self):
+        from unittest.mock import patch
+        from videoedit.benchmark import run_benchmark
+        data = self.read(self.manifest)
+        run = data["projects"][0]["runs"][0]
+        run.pop("ratings")
+        run["footage"] = "fixture-media"
+        def fake_rating(_input, output, _config):
+            path = Path(output)
+            path.mkdir(parents=True)
+            self.write(path / "ratings.json", self.read(self.manifest.parent / "ratings.json"))
+            self.write(path / "rating_run.json", {"status": "ok", "telemetry": {
+                "elapsed_seconds": 1, "storage_bytes": 123, "storage_scope": "tracked_output_files"}})
+        self.write(self.manifest, data)
+        with patch("videoedit.benchmark.run_rating", fake_rating):
+            run_benchmark(str(self.manifest), str(self.output))
+        result = self.read(self.output / "benchmark_report.json")["projects"][0]["runs"][0]
+        self.assertEqual(result["telemetry"]["storage_bytes"], 123)
+        self.assertEqual(result["telemetry"]["storage_scope"], "tracked_output_files")
+        self.assertIn("run_manifest_sha256", result["inputs"])
+
+    def test_review_windows_cannot_claim_time_beyond_known_source_duration(self):
+        ratings = self.read(self.manifest.parent / "ratings.json")
+        ratings["inventory"][0]["duration"] = 10
+        self.write(self.manifest.parent / "ratings.json", ratings)
+        result = self.cli("run", self.manifest, "--output", self.output)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.read(self.output / "benchmark_report.json")["status"], "failed")
+
     def test_report_records_command_and_provider_fingerprints(self):
         report = self.run_report()
         run = report["projects"][0]["runs"][0]

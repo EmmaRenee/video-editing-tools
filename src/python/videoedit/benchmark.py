@@ -32,6 +32,10 @@ DEFAULT_GATES = {
     "min_negative_annotations": 20, "min_sources": 3,
     "min_precision": 0.7, "min_recall": 0.7, "min_f1": 0.7,
 }
+DEFAULT_ABLATION_POLICY = {
+    "min_source_ratio": 0.8, "min_temporal_ratio": 0.8, "min_unit_ratio": 0.8,
+    "min_f1_delta": 0.02, "removal_f1_delta": 0.05, "min_profiles_default": 3, "min_profiles_removal": 3,
+}
 
 
 class BenchmarkRunError(ValueError):
@@ -76,6 +80,18 @@ def _times(row: dict[str, Any]) -> tuple[float, float]:
     return start, end
 
 
+def ablation_policy(data: dict[str, Any]) -> dict[str, float]:
+    overrides = data.get("ablation_policy", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("ablation_policy must be an object")
+    for key, value in overrides.items():
+        count = key.startswith("min_profiles")
+        if (key not in DEFAULT_ABLATION_POLICY or count and not isinstance(value, int)
+                or not _number(value, minimum=1 if count else 0, maximum=float("inf") if count else 1)):
+            raise ValueError("invalid ablation_policy; profile counts must be positive integers and other thresholds in [0, 1]")
+    return {**DEFAULT_ABLATION_POLICY, **overrides}
+
+
 def validate_manifest(manifest: str) -> dict[str, Any]:
     data = _read(Path(manifest))
     errors = []
@@ -83,6 +99,10 @@ def validate_manifest(manifest: str) -> dict[str, Any]:
         errors.append("schema_version must be videoedit.benchmark.v1")
     if not ID_RE.fullmatch(str(data.get("suite", ""))):
         errors.append("suite must be a portable lowercase ID")
+    try:
+        ablation_policy(data)
+    except ValueError as exc:
+        errors.append(str(exc))
     limit = data.get("review_limit", 25)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         errors.append("review_limit must be a positive integer")
@@ -323,6 +343,11 @@ def _evaluate_run(project: dict[str, Any], run: dict[str, Any], base: Path,
     annotations = load_annotations(str(annotation_path), ratings)
     index = _SourceIndex(ratings, annotation_path=str(annotation_path), source_root=annotations.source_root)
     windows = _windows(project, index)
+    for asset in ratings.get("inventory", []):
+        source = asset.get("filepath") or asset.get("path") or asset.get("source") or asset.get("filename")
+        duration = asset.get("duration")
+        if source and _number(duration) and any(end > duration + 0.001 for _start, end in windows.get(index.resolve(source), [])):
+            raise ValueError("review window extends beyond known source duration")
     ids = [clip.id for clip in annotations.clips]
     if len(ids) != len(set(ids)) or not annotations.clips:
         raise ValueError("annotations must have unique ids and nonempty clips")
@@ -368,6 +393,8 @@ def _evaluate_run(project: dict[str, Any], run: dict[str, Any], base: Path,
         source_rows.append({"source": f"source_{num:03d}", "reviewed_seconds": round(sum(end-start for start, end in windows[source]), 3),
                             "metrics": {key: value for key, value in local["metrics"].items() if key != "recall_by_tag"}})
     manifest_path = _path(base, run["run_manifest"]) if run.get("run_manifest") else None
+    if manifest_path is None and "footage" in run and (ratings_path.parent / "rating_run.json").is_file():
+        manifest_path = ratings_path.parent / "rating_run.json"
     run_manifest = _read(manifest_path) if manifest_path else None
     review_basis = {"annotations": _file_digest(annotation_path), "review": project["review"], "limit": limit, "profile": project["profile"]}
     inputs = {"ratings_sha256": _file_digest(ratings_path), "annotations_sha256": _file_digest(annotation_path),

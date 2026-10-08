@@ -19,6 +19,7 @@ from .advanced import (
 from .ai import find_missed_moments, generate_missed_review, judge_review_clips, score_frames
 from .calibration import evaluate_ratings, tune_scoring
 from .benchmark import compare_benchmarks, run_benchmark
+from .ablation import evaluate_ablations
 from .captions import burn_captions
 from .cloud import plan_cloud_job
 from .config import AnalysisConfig
@@ -104,6 +105,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "calibrate_scoring", "Tune scoring config candidates against annotations", op_calibrate_scoring)
     _register(registry, enabled_only, cwd, "run_benchmark", "Evaluate a scoped, reproducible footage benchmark", op_run_benchmark)
     _register(registry, enabled_only, cwd, "compare_benchmarks", "Compare benchmark reports with identical review basis", op_compare_benchmarks)
+    _register(registry, enabled_only, cwd, "evaluate_provider_ablations", "Compare controlled optional-provider additions", op_evaluate_provider_ablations)
     _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
@@ -162,6 +164,11 @@ def op_run_benchmark(context: dict[str, Any], params: dict[str, Any]) -> dict[st
 
 def op_compare_benchmarks(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     return compare_benchmarks(os.fspath(params["baseline"]), os.fspath(params.get("candidate") or context["input"]),
+                              os.fspath(params.get("output") or context["output"]))
+
+
+def op_evaluate_provider_ablations(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    return evaluate_ablations(os.fspath(params.get("input") or context["input"]),
                               os.fspath(params.get("output") or context["output"]))
 
 

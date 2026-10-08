@@ -27,6 +27,7 @@ OPERATION_OUTPUTS = {
     "evaluate_ratings": {"report", "markdown", "missed", "false_positives", "metrics"},
     "run_benchmark": {"report", "markdown", "per_source", "status", "projects"},
     "compare_benchmarks": {"report", "markdown", "comparisons"},
+    "evaluate_provider_ablations": {"report", "markdown", "scorecards", "status", "effects"},
     "calibrate_scoring": {
         "report",
         "markdown",
@@ -373,6 +374,10 @@ def _planned_result(
     if operation_name == "compare_benchmarks":
         return {"report": os.path.join(output, "benchmark_compare.json"),
                 "markdown": os.path.join(output, "benchmark_compare.md"), "comparisons": "unknown"}
+    if operation_name == "evaluate_provider_ablations":
+        return {"report": os.path.join(output, "ablation_report.json"),
+                "markdown": os.path.join(output, "ablation_report.md"),
+                "scorecards": os.path.join(output, "provider_scorecards.csv"), "status": "planned", "effects": "unknown"}
     if operation_name == "calibrate_scoring":
         return {
             "report": os.path.join(output, "calibration_report.json"),

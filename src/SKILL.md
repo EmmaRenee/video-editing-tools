@@ -36,6 +36,29 @@ operations. A `synthetic` or `insufficient_evidence` report does not prove
 real-footage quality. Preserve source footage and keep real manifests,
 annotations, decisions, and intermediate `.private/` outputs out of Git.
 
+### Provider Ablation Workflow
+
+Use `videoedit benchmark ablate benchmark.json --output analysis/ablations/`
+or pipeline operation `evaluate_provider_ablations` to compare the deterministic
+baseline, one-provider additions, and explicitly declared combinations. Keep
+base config, source fingerprints, review windows, and cache state controlled.
+Read `ablation_report.json`, `ablation_report.md`, and `provider_scorecards.csv`.
+Distinguish quality deltas from measured cost, provisional config bindings from
+historical manifest verification, and negative scans from absent processing.
+
+Supported provider IDs are `openclip`, `yolo`, `ocr`, `face_person`, `motorsports`,
+`topics`, `clip_judge`, and `learned_scorer`. OpenCLIP emits sampled temporal
+coverage; heuristics and learned scoring disclose candidate-only coverage.
+Judge artifacts are annotation-only. Legacy vision artifacts lacking processing
+coverage are not valid ablations; native vision instrumentation is still pending.
+Do not fabricate coverage from positive detections.
+
+Recommendations are evidence summaries, not automatic enablement/default changes.
+Synthetic, insufficient, confounded, or unverified runs cannot prove production
+benefit. CLI success means reports were written, not that V17 gates passed.
+Consult `docs/provider-ablations.md`; no models are implicitly downloaded and
+optional dependencies stay optional.
+
 ### Provenance And Run Diagnostics
 
 Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`, `roughcut plan`,

@@ -6,6 +6,12 @@ This project uses semantic versioning for the Python `videoedit` package once pu
 
 ## Unreleased
 
+- Added controlled provider-ablation scorecards with coverage, historical input
+  binding, explicit cost limits, identity-separated recommendations, and no
+  automatic default changes.
+- Added OpenCLIP/heuristic processing evidence; incomplete frame inference is
+  no longer reported or cached as successful.
+
 - Added scoped footage benchmark validation, execution, comparison reports,
   pipeline operations, privacy-safe summaries, and synthetic contract tests.
 - Documented V17 experimental-component dispositions and production evidence gates.

@@ -29,6 +29,11 @@ the core install. Footage invocation uses FFmpeg/ffprobe; AI providers use
 the optional extras described below. See [docs/benchmarking.md](docs/benchmarking.md)
 for human annotation requirements and report statuses.
 
+`videoedit benchmark ablate benchmark.json --output analysis/ablations/` also
+works with the core install and existing artifacts; generation alone needs
+optional provider dependencies. See [provider ablations](docs/provider-ablations.md)
+for controlled inputs, coverage requirements, and current instrumentation limits.
+
 Execution sidecars and provider provenance also require no additional core
 dependencies. Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`,
 `roughcut plan`, `assemble`, or `export-edl` before sharing diagnostics. This does

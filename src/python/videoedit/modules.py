@@ -140,6 +140,7 @@ OPERATION_MODULES = {
     "calibrate_scoring": "core.calibration",
     "run_benchmark": "core.calibration",
     "compare_benchmarks": "core.calibration",
+    "evaluate_provider_ablations": "core.calibration",
     "extract_segments": "core.handoff",
     "generate_edl": "core.handoff",
     "generate_review_assets": "core.review",

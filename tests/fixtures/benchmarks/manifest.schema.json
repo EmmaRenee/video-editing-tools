@@ -7,6 +7,18 @@
     "schema_version": {"const": "videoedit.benchmark.v1"},
     "suite": {"$ref": "#/$defs/id"},
     "review_limit": {"type": "integer", "minimum": 1},
+    "ablation_policy": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "min_source_ratio": {"$ref": "#/$defs/ratio"},
+        "min_temporal_ratio": {"$ref": "#/$defs/ratio"},
+        "min_unit_ratio": {"$ref": "#/$defs/ratio"},
+        "min_f1_delta": {"$ref": "#/$defs/ratio"},
+        "removal_f1_delta": {"$ref": "#/$defs/ratio"},
+        "min_profiles_default": {"type": "integer", "minimum": 1},
+        "min_profiles_removal": {"type": "integer", "minimum": 1}
+      }
+    },
     "quality_gates": {
       "type": "object",
       "additionalProperties": false,
