@@ -161,6 +161,7 @@ class SignalReport:
             and status.get("silence") == audio_status
             and status.get("audio") == audio_status
             and status.get("transcript") in {"ok", "not_requested", "unavailable_optional"}
+            and status.get("input_stability", "ok") == "ok"
         )
 
     def to_dict(self) -> dict[str, Any]:

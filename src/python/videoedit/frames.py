@@ -13,7 +13,7 @@ import time
 from typing import Any, Callable
 
 from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
-from .ffmpeg import probe_media, run_command, run_command_check, scan_video_files
+from .ffmpeg import decoder_identity as _decoder_identity, probe_media, run_command_check, scan_video_files
 from .manifests import atomic_json, fingerprint
 from .provenance import canonical_hash, file_sha256
 
@@ -39,19 +39,6 @@ def _settings(interval: float, maximum: int, width: int) -> dict[str, Any]:
         raise ValueError("width must be zero (original resolution) or a positive integer")
     return {"algorithm": SAMPLER, "sample_interval": float(interval), "max_frames": maximum,
             "width": width, "jpeg_quality": 3}
-
-
-def _decoder_identity() -> dict[str, Any]:
-    identity = {}
-    for command in ("ffmpeg", "ffprobe"):
-        executable = shutil.which(command)
-        version = None
-        if executable:
-            result = run_command([executable, "-version"], timeout=10)
-            lines = result.stdout.splitlines()
-            version = lines[0] if result.returncode == 0 and lines else None
-        identity[command] = {"executable": executable, "version": version}
-    return identity
 
 
 def _extract(source: str, timestamp: float, output: str, *, width: int, timeout: int) -> None:

@@ -21,6 +21,11 @@ RUN_SCHEMA = "videoedit.run_manifest.v1"
 PATH_MODES = {"absolute", "relative", "redacted"}
 JSON_SUFFIXES = {".json", ".yaml", ".yml", ".csv", ".srt", ".ass", ".edl", ".xml", ".m3u", ".sh", ".md", ".html", ".txt"}
 PROVIDER_LIBRARIES = ("open_clip_torch", "torch", "Pillow", "opencv-python", "ultralytics", "openai-whisper")
+CACHE_REASON_CODES = frozenset({
+    "cache_disabled", "cache_not_found", "cache_unreadable", "cache_invalid", "cache_entry_invalid",
+    "analysis_policy_changed", "source_changed", "decoder_changed", "transcript_changed",
+    "signal_artifacts_changed", "analysis_config_changed", "cached_analysis_incomplete",
+})
 
 
 def atomic_json(path: str | Path, data: dict[str, Any]) -> None:
@@ -166,6 +171,11 @@ class RunManifest:
                 "config_sha256": canonical_hash(params), "cache_status": cache_status,
                 "cache_hits": hits, "cache_misses": misses, "outputs": outputs, "result": result,
                 "warnings": result.get("warnings", [])}
+        reasons = result.get("telemetry", {}).get("cache_miss_reasons") if isinstance(result.get("telemetry"), dict) else None
+        if isinstance(reasons, dict):
+            step["cache_miss_reasons"] = {key: value for key, value in reasons.items()
+                                         if key in CACHE_REASON_CODES and isinstance(value, int)
+                                         and not isinstance(value, bool) and value >= 0}
         if error is not None:
             step.update(error=str(error), error_type=type(error).__name__)
         self.data["steps"].append(step)
@@ -212,6 +222,8 @@ class RunManifest:
         for index, step in enumerate(self.data["steps"], 1):
             row = {key: step[key] for key in ("operation", "status", "duration_seconds", "config_sha256", "cache_status", "cache_hits", "cache_misses")}
             row.update(name=f"step_{index:03d}", warning_count=len(step["warnings"]), outputs=records(step["outputs"], "output"), result={})
+            if "cache_miss_reasons" in step:
+                row["cache_miss_reasons"] = step["cache_miss_reasons"]
             if step.get("error_type"):
                 row["error_type"] = step["error_type"]
             payload["steps"].append(row)
@@ -245,5 +257,10 @@ class RunManifest:
         self.data["telemetry"] = {"elapsed_seconds": self.data["duration_seconds"], **counters,
                                   "storage_scope": "tracked_output_files",
                                   "storage_bytes": sum(row.get("size_bytes", 0) for row in self.data["outputs"] if row.get("type") == "file")}
+        if any("cache_miss_reasons" in step for step in steps):
+            self.data["telemetry"]["cache_miss_reasons"] = {
+                key: sum(step.get("cache_miss_reasons", {}).get(key, 0) for step in steps)
+                for key in sorted({key for step in steps for key in step.get("cache_miss_reasons", {})})
+            }
         self.write()
         return False

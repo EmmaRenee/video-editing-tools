@@ -11,15 +11,15 @@ from typing import Any
 
 from .ai import load_clip_judgment_explanations
 from .config import AnalysisConfig
-from .ffmpeg import analyze_audio_levels, detect_scene_changes, detect_silence, probe_media, scan_video_files
+from .ffmpeg import analyze_audio_levels, decoder_identity, detect_scene_changes, detect_silence, probe_media, scan_video_files
 from .inventory import write_inventory_outputs
 from .learning import apply_learned_scorer_to_candidates, load_learned_scorer
-from .manifests import RunManifest, fingerprint
+from .manifests import RunManifest, atomic_json, fingerprint
 from .models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, RatingReport, SignalReport
 from .reports import write_candidate_csv, write_rating_json, write_review_html, write_review_markdown, write_selection_sets
 from .signals import load_signal_artifacts, signal_artifact_paths
 from .timecode import clamp_window
-from .transcript import find_transcript_hits
+from .transcript import find_transcript, find_transcript_hits
 
 
 def run_rating(
@@ -31,7 +31,7 @@ def run_rating(
     config = config or AnalysisConfig()
     inputs = [os.fspath(footage_dir), *signal_artifact_paths(config).values()]
     inputs.extend(path for path in (config.learned_scorer_path, config.ai_clip_judgments_path) if path)
-    stats = {"cache_hits": 0, "cache_misses": 0}
+    stats = {"cache_hits": 0, "cache_misses": 0, "cache_miss_reasons": {}}
     with RunManifest(os.path.join(output_dir, "rating_run.json"), "rate_footage", inputs=inputs,
                      config=config.to_dict(), path_mode=manifest_paths) as manifest:
         try:
@@ -53,36 +53,53 @@ def run_rating(
 
 
 def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
-                stats: dict[str, int], manifest: RunManifest) -> RatingReport:
+                stats: dict[str, Any], manifest: RunManifest) -> RatingReport:
     config = config or AnalysisConfig()
     footage_dir = os.fspath(footage_dir)
     output_dir = os.fspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    cache = _load_cache(output_dir) if config.cache else {}
+    cache, cache_error = _load_cache(output_dir) if config.cache else ({}, "cache_disabled")
+    original_cache = dict(cache)
     cache_changed = False
     signals: list[SignalReport] = []
+    decoder = decoder_identity()
+    artifact_signatures = _artifact_signatures(config)
     signal_artifacts = load_signal_artifacts(config)
+    if _artifact_signatures(config) != artifact_signatures:
+        raise ValueError("signal artifacts changed while loading; retry with stable inputs")
     manifest.data["warnings"].extend(signal_artifacts.warnings)
 
     for path in scan_video_files(footage_dir):
         manifest.data["inputs"].append(fingerprint(path, content=False))
         key = os.path.abspath(path)
-        signature = _file_signature(path, config)
+        signature = _file_signature(path, config, decoder=decoder, artifacts=artifact_signatures)
+        if signature["transcript"]:
+            manifest.data["inputs"].append(signature["transcript"])
         cached = cache.get(key)
-        if cached and cached.get("signature") == signature:
-            cached_report = SignalReport.from_dict(cached["report"])
-            if cached_report.analysis_complete:
-                stats["cache_hits"] += 1
-                signals.append(cached_report)
-                continue
+        reason = _cache_miss_reason(cached, signature, cache_error)
+        if reason is None:
+            try:
+                cached_report = SignalReport.from_dict(cached["report"])
+                reason = None if cached_report.analysis_complete else "cached_analysis_incomplete"
+            except (AttributeError, KeyError, TypeError, ValueError):
+                reason = "cache_entry_invalid"
+        if reason is None:
+            stats["cache_hits"] += 1
+            _rescore_report(cached_report, config)
+            signals.append(cached_report)
+            continue
         stats["cache_misses"] += 1
+        stats["cache_miss_reasons"][reason] = stats["cache_miss_reasons"].get(reason, 0) + 1
         report = analyze_file(
             path,
             config,
             object_hits=signal_artifacts.objects_for(path),
             advanced_hits=signal_artifacts.advanced_for(path),
         )
+        if _file_signature(path, config, decoder=decoder, artifacts=artifact_signatures) != signature:
+            report.analysis_status["input_stability"] = "changed"
+            report.warnings.append("source or transcript changed during analysis; retry with stable inputs")
         signals.append(report)
         if config.cache and report.analysis_complete:
             cache[key] = {"signature": signature, "report": report.to_dict()}
@@ -91,6 +108,11 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
             del cache[key]
             cache_changed = True
 
+    if _artifact_signatures(config) != artifact_signatures:
+        for report in signals:
+            report.analysis_status["input_stability"] = "changed"
+            report.warnings.append("signal artifacts changed during analysis; retry with stable inputs")
+        cache, cache_changed = original_cache, False
     if config.cache and cache_changed:
         _write_cache(output_dir, cache)
 
@@ -407,7 +429,7 @@ def _score_window(
 ) -> tuple[int, set[str], list[str], dict[str, float | int | None]]:
     labels = set(seed_labels)
     reasons: list[str] = []
-    technical = report.scores.get("technical_score", 0.0)
+    technical = _technical_score(report.asset, config.weights["technical"])
 
     scene_count = sum(1 for value in report.scene_changes if start <= value <= end)
     visual = min(config.weights["visual"], scene_count * 8.0)
@@ -702,12 +724,29 @@ def _file_reasons(
     return reasons
 
 
-def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
+def _rescore_report(report: SignalReport, config: AnalysisConfig) -> None:
+    report.scores = score_signal(report.asset, report.scene_changes, report.silence_intervals, report.audio_levels,
+                                 report.transcript_hits, report.object_hits, report.advanced_hits, config)
+    transcript = find_transcript(report.asset.filepath, config.transcript_dir) if config.transcript_mode != "off" else None
+    report.reasons = ([f"transcript matched: {transcript}"] if transcript and report.analysis_status.get("transcript") == "ok" else [])
+    report.reasons.extend(_file_reasons(report.scores, report.scene_changes, report.silence_intervals, report.audio_levels,
+                                       report.transcript_hits, report.object_hits, report.advanced_hits))
+
+
+def _file_signature(path: str, config: AnalysisConfig, *, decoder: dict[str, Any] | None = None,
+                    artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
     stat = os.stat(os.fspath(path))
+    transcript = find_transcript(path, config.transcript_dir) if config.transcript_mode != "off" else None
     return {
-        "analysis_policy": "first_stream_decode_v4",
+        "analysis_policy": "input_identity_v5",
         "size": stat.st_size,
         "mtime": stat.st_mtime,
+        "mtime_ns": stat.st_mtime_ns,
+        "ctime_ns": stat.st_ctime_ns,
+        "inode": stat.st_ino,
+        "device": stat.st_dev,
+        "decoder": decoder if decoder is not None else decoder_identity(),
+        "transcript": fingerprint(transcript) if transcript else None,
         "scene_threshold": config.scene_threshold,
         "silence_threshold_db": config.silence_threshold_db,
         "min_silence_duration": config.min_silence_duration,
@@ -715,25 +754,40 @@ def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
         "keywords": config.keywords,
         "visual_objects_path": config.visual_objects_path,
         "signal_artifacts": config.signal_artifacts,
-        "signal_artifacts_signature": _artifact_signatures(config),
+        "signal_artifacts_signature": artifacts if artifacts is not None else _artifact_signatures(config),
     }
 
 
 def _artifact_signatures(config: AnalysisConfig) -> dict[str, Any]:
-    paths = dict(config.signal_artifacts or {})
-    if config.visual_objects_path:
-        paths["visual_objects"] = config.visual_objects_path
+    paths = signal_artifact_paths(config)
     return {key: _artifact_signature(value) for key, value in sorted(paths.items()) if value}
 
 
 def _artifact_signature(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
-    try:
-        stat = os.stat(os.fspath(path))
-    except OSError:
-        return {"missing": os.fspath(path)}
-    return {"size": stat.st_size, "mtime": stat.st_mtime}
+    return fingerprint(path)
+
+
+def _cache_miss_reason(cached: Any, signature: dict[str, Any], cache_error: str | None) -> str | None:
+    if cache_error:
+        return cache_error
+    if cached is None:
+        return "cache_not_found"
+    if not isinstance(cached, dict) or not isinstance(cached.get("signature"), dict):
+        return "cache_entry_invalid"
+    old = cached["signature"]
+    if old.get("analysis_policy") != signature["analysis_policy"]:
+        return "analysis_policy_changed"
+    for keys, reason in (
+        (("size", "mtime", "mtime_ns", "ctime_ns", "inode", "device"), "source_changed"),
+        (("decoder",), "decoder_changed"),
+        (("transcript", "transcript_mode"), "transcript_changed"),
+        (("signal_artifacts_signature", "signal_artifacts", "visual_objects_path"), "signal_artifacts_changed"),
+    ):
+        if any(old.get(key) != signature.get(key) for key in keys):
+            return reason
+    return None if old == signature else "analysis_config_changed"
 
 
 def _slug(value: str) -> str:
@@ -744,19 +798,20 @@ def _cache_path(output_dir: str) -> str:
     return os.path.join(os.fspath(output_dir), ".cache", "analysis-cache.json")
 
 
-def _load_cache(output_dir: str) -> dict[str, Any]:
+def _load_cache(output_dir: str) -> tuple[dict[str, Any], str | None]:
     path = _cache_path(output_dir)
     if not os.path.exists(path):
-        return {}
+        return {}, "cache_not_found"
     try:
         with open(path, encoding="utf-8") as handle:
-            return json.loads(handle.read())
+            data = json.load(handle)
+            return (data, None) if isinstance(data, dict) else ({}, "cache_invalid")
     except json.JSONDecodeError:
-        return {}
+        return {}, "cache_invalid"
+    except OSError:
+        return {}, "cache_unreadable"
 
 
 def _write_cache(output_dir: str, cache: dict[str, Any]) -> None:
     path = _cache_path(output_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(cache, indent=2))
+    atomic_json(path, cache)

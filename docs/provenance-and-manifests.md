@@ -102,6 +102,45 @@ inventory reports, HTML, and per-source selections.
 the size of an entire frame cache, model cache, or output directory. Unobserved
 cache behavior is `unknown`, not an assumed cache miss; absent counters are null.
 
+### Deterministic Rating Cache
+
+Core rating caches successful detector/transcript reports, not a frozen scoring
+configuration. Cache hits recompute file scores/reasons with the current weights
+and audio-spike settings; candidate generation and calibration likewise recompute
+technical scores from asset metadata. Changing scoring weights, window/merge
+settings, thresholds, limits or the learned scorer does not require re-decoding
+unchanged source analysis.
+
+The `input_identity_v5` cache policy binds FFmpeg/ffprobe executable paths and
+version lines, detector settings, source size/nanosecond mtime/ctime and file
+identity, the actually selected transcript's path/content SHA-256, and canonical
+signal-artifact paths/content hashes (including direct AI-frame-score API paths).
+Transcript discovery uses the same directory/suffix priority as analysis. A
+new/deleted/replaced selected transcript invalidates; edits to an unselected
+fallback or disabled transcript do not. Earlier detector caches refresh once.
+
+Media identity remains a fast local metadata fingerprint, not a cryptographic
+content checksum. Filesystem timestamp semantics vary; use `--no-cache` when
+metadata cannot be trusted and separately checksum originals for validation.
+Private cache entries contain operational paths and transcript hits; never share
+them as redacted diagnostics. Executable/version identity does not checksum every
+decoder library or guarantee bit-identical output across machines.
+
+`rating_run.json` step and aggregate telemetry include `cache_miss_reasons` counts:
+`cache_disabled`, `cache_not_found`, `cache_unreadable`, `cache_invalid`,
+`cache_entry_invalid`, `analysis_policy_changed`, `source_changed`,
+`decoder_changed`, `transcript_changed`, `signal_artifacts_changed`,
+`analysis_config_changed`, or `cached_analysis_incomplete`. One first applicable
+reason is counted per miss; an all-hit run has an empty map. These fixed codes,
+not filenames or transcript text, survive redaction. The reason map is additive;
+existing hit/miss counters and manifest/schema consumers remain compatible.
+
+Cache publication is atomic. Ordinary source/transcript changes during detector
+execution and signal-artifact changes during loading/analysis make the run
+incomplete and prevent publication of the affected new cache data. Retained old
+entries still need an exact input match on retry. Concurrent file mutation is
+not a supported input workflow; stabilize media and sidecars before analysis.
+
 ### Path Modes
 
 The default `absolute` preserves operational paths and legacy pipeline fields.

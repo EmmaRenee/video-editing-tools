@@ -73,6 +73,11 @@ not operational review/selection artifacts. See
 [provenance and manifests](../../docs/provenance-and-manifests.md) for sidecar
 names, pipeline references, migration, fingerprint methods, and unverified
 editor/model limitations.
+Core rating cache identity now includes decoder versions, selected transcript
+content and canonical signal artifacts; earlier caches refresh once. Cached
+signals are rescored with current weights without decoding again. Read the
+`cache_miss_reasons` counters and metadata-fingerprint limits in the same guide
+before interpreting cache reuse as reproducibility evidence.
 
 ### Quick Start
 
