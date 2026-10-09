@@ -203,20 +203,38 @@ def parse_scene_output(output: str) -> list[float]:
     return sorted(set(values))
 
 
+def _analysis_failed(result: CommandResult) -> bool:
+    if result.returncode != 0:
+        return True
+    # FFmpeg 6.1 can return zero after decoder errors, even with -xerror.
+    log = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
+    levels = {"quiet", "panic", "fatal", "error", "warning", "info", "verbose", "debug", "trace"}
+    for line in log.splitlines():
+        while match := re.match(r"[ \t]*\[([^\]\r\n]+)\][ \t]*", line):
+            label = match.group(1)
+            if label in levels:
+                if label in {"error", "fatal", "panic"}:
+                    return True
+                break
+            line = line[match.end():]
+    return False
+
+
 def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180) -> tuple[list[float], str | None]:
     if not has_command("ffmpeg"):
         return [], "ffmpeg not found"
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
+        "-loglevel",
+        "level+error",
         "-hide_banner",
         "-nostats",
         "-i",
         path_str,
         "-vf",
-        f"select='gt(scene,{threshold})',showinfo",
-        "-vsync",
-        "vfr",
+        f"select='gt(scene,{threshold})',metadata=print:key=lavfi.scene_score:file=-",
         "-f",
         "null",
         "-",
@@ -225,19 +243,18 @@ def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180)
         result = run_command(cmd, timeout=timeout)
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
-    output = f"{result.stdout}\n{result.stderr}"
-    return parse_scene_output(output), None if result.returncode == 0 else "scene detection failed"
+    return parse_scene_output(result.stdout), "scene detection failed" if _analysis_failed(result) else None
 
 
 def parse_silence_output(output: str, duration: float | None = None) -> list[SilenceInterval]:
     intervals: list[SilenceInterval] = []
     open_start: float | None = None
     for line in output.splitlines():
-        start_match = re.search(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)", line)
+        start_match = re.search(r"silence_start[:=]\s*([0-9]+(?:\.[0-9]+)?)", line)
         if start_match:
             open_start = float(start_match.group(1))
             continue
-        end_match = re.search(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)", line)
+        end_match = re.search(r"silence_end[:=]\s*([0-9]+(?:\.[0-9]+)?)", line)
         if end_match:
             end = float(end_match.group(1))
             start = open_start if open_start is not None else end
@@ -261,12 +278,15 @@ def detect_silence(
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
+        "-loglevel",
+        "level+error",
         "-hide_banner",
         "-nostats",
         "-i",
         path_str,
         "-af",
-        f"silencedetect=noise={threshold_db}dB:d={min_duration}",
+        f"silencedetect=noise={threshold_db}dB:d={min_duration},ametadata=print:file=-",
         "-f",
         "null",
         "-",
@@ -275,10 +295,9 @@ def detect_silence(
         result = run_command(cmd, timeout=timeout)
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
-    output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0 and "Output file is empty" not in output:
+    if _analysis_failed(result):
         return [], "silence detection failed"
-    return parse_silence_output(output, duration=duration), None
+    return parse_silence_output(result.stdout, duration=duration), None
 
 
 def parse_audio_metadata_output(output: str) -> list[AudioLevel]:
@@ -310,12 +329,15 @@ def analyze_audio_levels(path: str, timeout: int = 180) -> tuple[list[AudioLevel
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
+        "-loglevel",
+        "level+error",
         "-hide_banner",
         "-nostats",
         "-i",
         path_str,
         "-af",
-        "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level",
+        "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
         "-f",
         "null",
         "-",
@@ -324,7 +346,6 @@ def analyze_audio_levels(path: str, timeout: int = 180) -> tuple[list[AudioLevel
         result = run_command(cmd, timeout=timeout)
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
-    output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0:
+    if _analysis_failed(result):
         return [], "audio level analysis failed"
-    return parse_audio_metadata_output(output), None
+    return parse_audio_metadata_output(result.stdout), None

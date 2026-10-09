@@ -137,6 +137,13 @@ diagnostics; out-of-range known-source selections fail. Mixed-rate or mixed
 DF/NDF EDLs are diagnostic-only, with no importable edit events: use XML.
 Independent-reader tests are not live Resolve validation. Do not claim actual
 relink, timecode, audio or handle fidelity without recorded editor evidence.
+For release qualification, follow `docs/release.md`: audit clean tracked wheel/
+source archives, then run `tests/smoke/installed_workflow.py` with the core-only
+wheel's Python outside the checkout. It uses synthetic media and checks the
+installed CLI, review/approval, planning, rendering, handoff and absent-provider
+diagnostics. A successful smoke is not independent editorial-quality or Resolve
+evidence. Keep version proposals, tagging and publication separate from passing
+CI; do not publish without explicit approval.
 
 ## When to Use
 

@@ -148,6 +148,20 @@ class SignalReport:
     scores: dict[str, float] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    analysis_status: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def analysis_complete(self) -> bool:
+        status = self.analysis_status
+        audio_status = "ok" if self.asset.has_audio else "not_applicable"
+        return (
+            self.asset.status == "ok"
+            and status.get("probe") == "ok"
+            and status.get("scenes") == "ok"
+            and status.get("silence") == audio_status
+            and status.get("audio") == audio_status
+            and status.get("transcript") in {"ok", "not_requested", "unavailable_optional"}
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -162,6 +176,8 @@ class SignalReport:
             "scores": self.scores,
             "reasons": self.reasons,
             "warnings": self.warnings,
+            "analysis_status": self.analysis_status,
+            "analysis_complete": self.analysis_complete,
         }
 
     @classmethod
@@ -181,6 +197,7 @@ class SignalReport:
             scores=dict(data.get("scores", {})),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),
+            analysis_status=dict(data.get("analysis_status", {})),
         )
 
 

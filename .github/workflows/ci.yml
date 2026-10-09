@@ -6,10 +6,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   python-tests:
     name: Python ${{ matrix.python-version }} tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -19,10 +22,12 @@ jobs:
           - "3.12"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -39,38 +44,96 @@ jobs:
 
   package-build:
     name: Package build and wheel smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Build package
         run: |
           python -m pip install --upgrade pip build
-          python -m build src/python --outdir /tmp/videoedit-dist
+          git archive --format=tar --output "$RUNNER_TEMP/videoedit-source.tar" HEAD
+          mkdir "$RUNNER_TEMP/videoedit-source"
+          tar -xf "$RUNNER_TEMP/videoedit-source.tar" -C "$RUNNER_TEMP/videoedit-source"
+          python -m build "$RUNNER_TEMP/videoedit-source/src/python" --outdir "$RUNNER_TEMP/videoedit-dist"
+
+      - name: Audit wheel and source distribution
+        run: |
+          python tests/smoke/audit_distribution.py --checkout . \
+            --wheel "$RUNNER_TEMP"/videoedit-dist/videoedit-*.whl \
+            --sdist "$RUNNER_TEMP"/videoedit-dist/videoedit-*.tar.gz
 
       - name: Smoke test wheel install
         run: |
           python -m venv /tmp/videoedit-wheel-smoke
-          /tmp/videoedit-wheel-smoke/bin/python -m pip install --upgrade pip
-          /tmp/videoedit-wheel-smoke/bin/python -m pip install /tmp/videoedit-dist/videoedit-*.whl
+          /tmp/videoedit-wheel-smoke/bin/python -m pip install --no-index --no-deps "$RUNNER_TEMP"/videoedit-dist/videoedit-*.whl
           /tmp/videoedit-wheel-smoke/bin/videoedit operations
           /tmp/videoedit-wheel-smoke/bin/python -c "import videoedit; print(videoedit.__version__)"
 
-  interchange-oracle:
-    name: Editor interchange readers
-    runs-on: ubuntu-latest
+  wheel-workflow:
+    name: Python ${{ matrix.python-version }} installed workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install base media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: Build a tracked snapshot and audit distributions
+        run: |
+          python -m pip install --upgrade pip build
+          git archive --format=tar --output "$RUNNER_TEMP/videoedit-source.tar" HEAD
+          mkdir "$RUNNER_TEMP/videoedit-source"
+          tar -xf "$RUNNER_TEMP/videoedit-source.tar" -C "$RUNNER_TEMP/videoedit-source"
+          python -m build "$RUNNER_TEMP/videoedit-source/src/python" --outdir "$RUNNER_TEMP/videoedit-dist"
+          python tests/smoke/audit_distribution.py --checkout . \
+            --wheel "$RUNNER_TEMP"/videoedit-dist/videoedit-*.whl \
+            --sdist "$RUNNER_TEMP"/videoedit-dist/videoedit-*.tar.gz
+
+      - name: Install only the wheel in a new environment
+        run: |
+          python -m venv "$RUNNER_TEMP/videoedit-wheel"
+          "$RUNNER_TEMP/videoedit-wheel/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/videoedit-dist/videoedit-*.whl
+
+      - name: Run installed synthetic workflow outside checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/videoedit-wheel/bin/python" -I "$GITHUB_WORKSPACE/tests/smoke/installed_workflow.py" \
+            --checkout "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/videoedit-synthetic"
+
+  interchange-oracle:
+    name: Editor interchange readers
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
