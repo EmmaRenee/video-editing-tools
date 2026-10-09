@@ -149,11 +149,18 @@ timeline frame-rate assumptions, generated timecodes/frame positions, rounding,
 handles, known omitted features, and files produced. Redacted sidecars alias
 source paths, reel names, and labels.
 
-This slice reports existing exporter limitations; it does not change legacy
-EDL/XML generation or certify Resolve compatibility. Current exports assume a
-single nominal FPS, do not apply embedded source start timecode, and omit audio
-tracks/transitions. Legacy frame rounding/carry, XML generator items, mixed-rate
-media, fractional rates, integral plan time strings, and unclamped end handles
-need the real-media/editor validation in V17 #79. `editor_verified` remains
-false. Output generation succeeding is not evidence that relinking, timing,
-or audio survived an editor import.
+Delivery boundaries retain fractional elapsed seconds; numeric selection
+bounds take precedence over truncated display strings. Plans retain their FPS
+and precise endpoint strings. NDF timecode formatting uses exact conventional
+NTSC rates and nearest-frame half-up rounding with correct carry. See
+[selection timing](../src/python/README.md#selection-timing) for parsing rules
+and regenerating legacy files that lost their numeric bounds.
+
+These fixes do not certify Resolve compatibility. Current EDL/XML exports still
+assume a single FPS, do not apply embedded source start timecode, and omit audio
+tracks/transitions. Legacy EDL event columns, XML generator items/floor rounding,
+mixed-rate media, and unclamped end handles need the remaining implementation
+and real-media/editor validation in V17 #79. `editor_verified` remains false.
+Output generation succeeding is not evidence that relinking, timing, or audio
+survived an editor import. Stream-copy extraction is keyframe-dependent even
+when its requested timestamps are precise.

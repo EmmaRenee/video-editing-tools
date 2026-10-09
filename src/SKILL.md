@@ -112,6 +112,18 @@ schemas require upgrade or re-generation. Consult
 `docs/provenance-and-manifests.md` for the complete contract. Generated EDL/XML
 and `editor_verified: false` are not proof of a successful Resolve handoff.
 
+For delivery timing, trust `start_seconds`/`end_seconds` over whole-second display
+timestamps. Current approval and selection writers retain fractional bounds;
+rough-cut planning carries them into extraction and assembly. Reuse precise
+numeric bounds in legacy plans, but regenerate old selections that discarded
+them from the original ratings and saved review decisions. Do not guess the
+missing fractions. `HH:MM:SS.fraction` is elapsed time; `HH:MM:SS:FF` uses
+`source_fps` (or document `fps`), and `HH:MM:SS;FF` supports 29.97/59.94 drop-frame.
+All selection times are media offsets, not embedded source-start timecodes.
+Use render mode for precise cuts; stream copy remains keyframe-dependent.
+Legacy EDL/XML structure, audio, source-start timecodes, mixed-rate relinking and
+live Resolve validation remain explicit V17 gates, not completed by timing tests.
+
 ## When to Use
 
 ```

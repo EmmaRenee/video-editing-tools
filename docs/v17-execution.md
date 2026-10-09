@@ -3,6 +3,85 @@
 Source of truth: milestone 13 and umbrella issue #66. This is implementation
 evidence and design rulings, not a second backlog.
 
+## Selection Timebase Slice
+
+- Previous goal turn: verified progress, PR #93 / `f789585`, 224 local tests
+  and four CI jobs passed. Refreshed milestone 13, #66, #71/#72/#79 and #93
+  review state before branching `codex/v17-editor-handoff`; no merge.
+- Pre-flight: selection writers produce boundaries consumed by planning,
+  extraction, assembly and export. A loader-only fix cannot recover precision
+  already discarded by upstream writers, so each delivery writer is covered.
+- Ruling: repair existing supported timing first; this is not implicit approval
+  of the experimental Shoot/Resolve architecture. Optional SDK/OTIO adaptations
+  remain proposed work, subject to the disposition and PR review gates.
+- Root-cause reproduction: SMPTE frames were ignored, frame rounding dropped
+  second carry, seconds-only subsecond clips collapsed to zero length, approval
+  and selection writers discarded numeric bounds, and plans sent whole-second
+  strings rather than their saved decimal bounds to FFmpeg.
+- Ruling: numeric `start_seconds`/`end_seconds` are authoritative; display text
+  may be truncated. Timing is an elapsed media offset, not an embedded source
+  start timecode. Decimal NTSC aliases use exact rational media rates internally;
+  NDF formatting uses nearest-frame, half-up quantization. Drop-frame input
+  validates skipped labels; output remains explicitly non-drop-frame.
+- Ruling: preserve elapsed precision through delivery instead of rounding each
+  plan to milliseconds. Legacy whole-second-only files cannot be reconstructed;
+  regenerate from original ratings and decisions rather than inventing bounds.
+- Test-first: new checks reproduced timing/validation failures before fixes,
+  then exposed four upstream writers and submillisecond script truncation.
+  An actual 24 fps synthetic FFmpeg render of [0.125, 0.875) independently
+  probes at 18 frames / 0.75 seconds. This is timing evidence, not editor fidelity.
+- Independent read-only feasibility check: Resolve 20.3.2, macOS SDK and native
+  library are installed. Installed manual/SDK document native OTIO import/export.
+  Python OTIO is absent; active Studio/license, external scripting permission
+  and live API connection remain unverified. No app/project/settings changes.
+- Remaining #79 gates: replace legacy EDL event columns and XML generator items;
+  source-start timecodes, media identity/relink, audio, mixed FPS, handles bounds,
+  optional approved adapters and actual real-project editor import verification.
+- Verification: 249 Python 3.12 tests passed, including 25 focused timing tests;
+  wheel/source build and a fresh core-only install passed. Installed CLI approval
+  -> planning -> rendering preserved [0.125, 0.875); independent FFprobe reports
+  18 video frames / 0.75 seconds at 24 fps. AAC audio remains present with its
+  codec padding; this is not an audio-layout/editor fidelity assertion.
+- Installed-wheel doctor, operations, module listing, timing helpers and handoff
+  generation passed. Redacted handoff/assembly diagnostics contain no private
+  runtime root and retain exact requested bounds and `editor_verified: false`.
+  Core imports do not load Torch/OpenCV/Ultralytics/OpenCLIP/Whisper.
+- CodeRabbit reviewed the 13-file slice and raised zero issues. Primary tracked
+  files remain untouched; synthetic inputs and generated delivery outputs live
+  outside Git. No V17 issue is closed based on this timing evidence alone.
+- Fresh agent review identified two timing regressions missed by that review:
+  float-derived half-frame ties and independently rounded EDL record duration.
+  A third finding restored the still-valid legacy fractional XML warning.
+  Regression tests failed on all three before fixes. EDL source/record spans
+  now share one integer-frame cursor, also used by the handoff mapping.
+- Ruling: interpret up to two floating-point ULPs at a half-frame boundary as
+  representation noise, capped at 1e-9 frames. Large integer and truly below-tie
+  tests prevent that tolerance from inventing frames. Invalid overflowing FPS
+  also has a targeted validation failure instead of an overflow traceback.
+- Read-only external SDK probe returned no Resolve connection. No application,
+  project or security setting was changed; no reason for unavailable attachment
+  is inferred. Live-editor evidence remains outstanding.
+- Fresh review also noted the preexisting subsecond target-duration minimum;
+  source-bound/handle/target policy hardening remains separate from this slice.
+- CodeRabbit's second whole-slice review raised one valid XML duration issue:
+  flooring each elapsed duration disagreed with the legacy endpoint frame spans.
+  A failing two-clip regression reproduced 104 declared frames vs 106 on track.
+  The existing track accumulator now supplies the sequence duration; this does
+  not remove legacy generator-item or fractional-rate limitations.
+- Final local verification: 256 tests passed (32 timing checks added to the
+  previous 224), whitespace check, wheel/source build and core-only wheel
+  install passed after fixes. Installed-wheel quantization/EDL/XML assertions
+  passed; the rendered synthetic output remains 18 frames / 0.75 video seconds.
+- Scoped re-review verified the original findings were fixed, then reproduced
+  extreme scientific-notation integer drift and finite frame-total overflow.
+  Regression tests failed before switching to exact integer/binary-float inputs
+  and guarding the ULP conversion. CodeRabbit's third pass raised only a render
+  test portability issue: the test now checks `libx264` and skips unsupported
+  FFmpeg builds, with a simulated missing-encoder regression.
+- Latest verification after those fixes: 258 tests passed, including 34 timing
+  checks; source/wheel build, core-only install and installed numeric boundary
+  checks passed again. No production-quality or live-editor gate is waived.
+
 ## 2026-10-08
 
 - Refreshed issues #66-#81: all remain open. No existing V17 PR.

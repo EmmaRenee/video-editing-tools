@@ -7,7 +7,7 @@ import json
 import os
 from typing import Any
 
-from .timecode import seconds_to_hhmmss, timecode_to_seconds
+from .timecode import frame_rate, seconds_to_timestamp, timecode_to_seconds
 
 
 @dataclass
@@ -29,8 +29,10 @@ def load_selection(path: str, fps: float | None = None, default_fps: float = 30.
     clips = data.get("clips", [])
     if not isinstance(clips, list):
         raise ValueError(f"selection clips must be a list: {path}")
-    resolved_fps = float(fps if fps is not None else data.get("fps", default_fps))
-    normalized = [_normalize_clip(clip, source, index, path) for index, clip in enumerate(clips, 1)]
+    raw_fps = fps if fps is not None else data.get("fps", default_fps)
+    rate = frame_rate(raw_fps)
+    resolved_fps = float(raw_fps) if "/" not in str(raw_fps) else float(rate)
+    normalized = [_normalize_clip(clip, source, index, path, resolved_fps) for index, clip in enumerate(clips, 1)]
     return SelectionDocument(
         path=path,
         project=data.get("project") or data.get("name"),
@@ -50,27 +52,39 @@ def load_selection_data(path: str, fps: float | None = None, default_fps: float 
     }
 
 
-def _normalize_clip(clip: dict[str, Any], default_source: str | None, index: int, path: str) -> dict[str, Any]:
+def _normalize_clip(clip: dict[str, Any], default_source: str | None, index: int, path: str,
+                    fps: float = 30.0) -> dict[str, Any]:
     if not isinstance(clip, dict):
         raise ValueError(f"clip {index} in {path} must be an object")
     source = clip.get("source") or default_source
     if not source or source == "mixed":
         raise ValueError(f"clip {index} in {path} is missing source")
-    start = _clip_time(clip, "start", "start_seconds")
-    end = _clip_time(clip, "end", "end_seconds")
-    if timecode_to_seconds(end) <= timecode_to_seconds(start):
+    try:
+        source_fps = clip.get("source_fps", fps)
+        frame_rate(source_fps)
+        start = clip_seconds(clip, "start", source_fps)
+        end = clip_seconds(clip, "end", source_fps)
+        if start < 0 or end < 0:
+            raise ValueError("times must be non-negative")
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"clip {index} in {path}: {exc}") from exc
+    if end <= start:
         raise ValueError(f"clip {index} in {path} has non-positive duration")
     normalized = dict(clip)
     normalized["source"] = source
-    normalized["start"] = start
-    normalized["end"] = end
+    normalized["start"] = seconds_to_timestamp(start)
+    normalized["end"] = seconds_to_timestamp(end)
+    normalized["start_seconds"] = start
+    normalized["end_seconds"] = end
     normalized.setdefault("label", clip.get("id") or f"clip_{index:03d}")
     return normalized
 
 
-def _clip_time(clip: dict[str, Any], formatted_key: str, seconds_key: str) -> str:
-    if formatted_key in clip and clip[formatted_key] not in (None, ""):
-        return str(clip[formatted_key])
+def clip_seconds(clip: dict[str, Any], key: str, fps: float = 30.0) -> float:
+    """Prefer numeric bounds; legacy display timestamps may be truncated."""
+    seconds_key = f"{key}_seconds"
     if seconds_key in clip:
-        return seconds_to_hhmmss(float(clip[seconds_key]))
-    raise ValueError(f"clip is missing {formatted_key}")
+        return timecode_to_seconds(clip[seconds_key], fps=fps)
+    if key in clip and clip[key] not in (None, ""):
+        return timecode_to_seconds(clip[key], fps=fps)
+    raise ValueError(f"clip is missing {key}")
