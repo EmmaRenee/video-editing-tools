@@ -25,7 +25,7 @@ def generate_edl(clips: list[dict], source_file: str, fps: float = 30.0,
     if not timeline.edl_supported:
         reasons = ", ".join(value for value in timeline.limitations if value.startswith("edl_unsupported_"))
         raise ValueError(f"CMX EDL unsupported ({reasons.replace('_', '-')}); use XML")
-    drop = bool(timeline.clips and timeline.clips[0].source.drop_frame)
+    drop = timeline.edl_drop_frame
     tc = drop_timecode if drop else frames_to_timecode
     lines = ["TITLE: Video Editing Export", f"FCM: {'DROP FRAME' if drop else 'NON-DROP FRAME'}", ""]
     for clip in timeline.clips:

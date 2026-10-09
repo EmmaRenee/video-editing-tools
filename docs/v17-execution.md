@@ -57,6 +57,14 @@ evidence and design rulings, not a second backlog.
   handles, approved optional adapters, representative independent three-profile
   quality/ablation evidence, and final RC qualification. No issue closes from
   format-reader or synthetic evidence alone; nothing is merged or published.
+- Draft PR #95 from #94 passed all five CI jobs on its initial revision,
+  including independent interchange readers. CodeRabbit reviewed all 17 files
+  and raised one minor record-day calculation issue. A failing long-duration
+  mixed-rate regression reproduced it; record-day limits now use the same
+  supported timeline DF/NDF mode as the EDL writer and mapping. Latest local
+  suite: 322 tests; 30 independent-reader checks passed. Wheel/source build,
+  core-only reinstall and the three installed-CLI runtime exports/readback
+  checks passed again. Final committed re-review/CI remain pending.
 
 ## Selection Timebase Slice
 

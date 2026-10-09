@@ -13,6 +13,7 @@ from .source_info import HandoffMediaInfo, probe_handoff_media
 from .timecode import frame_rate, frames_to_timecode, seconds_to_frames, timecode_to_seconds
 
 HANDOFF_SCHEMA = "videoedit.handoff.v1"
+DROP_RATES = {Fraction(30000, 1001), Fraction(60000, 1001)}
 
 
 def _valid_xml_text(value: str) -> bool:
@@ -31,7 +32,7 @@ def xml_rate(rate: Fraction) -> tuple[int, bool]:
 
 def drop_timecode(frames: int, rate: Fraction) -> str:
     nominal = round(rate)
-    if rate not in {Fraction(30000, 1001), Fraction(60000, 1001)}:
+    if rate not in DROP_RATES:
         raise ValueError("drop-frame timecode requires 30000/1001 or 60000/1001")
     dropped = nominal // 15
     ten_minutes = nominal * 600 - dropped * 9
@@ -84,11 +85,16 @@ class HandoffTimeline:
     def edl_supported(self) -> bool:
         return not any(value.startswith("edl_unsupported_") for value in self.limitations)
 
+    @property
+    def edl_drop_frame(self) -> bool:
+        return bool(self.clips and self.clips[0].source.drop_frame and self.rate in DROP_RATES)
+
     def to_dict(self, handles: float = 0.0) -> dict:
         rows = []
         for clip in self.clips:
             source = clip.source
             tc = drop_timecode if source.drop_frame else frames_to_timecode
+            record_tc = drop_timecode if self.edl_drop_frame else frames_to_timecode
             rows.append({"source": source.path, "reel": source.reel, "label": clip.label,
                          "file_id": source.file_id, "event": clip.event,
                          "pathurl": Path(source.path).as_uri(), "metadata_status": source.info.status,
@@ -102,8 +108,8 @@ class HandoffTimeline:
                          "record_in_frames": clip.record_in, "record_out_frames": clip.record_out,
                          "edl_in": tc(source.timecode_frames + clip.source_in, source.rate) if self.edl_supported else None,
                          "edl_out": tc(source.timecode_frames + clip.source_out, source.rate) if self.edl_supported else None,
-                         "edl_record_in": tc(clip.record_in, self.rate) if self.edl_supported else None,
-                         "edl_record_out": tc(clip.record_out, self.rate) if self.edl_supported else None,
+                         "edl_record_in": record_tc(clip.record_in, self.rate) if self.edl_supported else None,
+                         "edl_record_out": record_tc(clip.record_out, self.rate) if self.edl_supported else None,
                          "timeline_start_seconds": clip.record_in / float(self.rate)})
         return {"schema_version": HANDOFF_SCHEMA, "timeline_fps": self.requested_fps,
                 "timeline_rate": str(self.rate), "duration_frames": self.duration_frames,
@@ -222,7 +228,8 @@ def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
         if clip.get("compound") or clip.get("effects"):
             warn("compound_or_effects_not_exported", event)
         source_day = round(source.rate) * 86400 - (round(source.rate) // 15) * 1296 if source.drop_frame else round(source.rate) * 86400
-        record_day = round(rate) * 86400 - (round(rate) // 15) * 1296 if source.drop_frame else round(rate) * 86400
+        record_drop = rows[0].source.drop_frame and rate in DROP_RATES
+        record_day = round(rate) * 86400 - (round(rate) // 15) * 1296 if record_drop else round(rate) * 86400
         if event > 999 or source.timecode_frames + source_out >= source_day or cursor >= record_day:
             warn("edl_unsupported_event_or_timecode_range", event)
     if len({clip.source.drop_frame for clip in rows}) > 1:

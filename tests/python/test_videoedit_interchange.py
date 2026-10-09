@@ -274,6 +274,13 @@ class InterchangeTests(unittest.TestCase):
         self.assertFalse(timeline.edl_supported)
         self.assertIn("edl_unsupported_event_or_timecode_range", timeline.limitations)
 
+    def test_integer_timeline_day_limit_does_not_use_source_drop_formula(self):
+        info = media(timecode="00:00:00;00")
+        info.duration = 90000
+        timeline, _ = self.timeline([{**self.clips[0], "start_seconds": 0, "end_seconds": 86380}], 24, info)
+        self.assertIn("edl_unsupported_mixed_rate", timeline.limitations)
+        self.assertNotIn("edl_unsupported_event_or_timecode_range", timeline.limitations)
+
     def test_cli_surfaces_partial_and_non_importable_edl_without_changing_return_contract(self):
         from videoedit.cli import main
         selection = self.root / "approved.json"
