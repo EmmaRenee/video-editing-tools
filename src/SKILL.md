@@ -78,6 +78,17 @@ Do not commit frames or absolute-path manifests. Consult `docs/frame-cache.md`
 for interrupted locks, strict content hashing, CLI failure behavior, and honest
 performance/quality verification. Do not infer improved selections from speed alone.
 
+For native OpenCLIP, reuse the same score output to reuse inference. Model weights
+load only for the first usable miss; all-hit runs load none. An existing local
+`--pretrained /path/to/model.safetensors` also avoids OpenCLIP/Pillow imports on
+all-hit runs, while Torch device checks and checkpoint hashing remain. Read
+`models_initialized`, `model_initialization_attempts`, and
+`model_initialization_seconds` as per-invocation counters, not total run cost;
+unknown custom-provider measurements are null. Native Torch/Pillow version
+binding invalidates older score caches once. Do not replace model files during
+execution or reuse a loaded encoder after replacing its checkpoint. Preserve
+private media and compare actual scores/coverage, not just wall time.
+
 ### Provenance And Run Diagnostics
 
 Use `videoedit signals objects footage/ --backend native --model /path/to/yolo26n.pt --output analysis/visual_objects.json --timeout 3600`

@@ -43,6 +43,14 @@ frames; extraction and inference telemetry have separate scopes. See
 [shared frames](../../docs/frame-cache.md) for atomic publication, invalidation,
 strict hashes, interrupted-worker recovery, privacy, and performance limits.
 
+OpenCLIP loads one model on the first usable inference miss and none on a fully
+cached run. Passing an existing local checkpoint with `--pretrained` also avoids
+OpenCLIP/Pillow imports on all-hit runs; Torch device discovery and checkpoint
+hashing still run. Native score fingerprints bind Torch/Pillow versions, so
+older caches recompute once while existing artifact readers remain compatible.
+See [model lifecycle](../../docs/frame-cache.md#telemetry-and-providers) for scoped
+initialization counters, named-pretrained startup costs, and weight-mutation checks.
+
 `videoedit signals objects footage/ --backend native --model /path/to/yolo26n.pt
 --output analysis/visual_objects.json` opts into continuous local YOLO scans.
 It loads one model for all sources and none on an all-cache-hit run. Read

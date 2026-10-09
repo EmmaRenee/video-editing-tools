@@ -81,14 +81,31 @@ AI keeps top-level cache counters scoped to inference, with nested
 `telemetry.frame_sampling` counters for extraction. `--no-cache` bypasses AI
 score reuse, not the shared frame cache. Different profiles can reuse compatible
 images while recomputing their own scores. Injected custom samplers remain
-compatible but report extraction telemetry as `not_instrumented`. OpenCLIP model
-initialization still occurs once per invocation, including a warm inference run;
-no zero-startup-cost claim is made.
+compatible but report extraction telemetry as `not_instrumented`. Native OpenCLIP
+creates its model only on the first usable inference miss, at most once per
+encoder lifetime. An all-hit or no-frame run initializes no model. A failed
+initialization is not retried for every source. Successful initialization count,
+attempts, and seconds are invocation deltas in top-level telemetry; unsupported
+custom encoders report null, not an assumed zero. Initialization time includes
+the deferred imports, model setup, and local-checkpoint integrity checks, not
+earlier metadata/device discovery or all inference time.
+
+Existing local files passed through `--pretrained /path/to/model.safetensors`
+also avoid OpenCLIP/Pillow imports on all-hit runs. Torch still imports to check
+the currently selected MPS/CUDA/CPU device, FFmpeg/ffprobe identity is checked,
+and the local checkpoint is hashed. Named pretrained catalogs still import
+OpenCLIP to establish repository identity. No zero-startup-cost claim is made.
+Torch/Pillow versions now join the inference fingerprint; older native score
+caches recompute once. Local weights are checked before/after loading and must
+match the recorded provenance; changing weights cannot publish valid scores
+under an old identity. Do not replace checkpoints during a run or reuse a loaded
+encoder after replacing its checkpoint.
 
 Existing OCR/face rating semantics remain source-wide; timestamps and coverage
 do not silently change scoring policy. Positive hits are not proof of detection
 accuracy. Native YOLO's continuous video decoding does not consume this uniform
-sample cache; it remains a separate lifecycle/coverage task.
+sample cache; it has a separate complete-result cache and timing/lifecycle
+counters. See [native object scanning](object-scanning.md).
 
 ## Pipelines
 

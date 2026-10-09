@@ -56,10 +56,17 @@ contain source paths and content needed for editing; keep those private.
   Rating input loaders and benchmark provider checks enforce the same contract.
 
 OpenCLIP source-cache signatures include provenance identity. Model revision,
-checkpoint, library version, prompt profile, and sampling changes invalidate
+checkpoint, library versions, prompt profile, and sampling changes invalidate
 those cached scores. Per-source `cache_status` and aggregate hit/miss telemetry
-identify reuse versus newly computed scores. This is not yet shared-frame or
-model-lifecycle optimization; those remain separate measured V17 work.
+identify reuse versus newly computed scores. Native OpenCLIP records Torch and
+Pillow versions in `provider_metadata.runtime_libraries` and binds them in the
+configuration hash alongside its OpenCLIP version. Earlier native score caches
+without that runtime binding recompute once; their artifacts remain readable.
+The float32 policy is explicit and checked against the loaded model. A local
+checkpoint must remain stable across loading and match the artifact's model
+checksum before scores can be accepted. Full cache hits skip model loading;
+device/library/decoder/checkpoint identity checks remain. See
+[model lifecycle and telemetry](frame-cache.md#telemetry-and-providers).
 
 Benchmark comparisons expose `provider_changes`. Matching hashes with known
 model revision/checksum can be marked equivalent; changed identities and
