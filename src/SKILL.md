@@ -277,6 +277,15 @@ python src/python/rate_footage.py footage/ --output analysis/
 
 ### 2a. Optional vision and signal fusion
 
+Run `videoedit doctor` and `videoedit modules doctor` first. The Haar/HOG
+face/person provider requires OpenCV 4.8 through 4.x; install the `advanced`
+extra or, in the chosen environment, `python -m pip install "opencv-python>=4.8,<5"`.
+Do not combine OpenCV wheel variants. Metadata checks do not prove runtime
+success; inspect the generated artifact's status and coverage. An initialization
+failure is `unavailable`, not a negative detection, and does not extract frames.
+OCR and YOLO remain usable independently. Preserve existing user environments
+when testing a dependency repair; see `INSTALL.md`.
+
 Use this only when optional providers should influence B-roll or rough-cut selection. `vision_reel` runs object, OCR, and face/person providers first, then rates with the generated artifacts:
 
 ```bash

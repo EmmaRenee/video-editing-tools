@@ -1015,6 +1015,8 @@ def cmd_modules_doctor(args: argparse.Namespace) -> int:
             for check in group["checks"]:
                 marker = "ok" if check["available"] else "missing"
                 print(f"  {marker:7} {check['name']}")
+                if check.get("message"):
+                    print(f"    {check['message']}")
     if report.get("external_errors"):
         print("external module errors:")
         for error in report["external_errors"]:

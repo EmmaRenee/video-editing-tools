@@ -228,8 +228,8 @@ class FrameCacheTests(unittest.TestCase):
                 patch.object(advanced, "_opencv_face_detector", return_value=None), \
                 patch.object(advanced, "_opencv_person_detector", return_value=object()):
             face = advanced.detect_face_person_presence(str(self.source), str(self.root / "face.json"))
-        self.assertEqual(face["status"], "error")
-        self.assertEqual(json.loads((self.root / "face.json").read_text())["coverage"]["sources"][0]["processed_units"], 0)
+        self.assertEqual(face["status"], "unavailable")
+        self.assertEqual(json.loads((self.root / "face.json").read_text())["hits"], [])
 
     def test_ai_native_sampler_reuses_frames_across_profiles_without_reusing_inference(self):
         from videoedit import ai

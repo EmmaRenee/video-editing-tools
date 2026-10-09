@@ -173,6 +173,27 @@ Expected `videoedit doctor` result:
 - Optional `whisper`, `tesseract`, `yolo`, and `cv2` are `ok` when full extras are installed.
 - Optional `open_clip`, `torch`, and `PIL` are reported by `videoedit modules doctor` for the `advanced.ai` module when AI extras are installed.
 
+The Haar/HOG face/person provider requires OpenCV **4.8 through 4.x**. The
+`advanced` extra constrains `opencv-python<5`: OpenCV 5 moves the legacy detector
+APIs and does not provide the required cascade assets in the base wheel. Do not
+install multiple OpenCV wheel variants in one environment; they share `cv2`.
+`doctor` and `modules doctor` inspect wheel metadata without importing OpenCV;
+an `ok` dependency check is not a successful detector run. Custom OpenCV builds
+without wheel metadata are marked unverified. If an existing environment uses
+OpenCV 5, use a separate environment or explicitly repair that environment:
+
+```bash
+python -m pip install "opencv-python>=4.8,<5"
+python -m pip check
+videoedit doctor
+videoedit signals face-person footage/ --output analysis/face_person_presence.json
+```
+
+Remove conflicting OpenCV wheel variants before installing the chosen one.
+Failed detector initialization writes an actionable `status: unavailable`
+artifact before frame extraction; OCR and object detection remain independent.
+See the upstream [OpenCV 4 to 5 migration guide](https://github.com/opencv/opencv/wiki/OpenCV-4-to-5-migration).
+
 Optional YOLO smoke test outside the repository:
 
 ```bash

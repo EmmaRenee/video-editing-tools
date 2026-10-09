@@ -13,7 +13,7 @@ import re
 from typing import Any, Callable
 
 from .cloud import cloud_diagnostics
-from .diagnostics import resolve_command
+from .diagnostics import opencv_face_person_status, resolve_command
 
 
 CONFIG_DIR = ".videoedit"
@@ -700,6 +700,8 @@ def _command_status(name: str) -> dict[str, Any]:
 
 
 def _python_module_status(name: str) -> dict[str, Any]:
+    if name == "cv2":
+        return opencv_face_person_status()
     spec = importlib.util.find_spec(name)
     return {"name": name, "type": "python_module", "available": bool(spec), "path": getattr(spec, "origin", None)}
 
