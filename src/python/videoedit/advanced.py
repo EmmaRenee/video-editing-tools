@@ -13,6 +13,7 @@ import os
 import re
 import time
 from typing import Any
+from uuid import uuid4
 
 from .diagnostics import resolve_command
 from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
@@ -309,7 +310,26 @@ def detect_visual_objects(
     max_detections: int = 5000,
     segment_merge_gap: float = 1.0,
     timeout: int = 180,
+    backend: str = "cli",
+    device: str = "cpu",
+    cache: bool = True,
+    source_hash: str = "metadata",
+    image_size: int = 640,
+    max_objects_per_frame: int = 300,
+    model_factory: Any = None,
+    metadata_probe: Any = None,
+    provider_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if backend == "native":
+        from .objects import detect_objects_native
+        return detect_objects_native(input_path, output, model=model, confidence=confidence,
+                    max_detections=max_detections, segment_merge_gap=segment_merge_gap, timeout=timeout,
+                    device=device, cache=cache, source_hash=source_hash, image_size=image_size,
+                    max_objects_per_frame=max_objects_per_frame, model_factory=model_factory,
+                    metadata_probe=metadata_probe, provider_identity=provider_identity)
+    if backend != "cli":
+        raise ValueError("object backend must be cli or native")
+    started = time.monotonic()
     output = os.fspath(output)
     detector = command or resolve_command("yolo")
     if not detector or (command and not has_command(detector)):
@@ -322,12 +342,12 @@ def detect_visual_objects(
         return {"output": output, "count": 0, "status": payload["status"]}
 
     output_dir = os.path.dirname(output) or "."
-    project_dir = os.path.abspath(os.path.join(output_dir, "object_detector"))
+    project_dir = os.path.abspath(os.path.join(output_dir, "object_detector", uuid4().hex))
     warnings: list[str] = []
     runs = []
     sources = []
-    for source in _input_files(input_path):
-        name = _safe_slug(os.path.splitext(os.path.basename(source))[0])
+    for source_index, source in enumerate(_input_files(input_path), 1):
+        name = f"{source_index:06d}_{_safe_slug(os.path.splitext(os.path.basename(source))[0])}"
         expected_run = os.path.join(project_dir, name)
         command_args = [
             detector,
@@ -344,10 +364,11 @@ def detect_visual_objects(
             command_args.insert(2, f"model={model}")
         if confidence is not None:
             command_args.append(f"conf={confidence}")
-        result = run_command(
-            command_args,
-            timeout=timeout,
-        )
+        try:
+            result = run_command(command_args, timeout=timeout)
+        except (OSError, TimeoutError) as exc:
+            from .ffmpeg import CommandResult
+            result = CommandResult(command_args, 1, "", str(exc))
         if result.returncode == 0:
             run_dir = _resolve_yolo_run_dir(expected_run)
             asset = probe_media(source, timeout=min(timeout, 60))
@@ -360,6 +381,22 @@ def detect_visual_objects(
                 segment_merge_gap=segment_merge_gap,
             )
             warnings.extend(source_summary.pop("warnings"))
+            progress = [(int(frame), int(total)) for frame, total in re.findall(
+                r"\(frame\s+(\d+)/(\d+)\)", result.stdout + "\n" + result.stderr)]
+            processed = sorted({frame for frame, total in progress if 0 < frame <= total})
+            totals = {total for _frame, total in progress}
+            expected = max(totals, default=0)
+            coverage_ok = bool(expected) and len(totals) == 1 and processed == list(range(1, expected + 1))
+            intervals = []
+            if asset.fps and asset.fps > 0:
+                for frame in processed:
+                    start, end = (frame - 1) / asset.fps, min(asset.duration, frame / asset.fps)
+                    if end > start:
+                        intervals.append([round(start, 6), round(end, 6)])
+            source_summary.update(status="ok", coverage={"source": source,
+                "status": "partial", "expected_units": expected, "processed_units": len(processed),
+                "intervals": intervals, "frame_progress_verified": coverage_ok,
+                "timing_verified": False, "timing_basis": "nominal_fps_cli"})
             sources.append(source_summary)
             runs.append(
                 {
@@ -372,7 +409,12 @@ def detect_visual_objects(
                 }
             )
         else:
-            warnings.append(f"object detection failed for {source}: {(result.stderr or result.stdout).strip()}")
+            message = f"object detection failed for {source}: {(result.stderr or result.stdout).strip()}"
+            warnings.append(message)
+            sources.append({"source": source, "status": "error", "detection_count": 0,
+                "detections": [], "class_counts": [], "segments": [], "warnings": [message],
+                "coverage": {"source": source, "status": "error", "expected_units": 0,
+                             "processed_units": 0, "intervals": []}})
 
     detection_count = sum(int(item.get("detection_count", 0)) for item in sources)
     classes = sorted({item["class_name"] for source in sources for item in source.get("class_counts", [])})
@@ -382,7 +424,7 @@ def detect_visual_objects(
         "provider": detector,
         "model": model,
         "confidence": confidence,
-        "status": "ok" if runs else "error",
+        "status": "ok" if runs and len(runs) == len(sources) else "partial" if runs else "error",
         "input": os.fspath(input_path),
         "count": len(runs),
         "detection_count": detection_count,
@@ -391,6 +433,13 @@ def detect_visual_objects(
         "runs": runs,
         "sources": sources,
         "warnings": warnings,
+        "coverage": {"schema_version": COVERAGE_SCHEMA, "scope": "temporal",
+                     "sources": [source["coverage"] for source in sources]},
+        "telemetry": {"elapsed_seconds": round(time.monotonic() - started, 6),
+                      "cache_hits": 0, "cache_misses": 0, "cache_scope": "none",
+                      "command_invocation_attempts": len(sources), "models_initialized": None,
+                      "decoded_frames": None,
+                      "reported_frame_results": sum(source["coverage"]["processed_units"] for source in sources)},
     }
     _attach_signal_metadata(payload, "visual_objects", os.path.basename(detector), input_path, sources,
                             sampling={"kind": "all_frames", "confidence": confidence,
@@ -398,6 +447,7 @@ def detect_visual_objects(
                             model_name=os.path.basename(model) if model else None,
                             checkpoint=model if model and os.path.isfile(model) else None)
     _write_json(output, payload)
+    payload["telemetry"]["artifact_bytes"] = os.path.getsize(output)
     return {
         "output": output,
         "count": len(runs),
@@ -406,6 +456,7 @@ def detect_visual_objects(
         "segment_count": segment_count,
         "status": payload["status"],
         "warnings": warnings,
+        "telemetry": payload["telemetry"],
     }
 
 

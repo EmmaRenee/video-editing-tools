@@ -181,7 +181,12 @@ cd /tmp/videoedit-yolo-smoke
 yolo predict model=yolo26n.pt source=https://ultralytics.com/images/bus.jpg project=/tmp/videoedit-yolo-smoke name=predict exist_ok=True
 ```
 
-The first YOLO run downloads model weights. Keep YOLO `runs/` output outside the repo or rely on `.gitignore`.
+The explicit standalone `yolo` smoke command above may download model weights.
+Keep YOLO `runs/` output outside the repo or rely on `.gitignore`. Package
+`signals objects --backend native --model /path/to/yolo26n.pt` instead requires
+an already-downloaded local checkpoint and never substitutes an implicit model
+download. See [continuous local object scanning](docs/object-scanning.md) for
+cache checks, CFR coverage, CPU/MPS limits and time budgets.
 
 ## Use The Pipeline
 

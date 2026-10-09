@@ -51,7 +51,8 @@ Supported provider IDs are `openclip`, `yolo`, `ocr`, `face_person`, `motorsport
 coverage; native OCR/face also count successfully processed negative frames.
 Heuristics and learned scoring disclose candidate-only coverage. Judge artifacts
 are annotation-only. Legacy vision artifacts lacking processing coverage are not
-valid ablations; native YOLO coverage instrumentation is still pending.
+valid ablations. Opt-in native YOLO verifies continuous CFR timing/frame totals
+and counts successful negative frames; uncertain scans are not valid ablations.
 Do not fabricate coverage from positive detections.
 
 Recommendations are evidence summaries, not automatic enablement/default changes.
@@ -78,6 +79,19 @@ for interrupted locks, strict content hashing, CLI failure behavior, and honest
 performance/quality verification. Do not infer improved selections from speed alone.
 
 ### Provenance And Run Diagnostics
+
+Use `videoedit signals objects footage/ --backend native --model /path/to/yolo26n.pt --output analysis/visual_objects.json --timeout 3600`
+for continuous local YOLO processing. Require an existing checkpoint; do not
+implicitly download weights. One model serves all sources; complete cache hits
+skip model initialization and decoding. `--no-cache` recomputes inference/timing;
+`--source-hash sha256` verifies content instead of trusting size/mtime alone.
+Read negative-frame coverage and probe/inference counters separately. VFR,
+unknown timing, failed or interrupted scans cannot prove complete coverage.
+The compatible default command bridge isolates label folders but its nominal
+timing remains provisional. CPU/float32 is default; MPS is explicit and needs
+actual performance/quality validation. Use `docs/object-scanning.md` for budgets,
+cache integrity, telemetry and privacy. Speed alone does not establish AI value.
+
 
 Use `--manifest-paths redacted` on `rate`, `run`, `review-assets`, `roughcut plan`,
 `assemble`, and `export-edl` when preparing shareable diagnostics. Use `relative`

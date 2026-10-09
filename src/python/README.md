@@ -43,6 +43,12 @@ frames; extraction and inference telemetry have separate scopes. See
 [shared frames](../../docs/frame-cache.md) for atomic publication, invalidation,
 strict hashes, interrupted-worker recovery, privacy, and performance limits.
 
+`videoedit signals objects footage/ --backend native --model /path/to/yolo26n.pt
+--output analysis/visual_objects.json` opts into continuous local YOLO scans.
+It loads one model for all sources and none on an all-cache-hit run. Read
+[object scanning](../../docs/object-scanning.md) for cold timestamp verification,
+native/legacy coverage limits, budgets, strict hashes and telemetry.
+
 ### V17 Provenance And Diagnostics
 
 Signal/AI/scorer artifacts gain `videoedit.provenance.v1` model and provider
@@ -496,7 +502,7 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 - `detect_motorsports_events` reads `ratings.json` and writes `motorsports_events.json`.
 - `cluster_transcript_topics` reads transcript hits from `ratings.json` and writes `topic_clusters.json`.
 - `detect_ocr_signage` writes `ocr_signage.json`; it runs only when FFmpeg and Tesseract are installed.
-- `detect_visual_objects` writes `visual_objects.json`; it runs only when an object detector command such as `yolo` is available. YOLO labels are parsed into bounded `detections`, `class_counts`, and time-based `segments`.
+- `detect_visual_objects` writes `visual_objects.json`; the default command bridge parses YOLO labels. Opt-in `backend: native` uses the optional Ultralytics library and existing local weights, with verified continuous coverage and complete-only caching. Both keep bounded `detections`, `class_counts`, and time-based `segments`.
 - `detect_face_person_presence` writes `face_person_presence.json`; it runs only when FFmpeg and OpenCV are installed.
 - `score_ai_frames` writes `ai_frame_scores.json`; it runs only when OpenCLIP, Torch, Pillow, and FFmpeg are installed.
 

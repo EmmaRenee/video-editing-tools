@@ -224,6 +224,72 @@ evidence and design rulings, not a second backlog.
   Core import loaded no Torch, OpenCLIP, OpenCV, Ultralytics, or Whisper modules.
   All private runtime artifacts stayed outside Git and the primary checkout.
 
+## Native YOLO Lifecycle Slice
+
+- Previous turn: verified progress, PR #92 / `dcf3d86`, 196 local tests,
+  clean-wheel checks and four CI jobs passed; unmerged. Refreshed #66/#76/#77,
+  milestone 13 and prerequisite review feedback before continuing.
+- Reused the isolated clone on `codex/v17-yolo-lifecycle`; primary experimental
+  files and private footage remain untouched. Execution/TDD is inline because no
+  subagent tool is available; the GitHub issues remain the specification.
+- Pre-flight: native visual-object artifacts must preserve the existing scorer's
+  `sources`/`segments` contract and supply #76 processing evidence; #77 cache
+  identity must bind media, checkpoint, library/decoder and inference settings.
+- Ruling: retain the legacy command backend and add an explicit native backend
+  using one Ultralytics instance per invocation. Native weights must already
+  exist locally; no silent model download or new mandatory dependency.
+- Ruling: continuous native video inference is not replaced with easier sparse
+  frame sampling. Count successful negative frames independently of detections;
+  unknown frame totals or timing cannot claim production temporal coverage.
+- Ruling: only complete source scans with validated cache integrity are reusable;
+  failures/interruption/source mutation remain diagnostic outputs. Model warmup
+  is avoided entirely for an all-cache-hit invocation, never reported as done
+  unless the model really initialized.
+- Work: native continuous processing, coverage/provenance/cache instrumentation,
+  command-run isolation and honest diagnostics, actual local-checkpoint cold/warm
+  and repeated-inference measurements, then whole-branch review and CI.
+- Native scans now verify decoded presentation timestamps in a separate cold
+  ffprobe pass rather than inferring CFR from matching nominal FPS fields. VFR,
+  bad results, missing totals/timing, interruption and changed inputs cannot
+  publish complete caches. CPU/float32 is explicit; optional MPS needs evidence.
+- Tests cover negative scans, incomplete/invalid frames, source/checkpoint/config/
+  provider invalidation, cache corruption, interrupts, same-basename isolation,
+  pipeline/CLI wiring, bounded online summaries and legacy top-500 tie parity.
+  Actual FFmpeg fractional-FPS/nonzero-origin timing passed. 219 tests passed.
+- Private real-media runtime, two 2-second 640px/10fps derivatives with identical
+  basenames: Ultralytics 8.4.90 / Torch 2.12.1 / OpenCV 5.0.0.93 / ffprobe 9.0.1.
+  One model, 40 native frames plus 40 timing-probe frames, 80 detections; cold
+  14.64s (13.0s model/import/font setup), warm 0.06s (two hits/no model/no decode),
+  recomputed inference 0.97s. Source/coverage/detection summaries matched exactly.
+  Final implementation rerun after import/font hydration: cold 2.37s, warm 0.05s,
+  recomputed 0.96s; same counts/coverage, one initialization attempt on misses and
+  none on hits. Failed model initialization is not retried for every source.
+  The legacy command bridge produced identical class/segment totals; its timing
+  coverage remains provisional. All three cache states yielded the same two
+  rating candidates; these short-window candidates were cuts, not quality wins.
+- The original cloud-venv check stalled reading Torch Python files (confirmed by
+  process sampling), was interrupted, and was replaced with the existing local
+  model environment. No primary files/environments were edited or models fetched.
+- These are single-machine runtime/parity checks, not independent provider
+  accuracy or representative quality improvements. Private sources, weights,
+  scripts and artifacts stayed under the local runtime directory/outside Git.
+- Whole-diff CodeRabbit review raised three issues. Red tests (including a real
+  fractional-FPS MKV) reproduced the CFR quantization bug, missing-stream
+  diagnostics and quoted cache booleans. Fixes account for container timebase
+  ticks without accepting coarse clocks or real cadence changes; native/AI
+  operations parse true/false explicitly. An author-review corruption test also
+  proved malformed cache indices could abort scans; they now trigger recompute.
+- Final corrected-diff CodeRabbit review raised zero issues. 224 Python 3.12
+  tests passed; wheel/source builds and a clean core-only wheel's doctor,
+  operations and modules commands passed. Missing native dependencies were
+  diagnosed without importing Torch/OpenCLIP/OpenCV/Ultralytics/Whisper.
+- Post-review actual runtime rerun: cold 3.66s, warm 0.05s, recomputed 0.92s;
+  same 80 detections/40 frames and exact source/coverage parity. Repeat legacy
+  summary and rating-candidate comparisons also passed. Warm-up, OS and font
+  caches affect these timings; none establishes independent selection quality.
+- Independent three-profile annotations, detector-budget work, editor handoff and
+  final RC qualification remain full-goal gates, not replaced by runtime smoke.
+
 ## Remaining Execution Order
 
 Follow the dependencies recorded on GitHub: protocol and runner (#73/#74),
