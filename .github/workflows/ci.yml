@@ -61,3 +61,21 @@ jobs:
           /tmp/videoedit-wheel-smoke/bin/python -m pip install /tmp/videoedit-dist/videoedit-*.whl
           /tmp/videoedit-wheel-smoke/bin/videoedit operations
           /tmp/videoedit-wheel-smoke/bin/python -c "import videoedit; print(videoedit.__version__)"
+
+  interchange-oracle:
+    name: Editor interchange readers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install independent interchange readers
+        run: python -m pip install opentimelineio==0.18.1 otio-fcp-adapter==1.0.0 otio-cmx3600-adapter==1.0.0
+
+      - name: Verify CMX and FCP XML contracts
+        run: python -m unittest discover -s tests/python -p test_videoedit_interchange.py

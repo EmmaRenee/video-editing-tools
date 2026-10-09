@@ -37,6 +37,9 @@ This toolkit provides FFmpeg-based video editing workflows with optional PowerSh
 Delivery selections and rough-cut plans preserve fractional seconds through
 approval, extraction and rendering. See [Selection Timing](src/python/README.md#selection-timing)
 for numeric-bound precedence, SMPTE parsing and remaining editor-handoff limits.
+Exports use standard CMX/FCP7 media structures and native source metadata; see
+[Editor Handoff](docs/editor-handoff.md) for mixed-rate EDL limits, audio support,
+offline fallbacks and the still-required live Resolve validation.
 
 **What it does:**
 - Cut dead air and silence from footage

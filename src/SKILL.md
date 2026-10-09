@@ -121,8 +121,15 @@ missing fractions. `HH:MM:SS.fraction` is elapsed time; `HH:MM:SS:FF` uses
 `source_fps` (or document `fps`), and `HH:MM:SS;FF` supports 29.97/59.94 drop-frame.
 All selection times are media offsets, not embedded source-start timecodes.
 Use render mode for precise cuts; stream copy remains keyframe-dependent.
-Legacy EDL/XML structure, audio, source-start timecodes, mixed-rate relinking and
-live Resolve validation remain explicit V17 gates, not completed by timing tests.
+Export probes each unique source for native FPS, embedded start timecode and
+audio. Standard CMX events and FCP7 media clip items share one normalized timeline;
+XML includes linked mono/stereo audio from a single supported stream. Inspect
+`*_handoff.json` and `docs/editor-handoff.md` for the relink/frame mapping and
+limitations. Missing media or unsupported layouts/effects yield partial
+diagnostics; out-of-range known-source selections fail. Mixed-rate or mixed
+DF/NDF EDLs are diagnostic-only, with no importable edit events: use XML.
+Independent-reader tests are not live Resolve validation. Do not claim actual
+relink, timecode, audio or handle fidelity without recorded editor evidence.
 
 ## When to Use
 
@@ -836,10 +843,13 @@ Prefer `videoedit export-edl analysis/selections/*.json --output edl/` or `video
 
 **EDL format example:**
 ```
-001  001  V     C        00:00:12:00 00:00:15:30 00:00:00:00 00:00:03:30
-* | FROM CLIP NAME: race_raw.mp4
-002  002  V     C        00:00:45:00 00:00:46:30 00:00:03:30 00:00:05:00
-* | FROM CLIP NAME: race_raw.mp4
+TITLE: Manual 30 FPS Example
+FCM: NON-DROP FRAME
+
+001  CAMERA1  V     C        00:00:12:00 00:00:15:15 00:00:00:00 00:00:03:15
+* FROM CLIP NAME: race_raw.mp4
+002  CAMERA1  V     C        00:00:45:00 00:00:46:15 00:00:03:15 00:00:05:00
+* FROM CLIP NAME: race_raw.mp4
 ```
 
 **Manual JSON shape:**

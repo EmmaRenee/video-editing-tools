@@ -3,6 +3,61 @@
 Source of truth: milestone 13 and umbrella issue #66. This is implementation
 evidence and design rulings, not a second backlog.
 
+## Source-Aware Interchange Slice
+
+- Previous turn: PR #94 / `7e928e3`, 258 tests and four CI jobs passed;
+  unmerged. Refreshed milestone 13, #66/#79 and PR review state before branching
+  `codex/v17-interchange-exports`. Primary experiments/media remain untouched.
+- Ruling: correct the existing supported CMX/FCP7 exports without promoting the
+  alternate Shoot/Resolve architecture. OTIO adapters are independent validation
+  readers only; runtime dependencies remain FFmpeg/ffprobe plus the standard
+  library. Optional runtime OTIO/Resolve integration remains separately gated.
+- A shared versioned native-rate timeline now feeds EDL, XML and handoff mapping.
+  Unique local sources are probed once for rational FPS, video-stream extent,
+  dimensions, embedded timecode and audio. Reel identities are bounded and
+  collision-checked; XML file URLs are escaped/encoded and repeated files use
+  references. Known mono/stereo streams generate linked XML audio tracks.
+- Standard single-line CMX event columns and FCM replace the legacy EDL layout;
+  FCP7 media clip/file items replace generator items. XML separates native
+  source in/out from timeline start/end, including fractional and mixed rates.
+  VLC playlists now use numeric seconds without six-digit precision loss.
+- Missing metadata remains unknown/partial. Unsupported mixed-rate or mixed
+  DF/NDF EDLs contain no edit events and are explicitly diagnostic-only; XML is
+  still emitted. CLI warnings surface partial/non-importable exports. Effects,
+  retiming, compound clips, multistream/surround audio and video-only EDL limits
+  remain explicit rather than silently claimed as supported.
+- Test-first checks reproduced invalid EDL columns, unescaped XML, missing audio,
+  absent source TC/rate mapping, lossy playlists, URI privacy leakage, ambiguous
+  relative relinks and invalid XML text before fixes.
+- Independent review reproduced four further defects: file-level SMPTE parsing
+  before native-rate probing, container duration extending video, a rounded EOF
+  overrun and DF midnight overflow. New red regressions passed after targeted
+  fixes. Mixed-rate SMPTE file bounds without `source_fps` are rejected rather
+  than silently reinterpreting legacy loader semantics; numeric bounds win.
+- Actual synthetic MOVs use built-in MPEG-4/PCM: 24 fps/stereo/nonzero NDF, and
+  30000/1001 fps/mono/nonzero DF. A separate 1s-video/3s-audio MOV proves audio
+  cannot extend the video selection. No hard `libx264` dependency for these tests.
+- An available private 300-second interview probes at 30000/1001, embedded DF TC,
+  4096x2160 and stereo PCM. Two engineering windows exported as 127 record frames
+  and two linked audio tracks. Integer and fractional synthetic exports contain
+  54 and 60 record frames respectively. These are engineering windows, not human
+  editorial ground truth. Two old approved-file references are missing; neither
+  the originals nor their historical selection files were altered or guessed.
+- Independent OTIO 0.18.1, FCP adapter 1.0.0 and CMX adapter 1.0.0 read the three
+  actual generated exports. URLs/source timecode/ranges and mono/stereo track
+  structure matched, with XML native endpoints within one frame. This does not
+  prove editor codec support, real-media relink, audio fidelity or live import.
+- Local verification: 321 Python 3.12 tests passed, one optional-reader skip in
+  the core-only environment; all 29 focused interchange tests passed separately
+  with the readers installed. Whitespace, wheel/source build and fresh core-only
+  wheel doctor/operations/modules checks passed. Installed-wheel CLI exported
+  all three runtime fixtures. A separate CI reader job was added; no heavy
+  provider was made a core dependency. Private outputs remain outside Git.
+- Remaining #79/#81/full-goal gates: actual Resolve import/relink/timecode/audio/
+  handles, approved optional adapters, representative independent three-profile
+  quality/ablation evidence, and final RC qualification. No issue closes from
+  format-reader or synthetic evidence alone; nothing is merged or published.
+
 ## Selection Timebase Slice
 
 - Previous goal turn: verified progress, PR #93 / `f789585`, 224 local tests

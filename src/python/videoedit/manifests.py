@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from ._version import __version__
 from .provenance import canonical_hash, file_sha256, library_version, public_provenance, validate_artifact
@@ -188,6 +189,15 @@ class RunManifest:
                         return os.path.relpath(Path(value).resolve(), self.path.parent.resolve())
                     except ValueError:
                         return value
+                if isinstance(value, str) and value.startswith("file:///"):
+                    uri = urlparse(value)
+                    path = unquote(uri.path)
+                    if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+                        path = path[1:]
+                    try:
+                        return os.path.relpath(Path(path).resolve(), self.path.parent.resolve())
+                    except ValueError:
+                        return value
                 return value
             return relative(self.data)
         payload = {key: self.data[key] for key in ("schema_version", "operation", "path_mode", "environment", "started", "status", "complete", "config_sha256", "telemetry")}
@@ -211,9 +221,15 @@ class RunManifest:
                 payload[key] = key
         if "handoff" in self.data:
             handoff = dict(self.data["handoff"])
-            handoff["sources"] = [{**{key: value for key, value in row.items() if key not in {"source", "reel", "label"}},
+            safe_fields = {"event", "metadata_status", "source_fps", "source_timecode", "source_timecode_frames",
+                           "duration_seconds", "width", "height", "start_seconds", "end_seconds",
+                           "xml_in_frames", "xml_out_frames", "record_in_frames", "record_out_frames",
+                           "edl_in", "edl_out", "edl_record_in", "edl_record_out", "timeline_start_seconds"}
+            handoff["sources"] = [{**{key: value for key, value in row.items() if key in safe_fields},
                                    "source": f"source_{index:03d}", "reel": f"reel_{index:03d}"}
                                   for index, row in enumerate(handoff.get("sources", []), 1)]
+            handoff["warning_count"] = len(handoff.get("warnings", []))
+            handoff["warnings"] = []
             payload["handoff"] = handoff
         return payload
 

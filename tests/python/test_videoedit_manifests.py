@@ -210,10 +210,10 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(len(paths), 4)
         path = output / "approved_handoff.json"
         data = json.loads(path.read_text())
-        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["status"], "partial")
         self.assertEqual(data["handoff"]["timeline_fps"], 29.97)
-        self.assertEqual(data["handoff"]["rounding"]["xml"], "floor_frames")
-        self.assertIn("audio_tracks_not_exported", data["handoff"]["omitted_features"])
+        self.assertEqual(data["handoff"]["rounding"]["xml"], "nearest_frame_half_up")
+        self.assertIn("source_metadata_unavailable", data["handoff"]["limitations"])
         self.assertFalse(data["handoff"]["editor_verified"])
         self.assertNotIn(str(self.root), path.read_text())
 

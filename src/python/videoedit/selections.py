@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from typing import Any
@@ -17,6 +17,7 @@ class SelectionDocument:
     source: str | None
     clips: list[dict[str, Any]]
     fps: float
+    raw_clips: list[dict[str, Any]] = field(default_factory=list)
 
 
 def load_selection(path: str, fps: float | None = None, default_fps: float = 30.0) -> SelectionDocument:
@@ -39,6 +40,7 @@ def load_selection(path: str, fps: float | None = None, default_fps: float = 30.
         source=source,
         clips=normalized,
         fps=resolved_fps,
+        raw_clips=clips,
     )
 
 

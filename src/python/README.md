@@ -506,11 +506,15 @@ rounded elapsed durations, so source and record frame counts agree.
 
 The planner retains the timeline `fps` and fractional endpoints, including
 handles and target-duration trimming. FFmpeg `copy` remains keyframe-dependent;
-use `--render-mode render` for precise cuts. This timing fix does not certify
-editor interchange: legacy EDL event columns/XML generator items, source-start
-timecodes, audio tracks, mixed-rate relinking and handles beyond known media
-duration still require the remaining V17 handoff work. Inspect handoff sidecars
-and require actual editor validation before claiming production readiness.
+use `--render-mode render` for precise cuts. Export now probes each unique local
+source, applies embedded start timecode in standard CMX events, and writes FCP7
+media clip items with native FPS, escaped paths and linked mono/stereo audio.
+Known source bounds are checked. Mixed-rate or mixed DF/NDF EDLs are explicitly
+diagnostic-only; XML retains the separate source and record rates. Missing media
+and unsupported layouts/effects remain partial, not silently complete.
+See [Editor Handoff](../../docs/editor-handoff.md) for the mapping, offline
+fallback and independent-reader checks. Actual Resolve relink/timecode/audio/
+handle validation remains required before claiming production readiness.
 
 ### Content Planning
 
