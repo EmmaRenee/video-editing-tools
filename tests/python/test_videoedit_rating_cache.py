@@ -410,6 +410,54 @@ class RatingCacheTests(unittest.TestCase):
         self.assertEqual(self.manifest()["status"], "partial")
         self.assertEqual(json.loads(self.cache_path().read_text()), {})
 
+    def test_source_change_during_final_step_recording_prevents_cache_commit(self):
+        from videoedit.manifests import RunManifest
+
+        record = RunManifest.record_step
+
+        def mutate_source(manifest, *args, **kwargs):
+            self.source.write_bytes(b"changed during final step recording")
+            return record(manifest, *args, **kwargs)
+
+        with patch.object(RunManifest, "record_step", mutate_source):
+            report = self.rate()
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertEqual(self.manifest()["telemetry"]["cache_misses"], 1)
+        self.assertFalse(self.cache_path().exists())
+
+    def test_source_change_during_final_manifest_write_prevents_cache_commit(self):
+        from videoedit.manifests import RunManifest
+
+        write = RunManifest.write
+
+        def mutate_source(manifest):
+            if manifest.data["status"] == "ok":
+                self.source.write_bytes(b"changed during final manifest write")
+            return write(manifest)
+
+        with patch.object(RunManifest, "write", mutate_source):
+            report = self.rate()
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertFalse(self.cache_path().exists())
+
+    def test_oversized_cached_numeric_metadata_reanalyzes_instead_of_overflowing(self):
+        from videoedit.provenance import canonical_hash
+
+        self.rate()
+        for refresh_digest in (False, True):
+            with self.subTest(refresh_digest=refresh_digest):
+                cache = json.loads(self.cache_path().read_text())
+                entry = next(iter(cache.values()))
+                entry["report"]["asset"]["duration"] = 10 ** 500
+                if refresh_digest:
+                    entry["report_sha256"] = canonical_hash(entry["report"])
+                self.cache_path().write_text(json.dumps(cache))
+                report = self.rate()
+                self.assertEqual(report.signals[0].asset.duration, 12)
+                self.assert_miss_reason("cache_entry_invalid")
+
 
 if __name__ == "__main__":
     unittest.main()

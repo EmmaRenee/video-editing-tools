@@ -143,7 +143,9 @@ existing hit/miss counters and manifest/schema consumers remain compatible.
 New cache data is published atomically only after healthy analysis, output
 generation and successful manifest writing. Partial runs may prune invalidated
 old entries, but do not publish newly computed entries. Every source/transcript,
-including cache hits, is checked again after the scan and after output generation.
+including cache hits, is checked again after the scan, after output generation,
+and after final manifest I/O immediately before cache publication. Late changes
+refresh report health and the manifest without double-counting cache telemetry.
 Observed source/transcript or artifact mutation makes the run incomplete. Artifact
 mutation preserves the old cache unchanged; retained entries still need an exact
 input match on retry. These checks are not a filesystem snapshot or a multi-file

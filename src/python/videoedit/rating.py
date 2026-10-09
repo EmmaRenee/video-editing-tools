@@ -39,29 +39,47 @@ def run_rating(
         try:
             report, cache = _run_rating(footage_dir, output_dir, config, stats, manifest)
             if cache.revalidate(config):
-                report.summary["analysis_failed"] = sum(not item.analysis_complete for item in report.signals)
-                write_rating_json(report, os.path.join(output_dir, "ratings.json"))
-                write_review_markdown(report, os.path.join(output_dir, "review.md"))
-                write_review_html(report, os.path.join(output_dir, "review.html"))
+                _refresh_rating_health(report, output_dir, manifest)
         except BaseException as exc:
             manifest.record_step("rating", "rate_footage", config.to_dict(), {"telemetry": stats},
                                  time.monotonic() - manifest.started,
                                  status="interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error", error=exc)
             raise
-        result = {"ratings": os.path.join(output_dir, "ratings.json"), "inventory": os.path.join(output_dir, "inventory.json"),
-                  "candidates": os.path.join(output_dir, "candidates.csv"), "review": os.path.join(output_dir, "review.md"),
-                  "telemetry": stats, "summary": report.summary}
-        failures = report.summary["analysis_failed"]
-        if failures:
-            manifest.data["partial"] = True
-            manifest.data["warnings"].append(f"media_analysis_failed:{failures}")
-        manifest.record_step("rating", "rate_footage", config.to_dict(), result, time.monotonic() - manifest.started)
+        _record_rating_step(report, output_dir, config, stats, manifest)
     try:
+        if cache.revalidate(config):
+            _refresh_rating_health(report, output_dir, manifest)
+            # Replace the step so a late stability failure does not double-count cache telemetry.
+            manifest.data["steps"].pop()
+            _record_rating_step(report, output_dir, config, stats, manifest)
+            manifest.__exit__(None, None, None)
         cache.publish(output_dir, config, complete=manifest.data["complete"])
     except BaseException as exc:
         manifest.__exit__(type(exc), exc, exc.__traceback__)
         raise
     return report
+
+
+def _refresh_rating_health(report: RatingReport, output_dir: str, manifest: RunManifest) -> None:
+    report.summary["analysis_failed"] = sum(not item.analysis_complete for item in report.signals)
+    write_rating_json(report, os.path.join(output_dir, "ratings.json"))
+    write_review_markdown(report, os.path.join(output_dir, "review.md"))
+    write_review_html(report, os.path.join(output_dir, "review.html"))
+    manifest.add_outputs([os.path.join(output_dir, "review.html")])
+
+
+def _record_rating_step(report: RatingReport, output_dir: str, config: AnalysisConfig,
+                        stats: dict[str, Any], manifest: RunManifest) -> None:
+    result = {"ratings": os.path.join(output_dir, "ratings.json"), "inventory": os.path.join(output_dir, "inventory.json"),
+              "candidates": os.path.join(output_dir, "candidates.csv"), "review": os.path.join(output_dir, "review.md"),
+              "telemetry": stats, "summary": report.summary}
+    failures = report.summary["analysis_failed"]
+    if failures:
+        manifest.data["partial"] = True
+        warning = f"media_analysis_failed:{failures}"
+        if warning not in manifest.data["warnings"]:
+            manifest.data["warnings"].append(warning)
+    manifest.record_step("rating", "rate_footage", config.to_dict(), result, time.monotonic() - manifest.started)
 
 
 @dataclass
@@ -140,7 +158,7 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
                 if reason is None:
                     _validate_cached_report(cached, key)
                     _rescore_report(cached_report, config)
-            except (AttributeError, KeyError, TypeError, ValueError):
+            except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
                 reason = "cache_entry_invalid"
         if reason is None:
             stats["cache_hits"] += 1
@@ -785,6 +803,9 @@ def _rescore_report(report: SignalReport, config: AnalysisConfig) -> None:
 
 def _validate_cached_report(cached: dict[str, Any], source: str) -> None:
     data = cached["report"]
+    # Integrity is a corruption check, not authentication of an untrusted cache.
+    if cached.get("report_sha256") != canonical_hash(data):
+        raise ValueError("cached detector report integrity mismatch")
     lists = ("scene_changes", "silence_intervals", "audio_levels", "transcript_hits", "object_hits",
              "advanced_hits", "reasons", "warnings")
     if (any(not isinstance(data.get(key), list) for key in lists)
@@ -801,9 +822,6 @@ def _validate_cached_report(cached: dict[str, Any], source: str) -> None:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError("cached numeric metadata is invalid")
-    # Integrity is a corruption check, not authentication of an untrusted cache.
-    if cached.get("report_sha256") != canonical_hash(data):
-        raise ValueError("cached detector report integrity mismatch")
 
 
 def _file_signature(path: str, config: AnalysisConfig, *, decoder: dict[str, Any] | None = None,
