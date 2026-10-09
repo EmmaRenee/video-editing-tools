@@ -50,6 +50,7 @@ desktop.ini
 *.vtt
 *.pt
 *.pth
+.object_cache/
 bus.jpg
 analysis/
 output/

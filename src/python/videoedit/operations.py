@@ -119,7 +119,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "normalize_audio", "Normalize audio to target loudness", op_normalize_audio)
     _register(registry, enabled_only, cwd, "concatenate_videos", "Concatenate extracted clips with FFmpeg", op_concatenate_videos)
     _register(registry, enabled_only, cwd, "detect_ocr_signage", "Optionally detect OCR/signage text from sampled frames", op_detect_ocr)
-    _register(registry, enabled_only, cwd, "detect_visual_objects", "Optionally run an external object detector", op_detect_objects)
+    _register(registry, enabled_only, cwd, "detect_visual_objects", "Optionally run CLI or native local YOLO detection", op_detect_objects)
     _register(registry, enabled_only, cwd, "score_ai_frames", "Score sampled frames against AI profile prompts", op_score_ai_frames)
     _register(registry, enabled_only, cwd, "detect_face_person_presence", "Optionally detect face/person presence from sampled frames", op_face_person)
     _register(registry, enabled_only, cwd, "detect_motorsports_events", "Infer motorsports event moments from ratings", op_motorsports_events)
@@ -525,6 +525,12 @@ def op_detect_objects(context: dict[str, Any], params: dict[str, Any]) -> dict[s
         max_detections=int(params.get("max_detections", 5000)),
         segment_merge_gap=float(params.get("segment_merge_gap", 1.0)),
         timeout=int(params.get("timeout", 180)),
+        backend=params.get("backend", "cli"),
+        device=params.get("device", "cpu"),
+        cache=_boolean(params.get("cache", True), "cache"),
+        source_hash=params.get("source_hash", "metadata"),
+        image_size=int(params.get("image_size", 640)),
+        max_objects_per_frame=int(params.get("max_objects_per_frame", 300)),
     )
     context["visual_objects"] = output
     return result
@@ -540,7 +546,7 @@ def op_score_ai_frames(context: dict[str, Any], params: dict[str, Any]) -> dict[
         sample_interval=float(params.get("sample_interval", 10.0)),
         max_frames_per_file=int(params.get("max_frames_per_file", 8)),
         min_score=float(params.get("min_score", 0.22)),
-        cache=bool(params.get("cache", True)),
+        cache=_boolean(params.get("cache", True), "cache"),
         model=params.get("model", "ViT-B-32"),
         pretrained=params.get("pretrained", "laion2b_s34b_b79k"),
         timeout=int(params.get("timeout", 180)),
@@ -761,6 +767,14 @@ def _clip_source(clip: dict[str, Any], default_source: str | None, index: int) -
 
 def _safe_slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_") or "item"
+
+
+def _boolean(value: Any, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+        return value.strip().lower() == "true"
+    raise ValueError(f"{name} must be a boolean (true or false)")
 
 
 def _selection_paths(value: Any) -> list[str]:

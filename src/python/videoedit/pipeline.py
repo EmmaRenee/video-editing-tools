@@ -58,6 +58,7 @@ OPERATION_OUTPUTS = {
         "segment_count",
         "status",
         "warnings",
+        "telemetry",
     },
     "detect_face_person_presence": {"output", "count", "status", "warnings", "telemetry"},
     "score_ai_frames": {"output", "status", "sources", "frames", "warnings", "telemetry"},
@@ -411,6 +412,7 @@ def _planned_result(
             "segment_count": "unknown",
             "status": "planned",
             "warnings": [],
+            "telemetry": {},
         }
     if operation_name == "detect_face_person_presence":
         return {"output": _json_output_plan(output, "face_person_presence.json"), "count": "unknown", "status": "planned", "warnings": []}

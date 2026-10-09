@@ -79,8 +79,10 @@ not successful processing or reusable successful cache entries.
 
 OpenCLIP, native OCR/face-person, motorsports, and topics now emit coverage.
 Legacy vision artifacts lacking it remain compatible with rating but are
-**not evaluated** as production ablations. Native YOLO coverage instrumentation
-is still pending. See [shared frames](frame-cache.md) for extraction reuse and
+**not evaluated** as production ablations. Opt-in [native YOLO](object-scanning.md)
+checks decoded CFR timestamps/frame totals and counts negative frames; uncertain
+scans and nominal-timing command-bridge outputs remain provisional.
+See [shared frames](frame-cache.md) for extraction reuse and
 negative-frame accounting. Do not infer
 full processing from detections or manually declare it. Missing dependencies
 remain optional; diagnostics name generation commands and `videoedit modules doctor`.

@@ -17,6 +17,11 @@ current provider limitations, and recommendation evidence gates.
 `videoedit signals sample-frames` and `--frame-cache` for native OCR/face/AI
 providers, with integrity checks, measured reuse, and negative-scan coverage.
 
+[Continuous local YOLO scanning](docs/object-scanning.md) adds opt-in
+`signals objects --backend native --model /path/to/yolo26n.pt`, one model per
+invocation, verified CFR/negative-frame coverage and complete-only source caching.
+The existing command bridge remains the default; AI providers remain optional.
+
 [Provider provenance and execution manifests](docs/provenance-and-manifests.md)
 record model identity, input/output fingerprints, timing, cache reuse, failures,
 and handoff assumptions. Use `--manifest-paths redacted` on `rate`, `run`,

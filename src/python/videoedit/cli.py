@@ -183,6 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
     signals_objects.add_argument("--command")
     signals_objects.add_argument("--confidence", type=float)
     signals_objects.add_argument("--max-detections", type=int, default=5000)
+    signals_objects.add_argument("--backend", choices=("cli", "native"), default="cli")
+    signals_objects.add_argument("--device", choices=("cpu", "mps"), default="cpu")
+    signals_objects.add_argument("--no-cache", action="store_true", help="Recompute native object results")
+    signals_objects.add_argument("--source-hash", choices=("metadata", "sha256"), default="metadata")
+    signals_objects.add_argument("--image-size", type=int, default=640)
+    signals_objects.add_argument("--max-objects-per-frame", type=int, default=300)
+    signals_objects.add_argument("--timeout", type=int, default=180, help="Per-source budget; cooperative for native inference")
     signals_objects.set_defaults(func=cmd_signals_objects)
     signals_ocr = signals_sub.add_parser("ocr", help="Run OCR/signage detection")
     signals_ocr.add_argument("input")
@@ -639,9 +646,16 @@ def cmd_signals_objects(args: argparse.Namespace) -> int:
         model=args.model,
         confidence=args.confidence,
         max_detections=args.max_detections,
+        backend=args.backend,
+        device=args.device,
+        cache=not args.no_cache,
+        source_hash=args.source_hash,
+        image_size=args.image_size,
+        max_objects_per_frame=args.max_objects_per_frame,
+        timeout=args.timeout,
     )
     print(json.dumps(result, indent=2))
-    return 0
+    return 0 if result.get("status") == "ok" else 1
 
 
 def cmd_signals_ocr(args: argparse.Namespace) -> int:
