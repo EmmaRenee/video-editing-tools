@@ -122,6 +122,31 @@ class DistributionAuditTests(unittest.TestCase):
         self.wheel_files["videoedit-0.5.0.dist-info/entry_points.txt"] = b"[console_scripts]\nvideoedit = wrong:main\n"
         self.rejected("invalid_console_entrypoint")
 
+    def test_extra_entrypoints_and_groups_are_rejected(self):
+        for extra in (b"private_experiment = videoedit.cli:main\n", b"[videoedit.modules]\nprivate = videoedit.cli:main\n",
+                      b"[DEFAULT]\nprivate = videoedit.cli:main\n"):
+            with self.subTest(extra=extra):
+                self.wheel_files["videoedit-0.5.0.dist-info/entry_points.txt"] = b"[console_scripts]\nvideoedit = videoedit.cli:main\n" + extra
+                self.rejected("invalid_console_entrypoint")
+
+    def test_zip_member_types_and_directory_duplicates_are_rejected(self):
+        for mode, payload, duplicate in ((0o120777, b"target", False), (0o100644, b"payload", False),
+                                         (0o040755, b"", True)):
+            with self.subTest(mode=mode, duplicate=duplicate):
+                self.archives()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    with zipfile.ZipFile(self.wheel, "a") as handle:
+                        member = zipfile.ZipInfo("private-experiment/")
+                        member.create_system = 3
+                        member.external_attr = mode << 16
+                        handle.writestr(member, payload)
+                        if duplicate:
+                            handle.writestr(member, payload)
+                result = self.audit()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("duplicate_archive_member" if duplicate else "unsupported_archive_member", result.stderr)
+
     def test_license_bytes_are_verified(self):
         self.wheel_files["videoedit-0.5.0.dist-info/licenses/LICENSE"] = b"wrong license"
         self.rejected("license_bytes_mismatch")

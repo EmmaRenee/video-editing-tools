@@ -9,6 +9,7 @@ from email import message_from_bytes
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import stat
 import subprocess
 import sys
 import tarfile
@@ -42,15 +43,20 @@ def _safe_name(name: str) -> None:
 
 def _wheel_files(path: Path) -> dict[str, bytes]:
     rows = {}
+    seen = set()
     with zipfile.ZipFile(path) as archive:
         for member in archive.infolist():
             _safe_name(member.filename)
-            if member.is_dir():
-                continue
-            if member.filename in rows:
+            name = member.filename.rstrip("/")
+            if name in seen:
                 raise ValueError("duplicate_archive_member")
-            mode = member.external_attr >> 16
-            if mode & 0o170000 == 0o120000:
+            seen.add(name)
+            member_type = stat.S_IFMT(member.external_attr >> 16)
+            if member.is_dir():
+                if member_type not in {0, stat.S_IFDIR} or member.file_size:
+                    raise ValueError("unsupported_archive_member")
+                continue
+            if member_type not in {0, stat.S_IFREG}:
                 raise ValueError("unsupported_archive_member")
             rows[member.filename] = archive.read(member)
     return rows
@@ -58,10 +64,18 @@ def _wheel_files(path: Path) -> dict[str, bytes]:
 
 def _sdist_files(path: Path, prefix: str) -> dict[str, bytes]:
     rows = {}
+    seen = set()
     with tarfile.open(path, "r:gz") as archive:
         for member in archive.getmembers():
             _safe_name(member.name)
+            if member.name in seen:
+                raise ValueError("duplicate_archive_member")
+            seen.add(member.name)
+            if member.name != prefix and not member.name.startswith(prefix + "/"):
+                raise ValueError("unexpected_sdist_root")
             if member.isdir():
+                if member.size:
+                    raise ValueError("unsupported_archive_member")
                 continue
             if not member.isfile():
                 raise ValueError("unsupported_archive_member")
@@ -115,9 +129,11 @@ def audit_distribution(checkout: Path, wheel: Path, sdist: Path) -> dict:
         raise ValueError("metadata_version_mismatch")
     if not {metadata_dir + name for name in ("WHEEL", "RECORD")} <= set(wheel_rows):
         raise ValueError("missing_wheel_metadata")
-    entrypoints = configparser.ConfigParser()
+    entrypoints = configparser.ConfigParser(interpolation=None)
+    entrypoints.optionxform = str
     entrypoints.read_string(wheel_rows.get(metadata_dir + "entry_points.txt", b"").decode())
-    if entrypoints.get("console_scripts", "videoedit", fallback="") != "videoedit.cli:main":
+    mapping = {section: dict(entrypoints.items(section)) for section in entrypoints.sections()}
+    if entrypoints.defaults() or mapping != {"console_scripts": {"videoedit": "videoedit.cli:main"}}:
         raise ValueError("invalid_console_entrypoint")
     if wheel_rows.get(metadata_dir + "licenses/LICENSE") != sources.get("LICENSE"):
         raise ValueError("license_bytes_mismatch")

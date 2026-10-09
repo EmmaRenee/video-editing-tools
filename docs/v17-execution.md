@@ -515,6 +515,14 @@ evidence and design rulings, not a second backlog.
   release or publication. Independent three-profile ground truth, provider
   quality/cost ablations, approved experimental dispositions and actual original-
   media Resolve relink/timecode/audio/boundary/handle verification remain gates.
+- Independent review reproduced four qualification gaps: recovered decoder errors
+  were still cacheable, review rows could hide missing media, extra wheel console
+  scripts were accepted, and ZIP directory-name handling bypassed link checks.
+  Red tests and actual proxy fault injection verified them before repair. Analysis
+  now stops on decoding errors, the smoke checks real review files/manifests and
+  corrupted-media retries, and the auditor validates full entrypoint mappings and
+  member types/duplicate names before skipping directories. Green initial CI or a
+  zero-issue automated review did not override independently reproduced failures.
 
 ## Remaining Execution Order
 

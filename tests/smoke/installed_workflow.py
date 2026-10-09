@@ -106,12 +106,38 @@ def run_workflow(output: Path, checkout: Path) -> dict:
             "--max-candidates", "5", "--manifest-paths", "redacted")
         assert read(analysis / "rating_run.json")["telemetry"]["cache_hits"] == 1, "warm_cache_not_reused"
 
+        damaged_dir = output / "damaged_footage"
+        damaged_dir.mkdir()
+        damaged = damaged_dir / "damaged.mov"
+        packets = json.loads(run("probe_packets", ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                                   "-show_packets", "-show_entries", "packet=pos,size", "-of", "json",
+                                                   str(source)]))["packets"]
+        packet = packets[len(packets) // 2]
+        pos, size = int(packet["pos"]), int(packet["size"])
+        data = bytearray(source.read_bytes())
+        data[pos:pos + size] = b"\0" * size
+        damaged.write_bytes(data)
+        damaged_analysis = output / "damaged_analysis"
+        for name in ("rate_damaged", "retry_damaged"):
+            cli(name, "rate", str(damaged_dir), "--output", str(damaged_analysis), "--transcript", "off",
+                "--manifest-paths", "redacted")
+            damaged_run = read(damaged_analysis / "rating_run.json")
+            assert damaged_run["status"] == "partial" and not damaged_run["complete"], "damaged_rating_certified"
+            assert damaged_run["telemetry"]["cache_hits"] == 0, "damaged_rating_cached"
+
         review = output / "review"
         cli("review", "review-assets", str(analysis / "ratings.json"), "--output", str(review),
             "--proxy", "--max-items", "5", "--manifest-paths", "redacted")
         assert (review / "contact_sheet.html").is_file(), "contact_sheet_missing"
         assets = read(review / "review_assets.json")
         assert assets["clips"], "review_empty"
+        review_run = read(review / "review_run.json")
+        assert review_run["status"] == "ok" and review_run["complete"] and not assets["warnings"], "review_incomplete"
+        for row in assets["clips"]:
+            for key in ("thumbnail", "proxy"):
+                assert row.get(key), f"review_{key}_missing"
+                media = review / row[key]
+                assert media.is_file() and media.stat().st_size > 0, f"review_{key}_unwritten"
         decisions = review / "review_decisions.json"
         decisions.write_text(json.dumps({"decisions": [
             {"id": row["id"], "decision": "approve" if index == 0 else "reject", "order": index + 1,
@@ -152,9 +178,12 @@ def run_workflow(output: Path, checkout: Path) -> dict:
         cli("optional_absent", "signals", "face-person", str(footage), "--output", str(absent), expected=1)
         assert read(absent)["status"] == "unavailable", "missing_provider_not_diagnosed"
         report.update(status="ok", complete=True, video_frames=30, video_duration_seconds=1.0,
-                      audio_channels=2, rating_candidates=len(ratings["candidates"]), optional_absent="verified")
+                      audio_channels=2, rating_candidates=len(ratings["candidates"]), optional_absent="verified",
+                      corrupted_media_retry="verified", review_media="verified")
     except BaseException as error:
         report.update(status="error", error_type=type(error).__name__)
+        if isinstance(error, AssertionError):
+            report["failed_check"] = str(error)
         raise
     finally:
         report["elapsed_seconds"] = round(time.monotonic() - started, 6)

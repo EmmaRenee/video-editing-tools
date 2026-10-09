@@ -209,6 +209,7 @@ def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180)
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
         "-hide_banner",
         "-nostats",
         "-i",
@@ -259,6 +260,7 @@ def detect_silence(
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
         "-hide_banner",
         "-nostats",
         "-i",
@@ -274,7 +276,7 @@ def detect_silence(
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
     output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0 and "Output file is empty" not in output:
+    if result.returncode != 0:
         return [], "silence detection failed"
     return parse_silence_output(output, duration=duration), None
 
@@ -308,6 +310,7 @@ def analyze_audio_levels(path: str, timeout: int = 180) -> tuple[list[AudioLevel
     path_str = os.fspath(path)
     cmd = [
         "ffmpeg",
+        "-xerror",
         "-hide_banner",
         "-nostats",
         "-i",

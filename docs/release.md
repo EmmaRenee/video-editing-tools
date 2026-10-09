@@ -52,7 +52,9 @@ This is a POSIX-shell developer procedure; Windows virtual environments use
 containing experiments. The auditor refuses modified or untracked `src/python`
 files. It checks runtime/compatibility file bytes against Git, rejects unexpected,
 duplicate, traversal and symlink archive members, and verifies package version,
-console entrypoint and license. It does not replace human privacy/license review.
+the complete approved entrypoint mapping and license. Archive types and duplicate
+names are checked before skipping directories. This does not replace human
+privacy/license review.
 
 The installed smoke requires FFmpeg/ffprobe and FFmpeg's `libx264`/AAC encoders
 for the existing rendered-assembly command. It refuses source/editable imports,
@@ -62,12 +64,17 @@ modules, inventory, cold/warm rating, review thumbnails/proxies, explicit review
 decisions, approval, bounded planning, rendering, EDL/XML export, preset
 validation/dry-run and unavailable-provider diagnostics. It checks 30 video
 frames / 1.0 second, stereo stream presence and non-zero XML source timecode.
+Review must have a complete manifest and actual nonempty thumbnail/proxy files.
 Rating must have complete detector status and sampled audio, not merely a
 successful process exit or fallback candidate. A successful negative detector
 result is distinct from a failed detector. `ratings.json` adds per-source
 `analysis_status`/`analysis_complete` and summary `analysis_failed`; failures mark
 the rating run partial and are not cached as successes. Older signal artifacts
 remain readable, but cached reports without completion evidence are reanalyzed.
+Analysis uses FFmpeg's error-fatal mode so decoding errors cannot be concealed by
+a successful exit after partial recovery; the installed smoke corrupts a video
+packet and verifies partial status with no cache reuse on retry. Caches created
+before the fatal-decode policy are invalidated too, even if they recorded success.
 `workflow/smoke_report.json` records versions, per-step results/timing and scoped
 storage use; stdout/stderr logs remain beside it. Failures produce an incomplete
 report after workflow startup. No private media or human annotations are used.

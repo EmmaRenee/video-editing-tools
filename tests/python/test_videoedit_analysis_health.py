@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src" / "python"))
 
 from videoedit.config import AnalysisConfig
-from videoedit.ffmpeg import detect_scene_changes
+from videoedit.ffmpeg import CommandResult, detect_scene_changes, detect_silence
 from videoedit.models import AudioLevel, MediaAsset, SignalReport
 from videoedit.rating import run_rating
 
@@ -92,6 +92,17 @@ class AnalysisHealthTests(unittest.TestCase):
         self.assertEqual(self.manifest()["telemetry"]["cache_misses"], 1)
         self.assertEqual(self.manifest()["telemetry"]["cache_hits"], 0)
 
+    def test_cache_from_before_fatal_decode_policy_is_reanalyzed(self):
+        self.rate()
+        cache = self.output / ".cache" / "analysis-cache.json"
+        data = json.loads(cache.read_text())
+        next(iter(data.values()))["signature"].pop("analysis_policy", None)
+        cache.write_text(json.dumps(data))
+        self.scene.return_value = ([2.0], None)
+        report = self.rate()
+        self.assertEqual(report.signals[0].scene_changes, [2.0])
+        self.assertEqual(self.manifest()["telemetry"]["cache_hits"], 0)
+
     def test_video_without_audio_is_not_an_audio_analysis_failure(self):
         self.asset.has_audio = False
         report = self.rate()
@@ -143,9 +154,39 @@ class AnalysisHealthTests(unittest.TestCase):
         self.assertEqual(report.scene_changes, [1.0])
         self.assertFalse(getattr(report, "analysis_complete", False))
 
+    def test_nonzero_silence_exit_is_failure_even_if_output_mentions_empty(self):
+        result = CommandResult([], 1, "", "decoding error\nOutput file is empty")
+        with patch("videoedit.ffmpeg.has_command", return_value=True), patch("videoedit.ffmpeg.run_command", return_value=result):
+            _intervals, warning = detect_silence(str(self.source))
+        self.assertIsNotNone(warning)
+
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg unavailable")
 class ActualSceneTests(unittest.TestCase):
+    def test_corrupted_packet_is_not_a_complete_cacheable_scan(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            footage = root / "footage"
+            footage.mkdir()
+            source = footage / "damaged.mov"
+            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                            "testsrc2=size=160x90:rate=30:duration=4", "-c:v", "mpeg4", str(source)],
+                           check=True, capture_output=True)
+            packets = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_packets", "-of", "json", str(source)],
+                                                check=True, capture_output=True).stdout)["packets"]
+            packet = packets[len(packets) // 2]
+            pos, size = int(packet["pos"]), int(packet["size"])
+            data = bytearray(source.read_bytes())
+            data[pos:pos + size] = b"\0" * size
+            source.write_bytes(data)
+            output = root / "analysis"
+            run_rating(str(footage), str(output), AnalysisConfig(transcript_mode="off"))
+            manifest = json.loads((output / "rating_run.json").read_text())
+            self.assertEqual(manifest["status"], "partial")
+            run_rating(str(footage), str(output), AnalysisConfig(transcript_mode="off"))
+            manifest = json.loads((output / "rating_run.json").read_text())
+            self.assertEqual(manifest["telemetry"]["cache_hits"], 0)
+
     def test_real_scene_transition_is_detected_without_removed_sync_options(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "scene.mov"
