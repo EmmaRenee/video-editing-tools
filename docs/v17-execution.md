@@ -529,6 +529,11 @@ evidence and design rulings, not a second backlog.
   Severity-prefixed logs now supplement exit status without interpreting arbitrary
   error-like text in info messages. Cache policy v2 invalidates earlier results;
   the corrupted-media partial/no-cache gate remains unchanged.
+- A further review reproduced chained logger-prefix and multiline-filename
+  ambiguity. Measurements now use metadata stdout and error-only stderr;
+  physical-line severity parsing supports complete context-prefix chains without
+  reading info text as errors. Real multiline filenames, scene transitions and
+  trailing silence have regressions. Cache policy v3 invalidates prior analyses.
 
 ## Remaining Execution Order
 

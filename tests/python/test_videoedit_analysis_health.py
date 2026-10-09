@@ -163,7 +163,8 @@ class AnalysisHealthTests(unittest.TestCase):
     def test_zero_exit_logged_decoder_errors_are_still_failures(self):
         for detector in (detect_scene_changes, detect_silence, analyze_audio_levels):
             for message in ("[mpeg4 @ 0xabc] [error] bad packet", "[fatal] decoder failed",
-                            "[panic] decoder failed", "\x1b[31m[decoder] [error] bad packet\x1b[0m"):
+                            "[panic] decoder failed", "\x1b[31m[decoder] [error] bad packet\x1b[0m",
+                            "[info]\n[error] decoder failed", "[vist#0:0/mpeg4 @ 0xabc] [dec:mpeg4 @ 0xdef] [error] decoder failed"):
                 with self.subTest(detector=detector.__name__, message=message):
                     with patch("videoedit.ffmpeg.has_command", return_value=True), patch("videoedit.ffmpeg.run_command", return_value=CommandResult([], 0, "", message)):
                         _values, warning = detector(str(self.source))
@@ -176,11 +177,37 @@ class AnalysisHealthTests(unittest.TestCase):
                     _values, warning = detector(str(self.source))
                 self.assertIsNone(warning)
                 args = command.call_args.args[0]
-                self.assertEqual(args[args.index("-loglevel") + 1], "level+info")
+                self.assertEqual(args[args.index("-loglevel") + 1], "level+error")
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg unavailable")
 class ActualSceneTests(unittest.TestCase):
+    def test_healthy_multiline_filename_remains_complete_and_cacheable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            footage = root / "footage"
+            footage.mkdir()
+            source = footage / "clip\n[error] source.mov"
+            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                            "testsrc2=size=96x64:rate=24:duration=2", "-c:v", "mpeg4", str(source)],
+                           check=True, capture_output=True)
+            output = root / "analysis"
+            for _index in range(2):
+                run_rating(str(footage), str(output), AnalysisConfig(transcript_mode="off"))
+                self.assertEqual(json.loads((output / "rating_run.json").read_text())["status"], "ok")
+            self.assertEqual(json.loads((output / "rating_run.json").read_text())["telemetry"]["cache_hits"], 1)
+
+    def test_real_silence_metadata_preserves_trailing_interval(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "silence.mov"
+            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                            "color=c=black:s=96x64:r=24:d=2", "-f", "lavfi", "-i",
+                            "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:v", "mpeg4", "-c:a", "pcm_s16le", str(source)],
+                           check=True, capture_output=True)
+            intervals, warning = detect_silence(str(source), duration=2)
+            self.assertIsNone(warning)
+            self.assertEqual([(row.start, row.end) for row in intervals], [(0, 2)])
+
     def test_corrupted_packet_is_not_a_complete_cacheable_scan(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

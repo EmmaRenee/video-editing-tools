@@ -705,7 +705,7 @@ def _file_reasons(
 def _file_signature(path: str, config: AnalysisConfig) -> dict[str, Any]:
     stat = os.stat(os.fspath(path))
     return {
-        "analysis_policy": "fatal_decode_v2",
+        "analysis_policy": "fatal_decode_v3",
         "size": stat.st_size,
         "mtime": stat.st_mtime,
         "scene_threshold": config.scene_threshold,
