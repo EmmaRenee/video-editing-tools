@@ -215,8 +215,6 @@ def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180)
         path_str,
         "-vf",
         f"select='gt(scene,{threshold})',showinfo",
-        "-vsync",
-        "vfr",
         "-f",
         "null",
         "-",

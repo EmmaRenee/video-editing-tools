@@ -44,7 +44,7 @@ def run_rating(
         result = {"ratings": os.path.join(output_dir, "ratings.json"), "inventory": os.path.join(output_dir, "inventory.json"),
                   "candidates": os.path.join(output_dir, "candidates.csv"), "review": os.path.join(output_dir, "review.md"),
                   "telemetry": stats, "summary": report.summary}
-        failures = sum(asset.status != "ok" for asset in report.inventory)
+        failures = report.summary["analysis_failed"]
         if failures:
             manifest.data["partial"] = True
             manifest.data["warnings"].append(f"media_analysis_failed:{failures}")
@@ -71,9 +71,11 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
         signature = _file_signature(path, config)
         cached = cache.get(key)
         if cached and cached.get("signature") == signature:
-            stats["cache_hits"] += 1
-            signals.append(SignalReport.from_dict(cached["report"]))
-            continue
+            cached_report = SignalReport.from_dict(cached["report"])
+            if cached_report.analysis_complete:
+                stats["cache_hits"] += 1
+                signals.append(cached_report)
+                continue
         stats["cache_misses"] += 1
         report = analyze_file(
             path,
@@ -82,8 +84,11 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
             advanced_hits=signal_artifacts.advanced_for(path),
         )
         signals.append(report)
-        if config.cache:
+        if config.cache and report.analysis_complete:
             cache[key] = {"signature": signature, "report": report.to_dict()}
+            cache_changed = True
+        elif config.cache and key in cache:
+            del cache[key]
             cache_changed = True
 
     if config.cache and cache_changed:
@@ -127,6 +132,7 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
         "review": sum(1 for item in candidates if item.action == "review"),
         "broll": sum(1 for item in candidates if item.action == "broll"),
         "cut": sum(1 for item in candidates if item.action == "cut"),
+        "analysis_failed": sum(not item.analysis_complete for item in signals),
     }
     report = RatingReport(
         generated=datetime.now().isoformat(),
@@ -163,13 +169,17 @@ def analyze_file(
     transcript_hits = []
     object_hits = object_hits or []
     advanced_hits = advanced_hits or []
+    analysis_status = {"probe": "error", "scenes": "not_run", "silence": "not_run",
+                       "audio": "not_run", "transcript": "not_run"}
 
     if asset.status != "ok":
         warnings.append(asset.error or "metadata probe failed")
     else:
+        analysis_status["probe"] = "ok"
         scene_changes, warning = detect_scene_changes(
             path, threshold=config.scene_threshold, timeout=config.command_timeout
         )
+        analysis_status["scenes"] = "error" if warning else "ok"
         if warning:
             warnings.append(warning)
         if asset.has_audio:
@@ -180,13 +190,17 @@ def analyze_file(
                 duration=asset.duration,
                 timeout=config.command_timeout,
             )
+            analysis_status["silence"] = "error" if warning else "ok"
             if warning:
                 warnings.append(warning)
             audio_levels, warning = analyze_audio_levels(path, timeout=config.command_timeout)
+            analysis_status["audio"] = "error" if warning else "ok"
             if warning:
                 warnings.append(warning)
         else:
             warnings.append("no audio stream")
+            analysis_status["silence"] = "not_applicable"
+            analysis_status["audio"] = "not_applicable"
 
         if config.transcript_mode != "off":
             transcript_hits, transcript_path = find_transcript_hits(
@@ -196,9 +210,15 @@ def analyze_file(
                 transcript_dir=config.transcript_dir,
             )
             if transcript_path:
+                analysis_status["transcript"] = "ok"
                 reasons.append(f"transcript matched: {transcript_path}")
             elif config.transcript_mode == "required":
+                analysis_status["transcript"] = "error"
                 warnings.append("transcript required but not found")
+            else:
+                analysis_status["transcript"] = "unavailable_optional"
+        else:
+            analysis_status["transcript"] = "not_requested"
 
     scores = score_signal(
         asset,
@@ -232,6 +252,7 @@ def analyze_file(
         scores=scores,
         reasons=reasons,
         warnings=warnings,
+        analysis_status=analysis_status,
     )
 
 

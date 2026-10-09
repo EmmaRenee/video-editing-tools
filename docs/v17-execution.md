@@ -482,6 +482,40 @@ evidence and design rulings, not a second backlog.
 - Independent three-profile annotations, detector-budget work, editor handoff and
   final RC qualification remain full-goal gates, not replaced by runtime smoke.
 
+## Clean-Install Validation Slice
+
+- Continued on the isolated clone from PR #96 (`b9cb060`), leaving the primary
+  experimental checkout, private originals and the user's open Resolve project
+  untouched. GitHub milestone 13 and #66/#71/#81 remain the acceptance source.
+- Added a developer-only wheel/source auditor: compare tracked runtime and
+  compatibility file bytes to Git, reject unexpected/unsafe/duplicate/link
+  members, verify version, console entrypoint and license. Build from a Git
+  archive, never the checkout containing untracked experiments.
+- Added an installed core-only synthetic workflow outside the checkout. It
+  exercises rating/cache, review/proxies, decisions/approval, bounded planning,
+  actual rendering, EDL/XML and missing optional-provider diagnostics, recording
+  versions, per-step timings, logs and scoped storage. Synthetic checks never
+  certify independent selection quality or live-editor behavior.
+- The first smoke exposed a real false-success: FFmpeg 9.0.1 rejected obsolete
+  scene-analysis `-vsync`, but rating reported `ok` and cached empty detections.
+  A real black/white fixture reproduced the failure before the fix. Removed the
+  unnecessary sync option from null-output analysis, added explicit per-detector
+  completion status, partial-run reporting and cache retry rules. Legacy JSON
+  remains readable; legacy caches without health evidence reanalyze once.
+- The stricter installed smoke rejects the old wheel rather than accepting its
+  fallback candidate. Successful empty detections and audio-free sources still
+  complete normally; missing required transcripts and failed requested detectors
+  cannot be cached as successful analysis. Old benchmarks with detector warnings
+  must be rerun, not retroactively treated as healthy quality evidence.
+- Expanded CI to eight jobs: Python 3.10-3.12 unit and installed-workflow matrices,
+  tracked-snapshot distribution audit/build, and independent editor readers.
+  Official actions are pinned by immutable revision, with an explicit Ubuntu
+  24.04 baseline, read-only token and no persisted checkout credentials.
+- Proposed `0.6.0rc1` only as a pending-review candidate; no version change, tag,
+  release or publication. Independent three-profile ground truth, provider
+  quality/cost ablations, approved experimental dispositions and actual original-
+  media Resolve relink/timecode/audio/boundary/handle verification remain gates.
+
 ## Remaining Execution Order
 
 Follow the dependencies recorded on GitHub: protocol and runner (#73/#74),

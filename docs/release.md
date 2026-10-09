@@ -4,6 +4,10 @@ This project is local-first. Do not publish a package or GitHub release just bec
 
 ## Versioning
 
+- V17 candidate proposal: **`0.6.0rc1`**, pending review; no version bump, tag,
+  release or publication is authorized by this proposal. Until the real-footage
+  and editor gates pass, wheels using the current version are validation builds,
+  not a qualified release candidate.
 - Keep the Python package version in `src/python/videoedit/_version.py`.
 - Package metadata reads that version through `src/python/pyproject.toml`.
 - Update `CHANGELOG.md` in the same pull request as a version change.
@@ -12,21 +16,61 @@ This project is local-first. Do not publish a package or GitHub release just bec
   - Minor: backward-compatible features or commands.
   - Major: breaking CLI, artifact, or API changes.
 
+V17 preserves existing V1-V16 command names and accepted JSON shapes. Additive
+fields must not require consumers to migrate. Any intentionally incompatible
+schema/CLI change requires a documented migration and regression tests before
+approval. Core execution remains standard-library Python plus FFmpeg/ffprobe;
+AI, vision, UI, cloud and editor adapters remain optional, with explicit
+unavailable/partial diagnostics rather than a successful empty result.
+
 ## Local Verification
 
 Run these commands from the repository root before opening a release PR:
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel build
-python -m pip install -e ./src/python
 python -m unittest discover -s tests/python
 git diff --check
-python -m build src/python --outdir /tmp/videoedit-dist
-python -m venv /tmp/videoedit-wheel-smoke
-/tmp/videoedit-wheel-smoke/bin/python -m pip install /tmp/videoedit-dist/videoedit-*.whl
-/tmp/videoedit-wheel-smoke/bin/videoedit operations
-/tmp/videoedit-wheel-smoke/bin/python -c "import videoedit; print(videoedit.__version__)"
+CHECKOUT="$(pwd)"
+QUALIFY="$(mktemp -d)"
+git archive --format=tar --output "$QUALIFY/source.tar" HEAD
+mkdir "$QUALIFY/source"
+tar -xf "$QUALIFY/source.tar" -C "$QUALIFY/source"
+python -m build "$QUALIFY/source/src/python" --outdir "$QUALIFY/dist"
+python tests/smoke/audit_distribution.py --checkout "$CHECKOUT" \
+  --wheel "$QUALIFY"/dist/videoedit-*.whl --sdist "$QUALIFY"/dist/videoedit-*.tar.gz
+python -m venv "$QUALIFY/wheel"
+"$QUALIFY/wheel/bin/python" -m pip install --no-index --no-deps "$QUALIFY"/dist/videoedit-*.whl
+cd "$QUALIFY"
+"$QUALIFY/wheel/bin/python" -I "$CHECKOUT/tests/smoke/installed_workflow.py" \
+  --checkout "$CHECKOUT" --output "$QUALIFY/workflow"
+cd "$CHECKOUT"
 ```
+
+This is a POSIX-shell developer procedure; Windows virtual environments use
+`Scripts/python.exe`. Use a clean isolated checkout, not the primary checkout
+containing experiments. The auditor refuses modified or untracked `src/python`
+files. It checks runtime/compatibility file bytes against Git, rejects unexpected,
+duplicate, traversal and symlink archive members, and verifies package version,
+console entrypoint and license. It does not replace human privacy/license review.
+
+The installed smoke requires FFmpeg/ffprobe and FFmpeg's `libx264`/AAC encoders
+for the existing rendered-assembly command. It refuses source/editable imports,
+non-venv Python, installed heavy optional providers and a nonempty output folder.
+It generates its own small MPEG-4/PCM fixture, then exercises doctor, operations,
+modules, inventory, cold/warm rating, review thumbnails/proxies, explicit review
+decisions, approval, bounded planning, rendering, EDL/XML export, preset
+validation/dry-run and unavailable-provider diagnostics. It checks 30 video
+frames / 1.0 second, stereo stream presence and non-zero XML source timecode.
+Rating must have complete detector status and sampled audio, not merely a
+successful process exit or fallback candidate. A successful negative detector
+result is distinct from a failed detector. `ratings.json` adds per-source
+`analysis_status`/`analysis_complete` and summary `analysis_failed`; failures mark
+the rating run partial and are not cached as successes. Older signal artifacts
+remain readable, but cached reports without completion evidence are reanalyzed.
+`workflow/smoke_report.json` records versions, per-step results/timing and scoped
+storage use; stdout/stderr logs remain beside it. Failures produce an incomplete
+report after workflow startup. No private media or human annotations are used.
 
 Use the repo-local `.venv` only for lightweight package checks. For Torch/OpenCLIP verification, use the local-disk AI environment documented in `INSTALL.md` because synced Google Drive virtual environments can be slow or unreliable for those imports.
 
@@ -37,9 +81,27 @@ Pull requests and pushes to `main` run `.github/workflows/ci.yml`:
 - Python unit tests on Python 3.10, 3.11, and 3.12.
 - `git diff --check`.
 - Source distribution and wheel build from `src/python`.
-- Clean wheel install smoke test using `videoedit operations`.
+- Wheel/source archive audit against the tracked snapshot.
+- Fresh core-only wheel installations on Python 3.10, 3.11 and 3.12, each running
+  the synthetic installed workflow outside the checkout with FFmpeg installed.
+- Independent CMX/FCP7 readers in their own optional development environment.
 
-The base CI path intentionally avoids FFmpeg, Whisper, YOLO, OpenCLIP, cloud credentials, and private footage. Optional-provider checks should remain local/manual or move into separate opt-in workflows.
+Jobs use the explicit `ubuntu-24.04` runner baseline, immutable official action
+revisions and a read-only repository token without persisted Git credentials.
+The baseline still receives image updates; the smoke report records Python and
+media-tool versions rather than claiming a frozen machine. The existing unit
+test jobs remain lightweight; only the installed-workflow matrix deliberately
+installs FFmpeg. No job installs Whisper, YOLO, OpenCLIP or cloud credentials or
+reads private footage. Reports are printed to CI logs; runtime media stays on
+the ephemeral runner. Optional-provider installed-state checks remain separately
+recorded local/manual evidence, not silently skipped RC acceptance.
+
+Synthetic smoke, archive audits and green CI are necessary but insufficient for
+V17 completion. Link independent three-profile benchmarks, provider quality/cost
+ablations, approved component dispositions, and actual Resolve original-media
+relink/timecode/audio/handle verification under #66/#81 before qualifying the RC.
+Reader parsing, audio stream presence and `editor_verified: false` are not editor
+or audio-fidelity certification.
 
 ## GitHub Release Gate
 
