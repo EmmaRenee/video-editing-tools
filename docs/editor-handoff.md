@@ -35,9 +35,40 @@ diagnostics, not the edit files themselves.
 - A known video-stream duration bounds the selection, including quantized EOF
   endpoints; longer audio/container duration cannot extend video availability.
   When the video extent is unknown, container length is not treated as proof.
-  Export rejects out-of-range
-  handles instead of silently extending the source. It does not automatically
-  clamp handles or repair missing historical references.
+  Export rejects out-of-range selection endpoints instead of silently extending
+  the source. It does not repair missing historical references.
+
+## Rough-Cut Bounds And Targets
+
+`videoedit roughcut plan approved.json --output roughcut_plan.json --handles 0.5
+--target-duration 90 --render-mode render` validates the approved ranges before
+adding handles. Invalid approved ranges are rejected, not repaired by clamping.
+The planner resolves media paths beside the selection document using the same
+ambiguity checks as export, and probes each unique source once per planning call.
+
+Pre-roll stops at zero; post-roll stops at the known video-stream duration.
+Every planned clip retains the approved `selection_start_seconds` and
+`selection_end_seconds`, `source_duration_seconds`, applied `handles_applied`
+(`pre`/`post` seconds), and `handles_clamped_to_source`. Unknown duration remains
+null, so post-roll cannot be certified bounded; the plan and run manifest are
+`partial`. Native `source_fps`, known source timecode, reels and unsupported edit
+features are retained for subsequent delivery and diagnostics.
+
+Targets trim the final retained clip at its elapsed-seconds endpoint, including
+sub-second targets and sub-second remainders. `target_trimmed` identifies the
+edit; the original approved bounds remain available even if the target trims
+approved content. Applied handles are recomputed after trimming. A positive
+target producing no source or timeline frame is rejected, not silently extended.
+A sub-frame remainder after valid preceding clips is omitted rather than making
+the entire plan fail.
+Zero duration or zero `max_clips` deliberately produces an empty plan. Handles
+and targets must be finite non-negative numbers; `max_clips` must be an integer.
+
+Elapsed planning bounds are not independently snapped to frames. Handoff rounds
+to native/record frames as described above, so its quantized duration can differ
+from the requested target by frame-rounding tolerances. Rendering/codec timing
+and stream-copy keyframes still require separate verification; a plan is not a
+completed delivery. `editor_verified` remains false.
 
 ## Supported Limits
 

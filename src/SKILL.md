@@ -120,6 +120,13 @@ them from the original ratings and saved review decisions. Do not guess the
 missing fractions. `HH:MM:SS.fraction` is elapsed time; `HH:MM:SS:FF` uses
 `source_fps` (or document `fps`), and `HH:MM:SS;FF` supports 29.97/59.94 drop-frame.
 All selection times are media offsets, not embedded source-start timecodes.
+For rough cuts, validate approved ranges before adding `--handles`; planning
+clamps handles to zero/known video duration and records applied pre/post-roll
+plus the original selection bounds. Unknown duration remains partial, not
+certified bounded. `--target-duration` can trim approved content; inspect
+`target_trimmed` and the plan report. Sub-second targets are supported, but
+zero-frame targets are rejected. Reuse the plan with `assemble --plan` so its
+resolved source paths and precise boundaries reach FFmpeg.
 Use render mode for precise cuts; stream copy remains keyframe-dependent.
 Export probes each unique source for native FPS, embedded start timecode and
 audio. Standard CMX events and FCP7 media clip items share one normalized timeline;

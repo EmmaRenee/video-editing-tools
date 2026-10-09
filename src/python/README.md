@@ -504,8 +504,13 @@ noise within two ULPs (capped at 1e-9 frames) of a half-frame tie rounds upward.
 EDL record positions accumulate quantized source spans, not independently
 rounded elapsed durations, so source and record frame counts agree.
 
-The planner retains the timeline `fps` and fractional endpoints, including
-handles and target-duration trimming. FFmpeg `copy` remains keyframe-dependent;
+The planner retains the timeline `fps`, native source metadata and fractional
+endpoints. It validates approved ranges before adding handles, clamps handles
+to known video bounds, and records applied pre/post-roll separately from the
+approved range. Sub-second targets trim rather than retaining a whole clip;
+zero-frame results are rejected. Missing duration and unsupported edit features
+remain partial diagnostics. See [rough-cut bounds](../../docs/editor-handoff.md#rough-cut-bounds-and-targets).
+FFmpeg `copy` remains keyframe-dependent;
 use `--render-mode render` for precise cuts. Export now probes each unique local
 source, applies embedded start timecode in standard CMX events, and writes FCP7
 media clip items with native FPS, escaped paths and linked mono/stereo audio.

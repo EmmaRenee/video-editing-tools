@@ -156,11 +156,14 @@ NTSC rates and nearest-frame half-up rounding with correct carry. See
 [selection timing](../src/python/README.md#selection-timing) for parsing rules
 and regenerating legacy files that lost their numeric bounds.
 
-These fixes do not certify Resolve compatibility. Current EDL/XML exports still
-assume a single FPS, do not apply embedded source start timecode, and omit audio
-tracks/transitions. Legacy EDL event columns, XML generator items/floor rounding,
-mixed-rate media, and unclamped end handles need the remaining implementation
-and real-media/editor validation in V17 #79. `editor_verified` remains false.
+These fixes do not certify Resolve compatibility. Current exports probe native
+rates and embedded start timecodes; XML includes linked single-stream mono/stereo
+audio, while EDL is video-only and mixed-rate EDL is diagnostic-only. Rough-cut
+plans validate approved bounds and clamp handles to known video extents, retaining
+applied pre/post-roll and target trims. Unknown duration and unsupported effects
+remain partial rather than complete. See [Editor Handoff](editor-handoff.md).
+Live real-media/editor validation remains required in V17 #79; `editor_verified`
+remains false.
 Output generation succeeding is not evidence that relinking, timing, or audio
 survived an editor import. Stream-copy extraction is keyframe-dependent even
 when its requested timestamps are precise.
