@@ -71,10 +71,11 @@ result is distinct from a failed detector. `ratings.json` adds per-source
 `analysis_status`/`analysis_complete` and summary `analysis_failed`; failures mark
 the rating run partial and are not cached as successes. Older signal artifacts
 remain readable, but cached reports without completion evidence are reanalyzed.
-Analysis uses FFmpeg's error-fatal mode so decoding errors cannot be concealed by
-a successful exit after partial recovery; the installed smoke corrupts a video
+Analysis uses FFmpeg's error-fatal mode plus severity-prefixed error log checks
+(FFmpeg 6.1 can still exit zero after decoder errors), so decoding failures cannot
+be concealed by a successful exit after partial recovery. The smoke corrupts a video
 packet and verifies partial status with no cache reuse on retry. Caches created
-before the fatal-decode policy are invalidated too, even if they recorded success.
+before the current fatal-decode policy are invalidated too, even if they recorded success.
 `workflow/smoke_report.json` records versions, per-step results/timing and scoped
 storage use; stdout/stderr logs remain beside it. Failures produce an incomplete
 report after workflow startup. No private media or human annotations are used.

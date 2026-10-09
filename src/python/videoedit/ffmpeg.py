@@ -203,6 +203,20 @@ def parse_scene_output(output: str) -> list[float]:
     return sorted(set(values))
 
 
+def _analysis_failed(result: CommandResult) -> bool:
+    if result.returncode != 0:
+        return True
+    # FFmpeg 6.1 can return zero after decoder errors, even with -xerror.
+    log = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
+    levels = {"quiet", "panic", "fatal", "error", "warning", "info", "verbose", "debug", "trace"}
+    for match in re.finditer(r"^\s*\[([^\]\r\n]+)\]\s*(?:\[([^\]\r\n]+)\])?", log, re.MULTILINE):
+        first, second = match.groups()
+        level = first if first in levels else second
+        if level in {"error", "fatal", "panic"}:
+            return True
+    return False
+
+
 def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180) -> tuple[list[float], str | None]:
     if not has_command("ffmpeg"):
         return [], "ffmpeg not found"
@@ -210,6 +224,8 @@ def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180)
     cmd = [
         "ffmpeg",
         "-xerror",
+        "-loglevel",
+        "level+info",
         "-hide_banner",
         "-nostats",
         "-i",
@@ -225,7 +241,7 @@ def detect_scene_changes(path: str, threshold: float = 0.35, timeout: int = 180)
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
     output = f"{result.stdout}\n{result.stderr}"
-    return parse_scene_output(output), None if result.returncode == 0 else "scene detection failed"
+    return parse_scene_output(output), "scene detection failed" if _analysis_failed(result) else None
 
 
 def parse_silence_output(output: str, duration: float | None = None) -> list[SilenceInterval]:
@@ -261,6 +277,8 @@ def detect_silence(
     cmd = [
         "ffmpeg",
         "-xerror",
+        "-loglevel",
+        "level+info",
         "-hide_banner",
         "-nostats",
         "-i",
@@ -276,7 +294,7 @@ def detect_silence(
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
     output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0:
+    if _analysis_failed(result):
         return [], "silence detection failed"
     return parse_silence_output(output, duration=duration), None
 
@@ -311,6 +329,8 @@ def analyze_audio_levels(path: str, timeout: int = 180) -> tuple[list[AudioLevel
     cmd = [
         "ffmpeg",
         "-xerror",
+        "-loglevel",
+        "level+info",
         "-hide_banner",
         "-nostats",
         "-i",
@@ -326,6 +346,6 @@ def analyze_audio_levels(path: str, timeout: int = 180) -> tuple[list[AudioLevel
     except (TimeoutError, OSError) as exc:
         return [], str(exc)
     output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0:
+    if _analysis_failed(result):
         return [], "audio level analysis failed"
     return parse_audio_metadata_output(output), None

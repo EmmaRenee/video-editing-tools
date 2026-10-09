@@ -523,6 +523,12 @@ evidence and design rulings, not a second backlog.
   corrupted-media retries, and the auditor validates full entrypoint mappings and
   member types/duplicate names before skipping directories. Green initial CI or a
   zero-issue automated review did not override independently reproduced failures.
+- Ubuntu CI caught an additional real version-specific recovery path. An isolated
+  official Ubuntu 24.04 container reproduced FFmpeg 6.1.1 logging decoder errors
+  while returning zero even with `-xerror`, `-max_error_rate 0` or `explode`.
+  Severity-prefixed logs now supplement exit status without interpreting arbitrary
+  error-like text in info messages. Cache policy v2 invalidates earlier results;
+  the corrupted-media partial/no-cache gate remains unchanged.
 
 ## Remaining Execution Order
 

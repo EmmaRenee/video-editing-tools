@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src" / "python"))
 
 from videoedit.config import AnalysisConfig
-from videoedit.ffmpeg import CommandResult, detect_scene_changes, detect_silence
+from videoedit.ffmpeg import CommandResult, analyze_audio_levels, detect_scene_changes, detect_silence
 from videoedit.models import AudioLevel, MediaAsset, SignalReport
 from videoedit.rating import run_rating
 
@@ -159,6 +159,24 @@ class AnalysisHealthTests(unittest.TestCase):
         with patch("videoedit.ffmpeg.has_command", return_value=True), patch("videoedit.ffmpeg.run_command", return_value=result):
             _intervals, warning = detect_silence(str(self.source))
         self.assertIsNotNone(warning)
+
+    def test_zero_exit_logged_decoder_errors_are_still_failures(self):
+        for detector in (detect_scene_changes, detect_silence, analyze_audio_levels):
+            for message in ("[mpeg4 @ 0xabc] [error] bad packet", "[fatal] decoder failed",
+                            "[panic] decoder failed", "\x1b[31m[decoder] [error] bad packet\x1b[0m"):
+                with self.subTest(detector=detector.__name__, message=message):
+                    with patch("videoedit.ffmpeg.has_command", return_value=True), patch("videoedit.ffmpeg.run_command", return_value=CommandResult([], 0, "", message)):
+                        _values, warning = detector(str(self.source))
+                    self.assertIsNotNone(warning)
+
+    def test_informational_error_text_is_not_a_decoder_failure(self):
+        for detector in (detect_scene_changes, detect_silence, analyze_audio_levels):
+            with self.subTest(detector=detector.__name__):
+                with patch("videoedit.ffmpeg.has_command", return_value=True), patch("videoedit.ffmpeg.run_command", return_value=CommandResult([], 0, "", "[info] Input from '[error] source.mov'")) as command:
+                    _values, warning = detector(str(self.source))
+                self.assertIsNone(warning)
+                args = command.call_args.args[0]
+                self.assertEqual(args[args.index("-loglevel") + 1], "level+info")
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg unavailable")
