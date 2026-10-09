@@ -34,6 +34,10 @@ diagnostics; editing artifacts themselves remain private.
 
 This toolkit provides FFmpeg-based video editing workflows with optional PowerShell cmdlets, Python automation, and AI/cloud handoff integrations. Designed for editing real footage, not generating from scratch.
 
+Delivery selections and rough-cut plans preserve fractional seconds through
+approval, extraction and rendering. See [Selection Timing](src/python/README.md#selection-timing)
+for numeric-bound precedence, SMPTE parsing and remaining editor-handoff limits.
+
 **What it does:**
 - Cut dead air and silence from footage
 - Extract highlights and create rough cuts

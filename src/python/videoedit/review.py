@@ -14,8 +14,8 @@ from .edl import export_selection_file
 from .ffmpeg import run_command_check
 from .manifests import RunManifest, fingerprint
 from .roughcut import clips_from_plan
-from .selections import load_selection
-from .timecode import seconds_to_hhmmss, timecode_to_seconds
+from .selections import clip_seconds, load_selection
+from .timecode import seconds_to_hhmmss, seconds_to_timestamp, timecode_to_seconds
 
 
 def assemble(selection_json: str, output: str, plan_json: str | None = None,
@@ -260,12 +260,14 @@ def export_review_handoff(selection_json: str, output_dir: str) -> list[str]:
 
 
 def _approved_clip(clip: dict, decision: dict | None = None) -> dict:
-    start_seconds = _clip_seconds(clip, "start", "start_seconds")
-    end_seconds = _clip_seconds(clip, "end", "end_seconds")
+    start_seconds = clip_seconds(clip, "start", clip.get("source_fps", 30))
+    end_seconds = clip_seconds(clip, "end", clip.get("source_fps", 30))
     approved = {
         "source": clip.get("source"),
-        "start": seconds_to_hhmmss(start_seconds),
-        "end": seconds_to_hhmmss(end_seconds),
+        "start": seconds_to_timestamp(start_seconds),
+        "end": seconds_to_timestamp(end_seconds),
+        "start_seconds": start_seconds,
+        "end_seconds": end_seconds,
         "label": clip.get("id") or clip.get("label") or "clip",
         "score": clip.get("score", 0),
         "action": "approved",

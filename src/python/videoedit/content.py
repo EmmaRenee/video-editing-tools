@@ -8,6 +8,9 @@ import os
 import re
 from typing import Any
 
+from .selections import clip_seconds
+from .timecode import seconds_to_timestamp
+
 
 SERIES_TEMPLATES: dict[str, dict[str, Any]] = {
     "what_were_looking_for": {
@@ -129,6 +132,8 @@ def plan_content_series(
                 "source": clip["source"],
                 "start": clip["start"],
                 "end": clip["end"],
+                "start_seconds": clip["start_seconds"],
+                "end_seconds": clip["end_seconds"],
                 "label": clip["id"],
                 "score": clip["score"],
                 "reasons": clip["reasons"],
@@ -197,11 +202,15 @@ def _series_item(clip: dict[str, Any], template: dict[str, Any], index: int) -> 
     hooks = template.get("hooks", [])
     hook = hooks[(index - 1) % len(hooks)] if hooks else "Clip candidate"
     reasons = list(clip.get("reasons", []))
+    start = clip_seconds(clip, "start", clip.get("source_fps", 30))
+    end = clip_seconds(clip, "end", clip.get("source_fps", 30))
     return {
         "id": clip.get("id") or clip.get("label") or f"clip_{index:04d}",
         "source": clip.get("source"),
-        "start": clip.get("start"),
-        "end": clip.get("end"),
+        "start": seconds_to_timestamp(start),
+        "end": seconds_to_timestamp(end),
+        "start_seconds": start,
+        "end_seconds": end,
         "duration": clip.get("duration"),
         "score": clip.get("score", 0),
         "labels": clip.get("labels", []),

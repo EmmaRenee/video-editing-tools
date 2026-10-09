@@ -35,8 +35,8 @@ from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
 from .roughcut import plan_roughcut
 from .scaffold import scaffold_project
-from .selections import load_selection
-from .timecode import seconds_to_hhmmss, timecode_to_seconds
+from .selections import clip_seconds, load_selection
+from .timecode import seconds_to_hhmmss, seconds_to_timestamp, timecode_to_seconds
 
 
 OperationFunc = Callable[[dict[str, Any], dict[str, Any]], Any]
@@ -729,6 +729,8 @@ def _write_candidate_selections(candidates: list[dict[str, Any]], output_dir: st
                     "source": clip.get("source"),
                     "start": _clip_timecode(clip, "start", "start_seconds"),
                     "end": _clip_timecode(clip, "end", "end_seconds"),
+                    "start_seconds": clip_seconds(clip, "start", clip.get("source_fps", 30)),
+                    "end_seconds": clip_seconds(clip, "end", clip.get("source_fps", 30)),
                     "label": clip.get("id") or clip.get("label") or f"clip_{index:03d}",
                     "score": clip.get("score", 0),
                     "action": clip.get("action", "review"),
@@ -744,12 +746,7 @@ def _write_candidate_selections(candidates: list[dict[str, Any]], output_dir: st
 
 
 def _clip_timecode(clip: dict[str, Any], formatted_key: str, seconds_key: str) -> str:
-    value = clip.get(formatted_key)
-    if isinstance(value, str) and value:
-        return value
-    if seconds_key in clip:
-        return seconds_to_hhmmss(float(clip[seconds_key]))
-    return "00:00:00"
+    return seconds_to_timestamp(clip_seconds(clip, formatted_key, clip.get("source_fps", 30)))
 
 
 def _clip_seconds(clip: dict[str, Any]) -> float:

@@ -484,6 +484,34 @@ If a required module is disabled in `.videoedit/config.json`, validation stops w
 
 When no top-level `source` is present, each clip must include `source`. FPS precedence is explicit `--fps`, then JSON `fps`, then `30`.
 
+### Selection Timing
+
+Delivery selections retain decimal seconds. `start_seconds` and `end_seconds`,
+when present, are authoritative over truncated display timestamps. Approval,
+rating selections, highlight selections, series selections and rough-cut plans
+retain those fields; extraction and assembly use `HH:MM:SS.fraction` timestamps.
+Legacy plans with precise numeric fields can be reused without truncation.
+Legacy selection files containing only whole-second timestamps cannot recover
+discarded precision: regenerate them from the original ratings and decisions.
+
+Three-part timestamps are elapsed time. Four-part SMPTE labels use the source
+frame rate (`source_fps`, otherwise the document's `fps`); a semicolon selects
+drop-frame parsing at 29.97 or 59.94 fps. These are **offsets from the first media
+frame**, not embedded source-start timecodes. Conventional decimal NTSC rates
+resolve to exact fractions internally. Non-drop output rounds to the nearest
+frame with ties upward and correct second/minute carry. Float representation
+noise within two ULPs (capped at 1e-9 frames) of a half-frame tie rounds upward.
+EDL record positions accumulate quantized source spans, not independently
+rounded elapsed durations, so source and record frame counts agree.
+
+The planner retains the timeline `fps` and fractional endpoints, including
+handles and target-duration trimming. FFmpeg `copy` remains keyframe-dependent;
+use `--render-mode render` for precise cuts. This timing fix does not certify
+editor interchange: legacy EDL event columns/XML generator items, source-start
+timecodes, audio tracks, mixed-rate relinking and handles beyond known media
+duration still require the remaining V17 handoff work. Inspect handoff sidecars
+and require actual editor validation before claiming production readiness.
+
 ### Content Planning
 
 ```bash

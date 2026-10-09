@@ -8,43 +8,48 @@ import shlex
 import time
 
 from .manifests import RunManifest, fingerprint
-from .selections import load_selection
-from .timecode import seconds_to_timecode, timecode_to_seconds
+from .selections import clip_seconds, load_selection
+from .timecode import frame_rate, frames_to_timecode, seconds_to_frames, seconds_to_timestamp
+
+
+def _edl_frame_ranges(clips: list[dict], fps: float):
+    cursor = 0
+    for index, clip in enumerate(clips, 1):
+        start, end = clip_seconds(clip, "start", fps), clip_seconds(clip, "end", fps)
+        if start < 0 or end <= start:
+            raise ValueError(f"clip {index} requires non-negative start and positive duration")
+        source_in, source_out = seconds_to_frames(start, fps), seconds_to_frames(end, fps)
+        record_out = cursor + source_out - source_in
+        yield index, clip, source_in, source_out, cursor, record_out
+        cursor = record_out
 
 
 def generate_edl(clips: list[dict], source_file: str, fps: float = 30.0) -> str:
     lines = ["TITLE: Video Editing Export", ""]
-    timeline_start = 0.0
-    for index, clip in enumerate(clips, 1):
+    for index, clip, source_in, source_out, record_in, record_out in _edl_frame_ranges(clips, fps):
         label = clip.get("label", f"Clip_{index:03d}")
         clip_source = clip.get("source") or source_file
-        start = timecode_to_seconds(clip["start"])
-        end = timecode_to_seconds(clip["end"])
-        duration = max(0.0, end - start)
-        timeline_end = timeline_start + duration
+        if source_out <= source_in:
+            raise ValueError(f"clip {index} does not span a frame at {fps} fps")
         lines.append(f"{index:03d}  {label}     C")
         lines.append(
-            f"{seconds_to_timecode(start, fps)} {seconds_to_timecode(end, fps)} "
-            f"{seconds_to_timecode(timeline_start, fps)} {seconds_to_timecode(timeline_end, fps)}"
+            f"{frames_to_timecode(source_in, fps)} {frames_to_timecode(source_out, fps)} "
+            f"{frames_to_timecode(record_in, fps)} {frames_to_timecode(record_out, fps)}"
         )
         lines.append("")
         lines.append(f"* FROM CLIP NAME: {clip_source}")
         lines.append("")
-        timeline_start = timeline_end
     return "\n".join(lines)
 
 
 def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0) -> str:
-    total_frames = 0
-    for clip in clips:
-        total_frames += int((timecode_to_seconds(clip["end"]) - timecode_to_seconds(clip["start"])) * fps)
     track = []
     timeline_start = 0
     for index, clip in enumerate(clips, 1):
         label = clip.get("label", f"Clip_{index:03d}")
         clip_source = clip.get("source") or source_file
-        start = int(timecode_to_seconds(clip["start"]) * fps)
-        end = int(timecode_to_seconds(clip["end"]) * fps)
+        start = int(clip_seconds(clip, "start", fps) * fps)
+        end = int(clip_seconds(clip, "end", fps) * fps)
         duration = max(0, end - start)
         track.append(
             f"""          <generatoritem>
@@ -64,7 +69,7 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0) -> str:
 <xmeml version="4">
   <sequence id="Videoedit Highlights">
     <name>Videoedit Generated Edit</name>
-    <duration>{total_frames}</duration>
+    <duration>{timeline_start}</duration>
     <rate><timebase>{int(fps)}</timebase><ntsc>FALSE</ntsc></rate>
     <media><video><track>
 {chr(10).join(track)}
@@ -94,8 +99,8 @@ def generate_extract_script(clips: list[dict], source_file: str, clips_dir: str)
         label = re.sub(r"[^\w.-]+", "_", clip.get("label", f"clip_{index:03d}"))
         label = label.strip("._-") or f"clip_{index:03d}"
         output = os.path.join(clips_dir, f"{label}.mp4")
-        start_seconds = max(0.0, timecode_to_seconds(clip["start"]))
-        end_seconds = max(0.0, timecode_to_seconds(clip["end"]))
+        start_seconds = max(0.0, clip_seconds(clip, "start", clip.get("source_fps", 30)))
+        end_seconds = max(0.0, clip_seconds(clip, "end", clip.get("source_fps", 30)))
         if end_seconds <= start_seconds:
             raise ValueError(f"clip {label} end must be after start")
         lines.append(
@@ -109,17 +114,7 @@ def generate_extract_script(clips: list[dict], source_file: str, clips_dir: str)
 
 
 def _time_arg(seconds: float) -> str:
-    seconds = max(0.0, float(seconds or 0))
-    whole = int(seconds)
-    milliseconds = int(round((seconds - whole) * 1000))
-    if milliseconds >= 1000:
-        whole += 1
-        milliseconds = 0
-    hours = whole // 3600
-    minutes = (whole % 3600) // 60
-    secs = whole % 60
-    base = f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{base}.{milliseconds:03d}".rstrip("0").rstrip(".") if milliseconds else base
+    return seconds_to_timestamp(seconds)
 
 
 def export_selection_file(selection_path: str, output_dir: str, fps: float | None = None,
@@ -158,18 +153,19 @@ def export_selection_file(selection_path: str, output_dir: str, fps: float | Non
 
 def handoff_metadata(clips: list[dict], fps: float, handles: float = 0.0) -> dict:
     sources = []
-    timeline = 0.0
-    for index, clip in enumerate(clips, 1):
-        start, end = timecode_to_seconds(clip["start"]), timecode_to_seconds(clip["end"])
+    rate = float(frame_rate(fps))
+    for index, clip, source_in, source_out, record_in, record_out in _edl_frame_ranges(clips, fps):
+        start, end = clip_seconds(clip, "start", fps), clip_seconds(clip, "end", fps)
         sources.append({"source": clip["source"], "reel": clip.get("label") or f"Clip_{index:03d}",
                         "event": index, "start_seconds": start, "end_seconds": end,
-                        "edl_in": seconds_to_timecode(start, fps), "edl_out": seconds_to_timecode(end, fps),
+                        "edl_in": frames_to_timecode(source_in, fps), "edl_out": frames_to_timecode(source_out, fps),
+                        "edl_record_in": frames_to_timecode(record_in, fps),
+                        "edl_record_out": frames_to_timecode(record_out, fps),
                         "xml_in_frames": int(start * fps), "xml_out_frames": int(end * fps),
-                        "timeline_start_seconds": timeline, "assumed_source_fps": fps})
-        timeline += max(0.0, end - start)
+                        "timeline_start_seconds": record_in / rate, "assumed_source_fps": fps})
     return {"timeline_fps": fps, "sources": sources, "handles": handles,
-            "rounding": {"edl": "legacy_nearest_frame_formatter", "xml": "floor_frames"},
+            "rounding": {"edl": "nearest_frame_half_up", "xml": "floor_frames"},
             "fps_assumption": "one_nominal_rate_for_all_sources", "editor_verified": False,
             "omitted_features": ["audio_tracks_not_exported", "source_start_timecode_not_applied", "transitions_not_exported"],
-            "limitations": ["legacy_edl_frame_carry", "legacy_xml_generatoritems", "mixed_rate_relink_unverified"] +
+            "limitations": ["legacy_edl_event_columns", "legacy_xml_generatoritems", "mixed_rate_relink_unverified"] +
                            (["fractional_rate_legacy_formatting"] if fps != int(fps) else [])}

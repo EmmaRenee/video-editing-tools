@@ -8,10 +8,10 @@ import os
 import time
 from typing import Any
 
-from .selections import load_selection
+from .selections import clip_seconds, load_selection
 from .edl import handoff_metadata
 from .manifests import RunManifest, fingerprint
-from .timecode import seconds_to_hhmmss, timecode_to_seconds
+from .timecode import seconds_to_hhmmss, seconds_to_timestamp, timecode_to_seconds
 
 
 FORMAT_PRESETS = {
@@ -68,8 +68,8 @@ def _plan_roughcut(selection_json: str, output: str, preset: str, sequence: str,
     execution.data["inputs"].extend(fingerprint(source, content=False) for source in sorted({clip["source"] for clip in clips}))
     execution.data["handoff"] = handoff_metadata(clips, selection.fps, handles=handles)
     execution.data["handoff"].update(render_mode=render_mode, format=format_type,
-                                    planning_rounding="legacy_integral_hhmmss", handles_clamped_to_duration=False)
-    total_duration = round(sum(clip["duration"] for clip in clips), 3)
+                                    planning_rounding="none_elapsed_seconds", handles_clamped_to_duration=False)
+    total_duration = sum(clip["duration"] for clip in clips)
     output = os.fspath(output)
     report_output = os.fspath(report_output or _default_report_path(output))
     payload = {
@@ -83,6 +83,7 @@ def _plan_roughcut(selection_json: str, output: str, preset: str, sequence: str,
         "handles": float(handles),
         "max_clips": max_clips,
         "render_mode": render_mode,
+        "fps": selection.fps,
         "summary": {
             "clips": len(clips),
             "duration": total_duration,
@@ -109,8 +110,8 @@ def clips_from_plan(path: str) -> list[dict[str, Any]]:
     return [
         {
             "source": clip["source"],
-            "start": clip["start"],
-            "end": clip["end"],
+            "start": seconds_to_timestamp(clip_seconds(clip, "start", plan.get("fps", 30))),
+            "end": seconds_to_timestamp(clip_seconds(clip, "end", plan.get("fps", 30))),
             "label": clip.get("label") or clip.get("id") or f"clip_{index:03d}",
             "score": clip.get("score", 0),
             "render_mode": plan.get("render_mode", "copy"),
@@ -123,15 +124,15 @@ def clips_from_plan(path: str) -> list[dict[str, Any]]:
 def _planned_clip(clip: dict[str, Any], index: int, handles: float) -> dict[str, Any]:
     start = max(0.0, _seconds(clip.get("start_seconds", clip.get("start", 0))) - max(0.0, float(handles)))
     end = max(start, _seconds(clip.get("end_seconds", clip.get("end", start))) + max(0.0, float(handles)))
-    duration = round(max(0.0, end - start), 3)
+    duration = max(0.0, end - start)
     return {
         "id": clip.get("id") or clip.get("label") or f"clip_{index:03d}",
         "label": clip.get("label") or clip.get("id") or f"clip_{index:03d}",
         "source": clip["source"],
-        "start": seconds_to_hhmmss(start),
-        "end": seconds_to_hhmmss(end),
-        "start_seconds": round(start, 3),
-        "end_seconds": round(end, 3),
+        "start": seconds_to_timestamp(start),
+        "end": seconds_to_timestamp(end),
+        "start_seconds": start,
+        "end_seconds": end,
         "duration": duration,
         "score": int(clip.get("score", 0) or 0),
         "review_order": int(clip.get("review_order", clip.get("order", index)) or index),
@@ -174,17 +175,17 @@ def _apply_target_duration(clips: list[dict[str, Any]], target_duration: float |
         if clip["duration"] <= remaining or not selected:
             selected_clip = dict(clip)
             if selected_clip["duration"] > remaining and remaining >= 1.0:
-                selected_clip["duration"] = round(remaining, 3)
-                selected_clip["end_seconds"] = round(selected_clip["start_seconds"] + remaining, 3)
-                selected_clip["end"] = seconds_to_hhmmss(selected_clip["end_seconds"])
+                selected_clip["duration"] = remaining
+                selected_clip["end_seconds"] = selected_clip["start_seconds"] + remaining
+                selected_clip["end"] = seconds_to_timestamp(selected_clip["end_seconds"])
             selected.append(selected_clip)
             elapsed += selected_clip["duration"]
             continue
         if remaining >= 1.0:
             selected_clip = dict(clip)
-            selected_clip["duration"] = round(remaining, 3)
-            selected_clip["end_seconds"] = round(selected_clip["start_seconds"] + remaining, 3)
-            selected_clip["end"] = seconds_to_hhmmss(selected_clip["end_seconds"])
+            selected_clip["duration"] = remaining
+            selected_clip["end_seconds"] = selected_clip["start_seconds"] + remaining
+            selected_clip["end"] = seconds_to_timestamp(selected_clip["end_seconds"])
             selected.append(selected_clip)
             break
     return selected

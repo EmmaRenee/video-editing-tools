@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .timecode import seconds_to_hhmmss, timecode_to_seconds
+from .timecode import seconds_to_hhmmss, seconds_to_timestamp, timecode_to_seconds
 
 
 @dataclass
@@ -246,8 +246,10 @@ class SelectionSet:
             "source": self.source,
             "clips": [
                 {
-                    "start": clip.to_dict()["start"],
-                    "end": clip.to_dict()["end"],
+                    "start": seconds_to_timestamp(clip.start),
+                    "end": seconds_to_timestamp(clip.end),
+                    "start_seconds": clip.start,
+                    "end_seconds": clip.end,
                     "label": clip.id,
                     "score": clip.score,
                     "action": clip.action,
