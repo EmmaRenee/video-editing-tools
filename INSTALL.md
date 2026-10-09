@@ -395,6 +395,10 @@ videoedit export-edl approved.json --output edl/
 ```
 
 Generated handoff files include EDL, XML, M3U, and FFmpeg extraction scripts. Use DaVinci Resolve for color, sound mix, fine timing, and final delivery.
+See [Editor Handoff](docs/editor-handoff.md) for native rates/timecode, mono/stereo
+audio, missing-media diagnostics and mixed-rate XML. Independent OpenTimelineIO
+readers are optional development/CI checks, not required runtime tools or proof
+of a successful Resolve import. Do not import a diagnostic-only unsupported EDL.
 
 ## Optional Cloud/API Tools
 

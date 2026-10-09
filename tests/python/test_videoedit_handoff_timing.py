@@ -233,8 +233,8 @@ class DeliveryTimingTests(unittest.TestCase):
     def test_edl_source_and_record_frame_spans_agree(self):
         clips = [{"source": "a.mp4", "start_seconds": 1.125, "end_seconds": 2.875},
                  {"source": "b.mp4", "start_seconds": 3.125, "end_seconds": 4.875}]
-        lines = [line.split() for line in generate_edl(clips, "mixed", 30).splitlines()
-                 if line.startswith("00:")]
+        lines = [line.split()[4:] for line in generate_edl(clips, "mixed", 30).splitlines()
+                 if line[:3].isdigit()]
         cursor = 0
         for source_in, source_out, record_in, record_out in lines:
             frames = lambda tc: round(timecode_to_seconds(tc, 30) * 30)
@@ -251,20 +251,24 @@ class DeliveryTimingTests(unittest.TestCase):
         self.assertEqual(sources[0]["edl_record_out"], "00:00:01:22")
         self.assertEqual(sources[1]["edl_record_in"], "00:00:01:22")
 
-    def test_fractional_xml_limitation_remains_explicit(self):
+    def test_fractional_xml_has_ntsc_rate_instead_of_legacy_limitation(self):
         metadata = handoff_metadata([{"source": "a.mp4", "start_seconds": 0,
                                       "end_seconds": 1001}], 29.97)
-        self.assertIn("fractional_rate_legacy_formatting", metadata["limitations"])
+        self.assertNotIn("fractional_rate_legacy_formatting", metadata["limitations"])
+        root = ET.fromstring(generate_xml([{"source": "a.mp4", "start_seconds": 0,
+                                           "end_seconds": 1001}], "a.mp4", 29.97))
+        self.assertEqual(root.findtext("sequence/rate/timebase"), "30")
+        self.assertEqual(root.findtext("sequence/rate/ntsc"), "TRUE")
 
-    def test_legacy_xml_sequence_duration_matches_its_track_endpoints(self):
+    def test_xml_sequence_duration_matches_its_track_endpoints(self):
         clips = [{"start_seconds": 1.125, "end_seconds": 2.875},
                  {"start_seconds": 1.125, "end_seconds": 2.875}]
         root = ET.fromstring(generate_xml(clips, "source.mp4", 30))
         sequence = root.find("sequence")
-        items = sequence.findall("media/video/track/generatoritem")
-        self.assertEqual(int(sequence.findtext("duration")), 106)
-        self.assertEqual(sum(int(item.findtext("duration")) for item in items), 106)
-        self.assertEqual(int(items[-1].findtext("start")) + int(items[-1].findtext("duration")), 106)
+        items = sequence.findall("media/video/track/clipitem")
+        self.assertEqual(int(sequence.findtext("duration")), 104)
+        self.assertEqual(sum(int(item.findtext("duration")) for item in items), 104)
+        self.assertEqual(int(items[-1].findtext("end")), 104)
 
     def test_edl_rejects_ranges_that_collapse_to_zero_frames(self):
         with self.assertRaisesRegex(ValueError, "frame"):

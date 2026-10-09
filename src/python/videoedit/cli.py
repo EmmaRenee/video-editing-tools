@@ -527,6 +527,14 @@ def cmd_export_edl(args: argparse.Namespace) -> int:
         paths = _expand_paths(value)
         for path in paths:
             written.extend(export_selection_file(path, output, fps=args.fps, manifest_paths=args.manifest_paths))
+            stem = os.path.splitext(os.path.basename(path))[0]
+            manifest_path = os.path.join(output, stem + "_handoff.json")
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            if manifest.get("status") != "ok":
+                print(f"warning: Partial handoff; inspect {stem}_handoff.json before editing.", file=sys.stderr)
+            if manifest.get("handoff", {}).get("edl_supported") is False:
+                print("warning: EDL is not an importable edit; use XML.", file=sys.stderr)
     print(f"Wrote {len(written)} handoff files to {output}")
     return 0
 
