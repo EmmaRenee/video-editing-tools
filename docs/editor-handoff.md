@@ -42,7 +42,10 @@ diagnostics, not the edit files themselves.
 ## Supported Limits
 
 CMX EDL cannot safely express mixed source rates or mixed DF/NDF modes in this
-cut-only writer. Direct `generate_edl` raises a targeted error. The four-file
+cut-only writer. Tested CMX rates are 24, 25, 30, 48, 50, 60 and NTSC fractions
+24000/1001, 30000/1001, 48000/1001, 60000/1001; other rates, including 120 fps,
+are explicitly unsupported rather than emitting invalid frame labels.
+Direct `generate_edl` raises a targeted error. The four-file
 export instead writes an explicitly **NOT AN IMPORTABLE EDIT** diagnostic EDL
 with no edit events, exports XML normally, and marks the manifest `partial` with
 `edl_supported: false`. Events beyond CMX numbering/timecode limits are handled

@@ -14,6 +14,8 @@ from .timecode import frame_rate, frames_to_timecode, seconds_to_frames, timecod
 
 HANDOFF_SCHEMA = "videoedit.handoff.v1"
 DROP_RATES = {Fraction(30000, 1001), Fraction(60000, 1001)}
+CMX_RATES = {Fraction(value) for value in (24, 25, 30, 48, 50, 60)} | {
+    Fraction(value, 1001) for value in (24000, 30000, 48000, 60000)}
 
 
 def _valid_xml_text(value: str) -> bool:
@@ -132,7 +134,10 @@ def _source_path(value: str, base_dir: str | None) -> str:
             raise ValueError("ambiguous relative handoff source; provide an absolute path")
         if not path.exists():
             path = relative
-    return str(path.resolve())
+    resolved = str(path.resolve())
+    if not _valid_xml_text(resolved) or any(char in resolved for char in ("\r", "\n")):
+        raise ValueError("handoff resolved source contains characters forbidden in XML or line-based exports")
+    return resolved
 
 
 def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
@@ -217,6 +222,8 @@ def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
         cursor += record_duration
         if source.rate != rate:
             warn("edl_unsupported_mixed_rate", event)
+        if source.rate not in CMX_RATES or rate not in CMX_RATES:
+            warn("edl_unsupported_rate", event)
         if len(source.info.audio_streams) > 1 or any(stream.get("channels") not in {1, 2} for stream in source.info.audio_streams):
             warn("unsupported_audio_layout", event)
         elif source.info.audio_streams:

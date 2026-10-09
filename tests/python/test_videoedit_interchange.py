@@ -2,6 +2,7 @@
 
 import json
 import importlib.util
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -281,6 +282,28 @@ class InterchangeTests(unittest.TestCase):
         self.assertIn("edl_unsupported_mixed_rate", timeline.limitations)
         self.assertNotIn("edl_unsupported_event_or_timecode_range", timeline.limitations)
 
+    def test_unsupported_cmx_rate_never_emits_three_digit_frame_labels(self):
+        timeline, _ = self.timeline([{**self.clips[0], "start_seconds": 0.95, "end_seconds": 1.95}],
+                                   120, media(fps="120/1"))
+        self.assertFalse(timeline.edl_supported)
+        self.assertIn("edl_unsupported_rate", timeline.limitations)
+        with self.assertRaisesRegex(ValueError, "unsupported.rate"):
+            generate_edl([], "mixed", 120, timeline=timeline)
+
+    @unittest.skipIf(os.name == "nt", "POSIX control-character filename fixture")
+    def test_resolved_symlink_target_is_validated_before_xml_generation(self):
+        target = self.root / "bad\x01name.mov"
+        target.write_bytes(b"synthetic probe fixture")
+        alias = self.root / "valid-alias.mov"
+        alias.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "resolved source"):
+            self.timeline([{**self.clips[0], "source": str(alias)}])
+
+    def test_invalid_source_drop_frame_rates_are_already_rejected_by_parser(self):
+        for fps in ("25/1", "24000/1001"):
+            with self.subTest(fps=fps), self.assertRaisesRegex(ValueError, "invalid source_timecode"):
+                self.timeline(info=media(fps=fps, timecode="01:00:00;00"))
+
     def test_cli_surfaces_partial_and_non_importable_edl_without_changing_return_contract(self):
         from videoedit.cli import main
         selection = self.root / "approved.json"
@@ -297,13 +320,15 @@ class InterchangeTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("opentimelineio"), "Optional OTIO readers unavailable")
     def test_independent_otio_readers_preserve_ranges_and_media_urls(self):
         import opentimelineio as otio
+        from videoedit.handoff import CMX_RATES
         from videoedit.timecode import frame_rate
         required = {"fcp_xml", "cmx_3600"}
         if not required <= set(otio.adapters.available_adapter_names()):
             self.skipTest("Optional FCP/CMX adapters unavailable")
-        cases = [("24/1", 24, "01:00:00:00"), ("30000/1001", 29.97, "01:00:00:00"),
-                 ("30000/1001", 29.97, "01:00:00;00"), ("60000/1001", 59.94, "01:00:00;00"),
-                 ("24/1", 30, "01:00:00:00"), ("24000/1001", 30, "01:00:00:00")]
+        cases = [(f"{rate.numerator}/{rate.denominator}", rate, "01:00:00:00") for rate in sorted(CMX_RATES)] + [
+            ("30000/1001", 29.97, "01:00:00;00"), ("60000/1001", 59.94, "01:00:00;00"),
+            ("24/1", 30, "01:00:00:00"), ("24000/1001", 30, "01:00:00:00"),
+            ("120/1", 120, "01:00:00:00")]
         for source_rate, fps, tc in cases:
             with self.subTest(source_rate=source_rate, fps=fps, tc=tc):
                 audio = [{"index": 1, "channels": 2, "sample_rate": 48000, "codec": "pcm_s16le"}]

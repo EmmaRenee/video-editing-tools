@@ -65,6 +65,21 @@ evidence and design rulings, not a second backlog.
   suite: 322 tests; 30 independent-reader checks passed. Wheel/source build,
   core-only reinstall and the three installed-CLI runtime exports/readback
   checks passed again. Final committed re-review/CI remain pending.
+- Follow-up independent review reproduced unsupported 120-fps CMX labels and a
+  valid alias resolving to an XML-invalid filename. Red tests include an actual
+  on-disk POSIX symlink. Both are fixed with tested-rate gating and resolved-path
+  validation. Independent re-review reports no remaining concrete findings;
+  all ten supported CMX rates and five unsupported-rate combinations were
+  independently parsed/rejected as appropriate. Full suite/actual symlink/live
+  editor were not run by that read-only reviewer; local tests cover the first
+  two, while live editor remains outstanding.
+- CodeRabbit's second completed pass raised one major invalid-DF-rate issue,
+  but it does not reproduce: the existing `timecode_to_seconds` rejects DF25
+  and DF23.976 before creating a source. A regression verifies that existing
+  guard without introducing a redundant validator. Latest local suite: 325
+  tests, one optional-reader skip; all 33 focused reader tests pass, covering
+  every advertised CMX rate and XML 120 fps. Wheel/source build, core-only
+  reinstall and three installed-CLI exports passed after the final fixes.
 
 ## Selection Timebase Slice
 
