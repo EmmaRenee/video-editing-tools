@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import html
+import importlib.util
 import json
 import math
 import os
@@ -34,6 +35,10 @@ AI_REVIEW_SCHEMA_VERSION = "videoedit.missed_review.v1"
 AI_CLIP_JUDGE_SCHEMA_VERSION = "videoedit.ai_clip_judgments.v1"
 AI_CLIP_JUDGE_ENV = "VIDEOEDIT_AI_JUDGE_COMMAND"
 AI_CLIP_JUDGE_ACTIONS = {"select", "review", "broll", "reject", "ignore", "cut"}
+OPENCLIP_INSTALL_MESSAGE = (
+    "OpenCLIP frame scoring requires open_clip_torch, torch, and Pillow. "
+    "Install with: python -m pip install -e './src/python[ai]'"
+)
 
 
 @dataclass(frozen=True)
@@ -247,6 +252,10 @@ def score_frames(
             _write_json(output, payload)
             return {"output": output, "status": "unavailable", "count": 0, "error": payload["error"]}
 
+    model_before = {key: getattr(encoder, key, None) for key in
+                    ("models_initialized", "model_initialization_attempts", "model_initialization_seconds")}
+    runtime_libraries = getattr(encoder, "runtime_libraries", None)
+
     probe = media_probe or probe_media
     sampler = frame_sampler or _sample_frame
     shared = FrameCache(frame_cache or os.path.join(output_dir, ".frame_cache"), timeout=timeout,
@@ -262,7 +271,8 @@ def score_frames(
         profile=profile.to_dict(), sampling={"kind": SAMPLER if shared else "injected", "interval_seconds": float(sample_interval),
                                              "max_frames_per_file": int(max_frames_per_file), "width": 336, "jpeg_quality": 3},
         random_seed=getattr(encoder, "random_seed", None), config={"model": model, "pretrained": pretrained, "min_score": min_score,
-                                                                 "decoder": shared.decoder if shared else "injected"},
+                                                                 "decoder": shared.decoder if shared else "injected",
+                                                                 **({"runtime_libraries": runtime_libraries} if runtime_libraries is not None else {})},
     )
     for source in files:
         signature = _source_signature(source, profile.id, sample_interval, max_frames_per_file, min_score, model, pretrained)
@@ -331,6 +341,9 @@ def score_frames(
         scored_frames = []
         try:
             score_rows = encoder.score_images(frame_paths, prompt_texts)
+            loaded_checksum = getattr(encoder, "_loaded_checkpoint_sha256", None)
+            if loaded_checksum is not None and loaded_checksum != provenance["model"]["sha256"]:
+                raise ValueError("loaded OpenCLIP checkpoint differs from recorded provenance; create a new encoder and retry")
             if len(score_rows) != len(frame_paths):
                 raise ValueError("encoder row count does not match sampled frames")
             for scores in score_rows:
@@ -368,6 +381,11 @@ def score_frames(
         "provenance": provenance,
         "telemetry": {"cache_hits": cache_hits, "cache_misses": cache_misses, "cache_scope": "inference",
                       "elapsed_seconds": round(time.monotonic() - started, 6),
+                      **{key: getattr(encoder, key) - value
+                         if isinstance(value, (int, float)) and not isinstance(value, bool)
+                         and isinstance(getattr(encoder, key, None), (int, float)) else None
+                         for key, value in model_before.items()},
+                      "model_initialization_scope": "per_invocation",
                       "frame_sampling": {**frame_telemetry, "status": "measured" if shared else "not_instrumented",
                                          "decoded_frames_scope": "successful_sample_images", "output_size_scope": "jpeg_images"}},
         "provider_metadata": {
@@ -375,6 +393,7 @@ def score_frames(
             "model": getattr(encoder, "model_name", model),
             "pretrained": pretrained,
             "artifact_kind": "ai_frame_scores",
+            **({"runtime_libraries": runtime_libraries} if runtime_libraries is not None else {}),
         },
         "settings": {
             "sample_interval": float(sample_interval),
@@ -608,34 +627,79 @@ class CommandClipJudgeProvider:
 
 
 class OpenCLIPEncoder:
+    """Load at most once; create a fresh encoder after any initialization failure."""
+
     provider_name = "openclip"
 
     def __init__(self, model: str = "ViT-B-32", pretrained: str = "laion2b_s34b_b79k") -> None:
         try:
-            import open_clip
-            from PIL import Image
+            if any(importlib.util.find_spec(name) is None for name in ("open_clip", "torch", "PIL")):
+                raise ImportError("missing optional frame-scoring dependency")
             import torch
-        except ImportError as exc:
-            raise ImportError(
-                "OpenCLIP frame scoring requires open_clip_torch, torch, and Pillow. "
-                "Install with: python -m pip install -e './src/python[ai]'"
-            ) from exc
-        self.open_clip = open_clip
-        self.Image = Image
+        except (ImportError, ValueError) as exc:
+            raise ImportError(OPENCLIP_INSTALL_MESSAGE) from exc
         self.torch = torch
         self.device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-        self.model, _, self.preprocess = open_clip.create_model_and_transforms(model, pretrained=pretrained)
-        self.model = self.model.to(self.device).eval()
-        self.tokenizer = open_clip.get_tokenizer(model)
         self.model_name = model
+        self.pretrained = pretrained
         self.provider_version = library_version("open_clip_torch")
-        self.precision = str(next(self.model.parameters()).dtype).removeprefix("torch.")
+        self.runtime_libraries = {name: library_version(name) for name in ("torch", "Pillow")}
+        self.precision = "float32"
         self.checkpoint_path = pretrained if os.path.isfile(pretrained) else None
-        cfg = open_clip.get_pretrained_cfg(model, pretrained)
+        self.open_clip = None
+        cfg = {}
+        if self.checkpoint_path is None:
+            try:
+                import open_clip
+            except ImportError as exc:
+                raise ImportError(OPENCLIP_INSTALL_MESSAGE) from exc
+            self.open_clip = open_clip
+            cfg = open_clip.get_pretrained_cfg(model, pretrained)
         hub = cfg.get("hf_hub", "") if isinstance(cfg, dict) else ""
         self.model_repository = "/".join(hub.split("/")[:2]) if hub else None
+        self.model = self.preprocess = self.tokenizer = self.Image = None
+        self.models_initialized = self.model_initialization_attempts = 0
+        self.model_initialization_seconds = 0.0
+        self._initialization_error: Exception | None = None
+        self._loaded_checkpoint_sha256: str | None = None
+
+    def _load_model(self) -> None:
+        if self.models_initialized:
+            return
+        if self._initialization_error is not None:
+            raise self._initialization_error
+        started = time.monotonic()
+        self.model_initialization_attempts += 1
+        try:
+            checkpoint_checksum = file_sha256(self.checkpoint_path) if self.checkpoint_path else None
+            if self.open_clip is None:
+                import open_clip
+                self.open_clip = open_clip
+            from PIL import Image
+            self.Image = Image
+            self.model, _, self.preprocess = self.open_clip.create_model_and_transforms(
+                self.model_name, pretrained=self.pretrained, precision="fp32",
+            )
+            self.model = self.model.to(self.device).eval()
+            self.tokenizer = self.open_clip.get_tokenizer(self.model_name)
+            if str(next(self.model.parameters()).dtype).removeprefix("torch.") != self.precision:
+                raise ValueError("OpenCLIP model precision differs from configured float32 provenance")
+            if self.checkpoint_path and file_sha256(self.checkpoint_path) != checkpoint_checksum:
+                raise ValueError("OpenCLIP checkpoint changed during model initialization; retry with stable weights")
+            self._loaded_checkpoint_sha256 = checkpoint_checksum
+            self.models_initialized = 1
+        except Exception as exc:
+            if isinstance(exc, ImportError):
+                error = ImportError(f"{OPENCLIP_INSTALL_MESSAGE} Dependency import failed: {exc}")
+                self._initialization_error = error
+                raise error from exc
+            self._initialization_error = exc
+            raise
+        finally:
+            self.model_initialization_seconds += time.monotonic() - started
 
     def score_images(self, image_paths: list[str], prompts: list[str]) -> list[list[float]]:
+        self._load_model()
         torch = self.torch
         images = [self.preprocess(self.Image.open(path).convert("RGB")) for path in image_paths]
         batch = torch.stack(images).to(self.device)

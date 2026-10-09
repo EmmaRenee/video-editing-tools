@@ -231,6 +231,16 @@ videoedit ai review-missed analysis/ai_missed_moments.json --output review_misse
 
 AI frame scoring is optional, local-first, and does not require a paid subscription. Missing OpenCLIP/Torch dependencies write an unavailable artifact with install guidance; core inventory, rating, review, and rough-cut commands still work.
 
+For reproducible offline scoring, use an existing local checkpoint with
+`videoedit ai score-frames footage/ --pretrained /path/to/model.safetensors --output analysis/ai_frame_scores.json`.
+Full inference-cache hits load no model and skip OpenCLIP/Pillow imports for local
+checkpoints, but still import Torch for device selection and verify model/runtime
+identity. Named pretrained catalogs still import OpenCLIP. Torch/Pillow upgrades
+invalidate native score caches, including a one-time refresh of older artifacts.
+Do not change checkpoints while a run is active. See
+[cache lifecycle and limits](docs/frame-cache.md#telemetry-and-providers); successful
+installation or faster startup does not establish editorial accuracy.
+
 AI-assisted presets declare their optional modules and local dependencies. Use `validate` and `run --dry-run` before long footage runs:
 
 ```bash
