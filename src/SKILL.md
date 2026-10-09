@@ -129,6 +129,12 @@ not combine alternate tracks. Audio passes exclude video decoding and scenes
 exclude audio; one failed detector still makes the overall rating partial.
 Reanalyze caches created before explicit first-stream selection. Inspect
 multi-track sources before using the measurements as editorial evidence.
+Core detector cache policy `input_identity_v5` also refreshes earlier caches once;
+it tracks decoder identity, selected transcript content and signal artifacts.
+Inspect `rating_run.json` telemetry `cache_miss_reasons` when reuse is unexpected.
+Cached analysis is rescored with current weights; scoring-only tuning need not
+decode again. Source identity uses local metadata, not a full byte checksum;
+use `--no-cache` when metadata is untrusted and keep input files stable during runs.
 
 For delivery timing, trust `start_seconds`/`end_seconds` over whole-second display
 timestamps. Current approval and selection writers retain fractional bounds;

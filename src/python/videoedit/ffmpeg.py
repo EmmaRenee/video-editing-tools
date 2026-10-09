@@ -29,6 +29,23 @@ def has_command(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def decoder_identity() -> dict[str, dict[str, str | None]]:
+    """Describe the actual FFmpeg tools used by both detector and image caches."""
+    identity = {}
+    for command in ("ffmpeg", "ffprobe"):
+        executable = shutil.which(command)
+        version = None
+        if executable:
+            try:
+                result = run_command([executable, "-version"], timeout=10)
+                lines = result.stdout.splitlines()
+                version = lines[0] if result.returncode == 0 and lines else None
+            except (OSError, TimeoutError):
+                pass
+        identity[command] = {"executable": executable, "version": version}
+    return identity
+
+
 def run_command(args: list[str], timeout: int = 180) -> CommandResult:
     """Run a command without importing subprocess.
 
