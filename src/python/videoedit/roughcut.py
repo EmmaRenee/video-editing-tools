@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from fractions import Fraction
 import json
+import math
 import os
+from pathlib import Path
 import time
 from typing import Any
 
 from .selections import clip_seconds, load_selection
-from .edl import handoff_metadata
+from .handoff import HandoffClip, build_handoff_timeline
 from .manifests import RunManifest, fingerprint
-from .timecode import seconds_to_hhmmss, seconds_to_timestamp, timecode_to_seconds
+from .timecode import frame_rate, seconds_to_frames, seconds_to_hhmmss, seconds_to_timestamp
 
 
 FORMAT_PRESETS = {
@@ -37,6 +40,14 @@ def plan_roughcut(
     report_output: str | None = None,
     manifest_paths: str = "absolute",
 ) -> dict[str, Any]:
+    handles = _nonnegative_number(handles, "handles")
+    if target_duration is not None:
+        target_duration = _nonnegative_number(target_duration, "target_duration")
+    if max_clips is not None:
+        limit = _nonnegative_number(max_clips, "max_clips")
+        if not limit.is_integer():
+            raise ValueError("max_clips must be a non-negative integer")
+        max_clips = int(limit)
     stem = os.path.splitext(os.fspath(output))[0]
     settings = {"preset": preset, "sequence": sequence, "target_duration": target_duration, "format": format_type,
                 "handles": handles, "max_clips": max_clips, "render_mode": render_mode}
@@ -60,20 +71,32 @@ def _plan_roughcut(selection_json: str, output: str, preset: str, sequence: str,
         raise ValueError(f"unsupported render mode: {render_mode}")
 
     selection = load_selection(selection_json)
-    clips = [_planned_clip(clip, index, handles) for index, clip in enumerate(selection.clips, 1)]
+    approved = build_handoff_timeline(selection.clips, selection.source or "mixed", selection.fps,
+                                      base_dir=str(Path(selection_json).resolve().parent),
+                                      original_clips=selection.raw_clips)
+    clips = [_planned_clip(clip, index, handles, native)
+             for index, (clip, native) in enumerate(zip(selection.clips, approved.clips), 1)]
     clips = _sequence_clips(clips, sequence)
     if max_clips is not None:
-        clips = clips[: max(0, int(max_clips))]
-    clips = _apply_target_duration(clips, target_duration)
+        clips = clips[:max_clips]
+    clips = _apply_target_duration(clips, target_duration, selection.fps)
     execution.data["inputs"].extend(fingerprint(source, content=False) for source in sorted({clip["source"] for clip in clips}))
-    execution.data["handoff"] = handoff_metadata(clips, selection.fps, handles=handles)
+    timeline = build_handoff_timeline(clips, "mixed", selection.fps,
+                                      media_info={clip.source.path: clip.source.info for clip in approved.clips})
+    execution.data["handoff"] = timeline.to_dict(handles)
     execution.data["handoff"].update(render_mode=render_mode, format=format_type,
-                                    planning_rounding="none_elapsed_seconds", handles_clamped_to_duration=False)
+                                    planning_rounding="none_elapsed_seconds",
+                                    handles_clamped_to_duration=any(clip["handles_clamped_to_source"] for clip in clips),
+                                    target_policy="trim_tail_elapsed_seconds_reject_zero_frame_spans")
+    execution.data["warnings"].extend(timeline.warnings)
+    execution.data["partial"] = bool(set(timeline.limitations) - {"edl_audio_not_exported"})
     total_duration = sum(clip["duration"] for clip in clips)
     output = os.fspath(output)
     report_output = os.fspath(report_output or _default_report_path(output))
     payload = {
         "generated": datetime.now().isoformat(),
+        "status": "partial" if execution.data["partial"] else "ok",
+        "warnings": list(timeline.warnings),
         "selection": os.fspath(selection_json),
         "preset": preset,
         "sequence": sequence,
@@ -94,7 +117,8 @@ def _plan_roughcut(selection_json: str, output: str, preset: str, sequence: str,
     }
     _write_json(output, payload)
     _write_report(payload, report_output)
-    return {"plan": output, "report": report_output, "clips": len(clips), "duration": total_duration}
+    return {"plan": output, "report": report_output, "clips": len(clips), "duration": total_duration,
+            "warnings": list(timeline.warnings)}
 
 
 def load_roughcut_plan(path: str) -> dict[str, Any]:
@@ -109,9 +133,12 @@ def clips_from_plan(path: str) -> list[dict[str, Any]]:
     plan = load_roughcut_plan(path)
     return [
         {
+            **clip,
             "source": clip["source"],
-            "start": seconds_to_timestamp(clip_seconds(clip, "start", plan.get("fps", 30))),
-            "end": seconds_to_timestamp(clip_seconds(clip, "end", plan.get("fps", 30))),
+            "start": seconds_to_timestamp(clip_seconds(clip, "start", clip.get("source_fps", plan.get("fps", 30)))),
+            "end": seconds_to_timestamp(clip_seconds(clip, "end", clip.get("source_fps", plan.get("fps", 30)))),
+            "start_seconds": clip_seconds(clip, "start", clip.get("source_fps", plan.get("fps", 30))),
+            "end_seconds": clip_seconds(clip, "end", clip.get("source_fps", plan.get("fps", 30))),
             "label": clip.get("label") or clip.get("id") or f"clip_{index:03d}",
             "score": clip.get("score", 0),
             "render_mode": plan.get("render_mode", "copy"),
@@ -121,24 +148,46 @@ def clips_from_plan(path: str) -> list[dict[str, Any]]:
     ]
 
 
-def _planned_clip(clip: dict[str, Any], index: int, handles: float) -> dict[str, Any]:
-    start = max(0.0, _seconds(clip.get("start_seconds", clip.get("start", 0))) - max(0.0, float(handles)))
-    end = max(start, _seconds(clip.get("end_seconds", clip.get("end", start))) + max(0.0, float(handles)))
-    duration = max(0.0, end - start)
-    return {
+def _planned_clip(clip: dict[str, Any], index: int, handles: float, native: HandoffClip) -> dict[str, Any]:
+    requested_start, requested_end = native.start_seconds - handles, native.end_seconds + handles
+    start, end = max(0.0, requested_start), requested_end
+    extent = native.source.info.duration
+    if extent is not None:
+        end = min(end, extent)
+    planned = {
+        **clip,
         "id": clip.get("id") or clip.get("label") or f"clip_{index:03d}",
         "label": clip.get("label") or clip.get("id") or f"clip_{index:03d}",
-        "source": clip["source"],
+        "source": native.source.path,
+        "source_fps": str(native.source.rate),
+        "reel": native.source.reel,
         "start": seconds_to_timestamp(start),
         "end": seconds_to_timestamp(end),
         "start_seconds": start,
         "end_seconds": end,
-        "duration": duration,
+        "duration": end - start,
+        "selection_start_seconds": native.start_seconds,
+        "selection_end_seconds": native.end_seconds,
+        "source_duration_seconds": extent,
+        "handles_clamped_to_source": start > requested_start or end < requested_end,
+        "target_trimmed": False,
         "score": int(clip.get("score", 0) or 0),
         "review_order": int(clip.get("review_order", clip.get("order", index)) or index),
         "source_order": index,
         "labels": list(clip.get("labels", [])),
         "reasons": list(clip.get("reasons", [])),
+    }
+    if native.source.info.timecode or clip.get("source_timecode"):
+        planned["source_timecode"] = native.source.timecode
+    _update_handles(planned)
+    return planned
+
+
+def _update_handles(clip: dict[str, Any]) -> None:
+    start, end = clip["start_seconds"], clip["end_seconds"]
+    clip["handles_applied"] = {
+        "pre": max(0.0, min(end, clip["selection_start_seconds"]) - start),
+        "post": max(0.0, end - max(start, clip["selection_end_seconds"])),
     }
 
 
@@ -160,10 +209,11 @@ def _sequence_clips(clips: list[dict[str, Any]], sequence: str) -> list[dict[str
     return ordered
 
 
-def _apply_target_duration(clips: list[dict[str, Any]], target_duration: float | None) -> list[dict[str, Any]]:
+def _apply_target_duration(clips: list[dict[str, Any]], target_duration: float | None,
+                           fps: float) -> list[dict[str, Any]]:
     if target_duration is None:
         return clips
-    target = max(0.0, float(target_duration))
+    target = target_duration
     if target <= 0:
         return []
     selected = []
@@ -172,27 +222,32 @@ def _apply_target_duration(clips: list[dict[str, Any]], target_duration: float |
         if elapsed >= target:
             break
         remaining = target - elapsed
-        if clip["duration"] <= remaining or not selected:
-            selected_clip = dict(clip)
-            if selected_clip["duration"] > remaining and remaining >= 1.0:
-                selected_clip["duration"] = remaining
-                selected_clip["end_seconds"] = selected_clip["start_seconds"] + remaining
-                selected_clip["end"] = seconds_to_timestamp(selected_clip["end_seconds"])
-            selected.append(selected_clip)
-            elapsed += selected_clip["duration"]
-            continue
-        if remaining >= 1.0:
-            selected_clip = dict(clip)
+        selected_clip = dict(clip)
+        if selected_clip["duration"] > remaining:
             selected_clip["duration"] = remaining
             selected_clip["end_seconds"] = selected_clip["start_seconds"] + remaining
             selected_clip["end"] = seconds_to_timestamp(selected_clip["end_seconds"])
-            selected.append(selected_clip)
-            break
+            selected_clip["target_trimmed"] = True
+            _update_handles(selected_clip)
+            # Keep valid preceding clips when the final remainder cannot form a frame.
+            native_rate = frame_rate(selected_clip["source_fps"])
+            span = (seconds_to_frames(selected_clip["end_seconds"], native_rate) -
+                    seconds_to_frames(selected_clip["start_seconds"], native_rate))
+            if selected and (span <= 0 or seconds_to_frames(Fraction(span, 1) / native_rate, fps) <= 0):
+                break
+        selected.append(selected_clip)
+        elapsed += selected_clip["duration"]
     return selected
 
 
-def _seconds(value: Any) -> float:
-    return timecode_to_seconds(value)
+def _nonnegative_number(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"{name} must be a finite non-negative number") from error
+    if isinstance(value, bool) or not math.isfinite(number) or number < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return number
 
 
 def _default_report_path(output: str) -> str:

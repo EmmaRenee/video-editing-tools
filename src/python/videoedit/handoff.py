@@ -142,7 +142,8 @@ def _source_path(value: str, base_dir: str | None) -> str:
 
 def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
                            *, base_dir: str | None = None,
-                           original_clips: list[dict] | None = None) -> HandoffTimeline:
+                           original_clips: list[dict] | None = None,
+                           media_info: dict[str, HandoffMediaInfo] | None = None) -> HandoffTimeline:
     rate = frame_rate(fps)
     sources, reels = {}, {}
     rows, warnings, limitations = [], [], []
@@ -156,7 +157,7 @@ def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
     for event, clip in enumerate(clips, 1):
         path = _source_path(str(clip.get("source") or source_file), base_dir)
         if path not in sources:
-            info = probe_handoff_media(path)
+            info = media_info[path] if media_info is not None and path in media_info else probe_handoff_media(path)
             source_rate = frame_rate(info.fps or clip.get("source_fps") or fps)
             if not info.fps:
                 warn("source_fps_assumed", event)

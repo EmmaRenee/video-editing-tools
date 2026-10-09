@@ -3,6 +3,41 @@
 Source of truth: milestone 13 and umbrella issue #66. This is implementation
 evidence and design rulings, not a second backlog.
 
+## Rough-Cut Bounds Slice
+
+- Previous turn: PR #95 / `8ba94bb`, 325 tests, 33 independent-reader checks,
+  five CI jobs and final CodeRabbit 0 issues; unmerged. Refreshed milestone 13,
+  #66/#79 before branching `codex/v17-roughcut-bounds` in the isolated clone.
+- Pre-flight: plans consume normalized selections and feed FFmpeg assembly and
+  the shared handoff timeline. Normalization alone hid mixed-rate SMPTE ambiguity;
+  the original selection rows must reach native-rate validation before handles.
+- Ruling: invalid approved ranges fail before adding handles; only requested
+  pre/post-roll is clamped to zero and known video extent. Unknown duration stays
+  null/partial, not a claimed bound. Preserve source metadata and unsupported edit
+  features instead of discarding them during plan/assembly conversion.
+- Ruling: targets trim elapsed tail endpoints, including sub-second remainders.
+  Applied handles are recalculated and original approved ranges remain visible.
+  Zero-frame first clips fail; a sub-frame remainder after valid clips is omitted.
+  Targets can trim approved content, which is explicitly flagged, not hidden.
+- Eighteen focused tests cover source bounds, target tails, invalid finite-number
+  controls, path resolution/ambiguity, source metadata conflicts, legacy SMPTE,
+  one probe per source, unknown-duration partial status and unsupported features.
+  Tests reproduced the defects before fixes. The old missing-media manifest
+  expectation was corrected from `ok` to `partial`; no metadata is fabricated.
+- Local suite: 343 tests passed, one optional-reader skip. All 33 independent
+  interchange-reader checks passed. Wheel/source builds and whitespace passed.
+- User authorized Lexar: a separate validation directory holds only generated
+  fixtures/outputs. A hash-verified synthetic copy rendered bounded handles to
+  120 frames / 5.0 seconds and a sub-second target to 12 frames / 0.5 seconds;
+  both retain a stereo audio stream. These checks do not establish audio fidelity,
+  real-footage editorial quality or live editor compatibility.
+- Real interview copy stalled on a Google Drive `compressed,dataless` placeholder
+  with zero bytes written. The agent's process was stopped; the empty destination
+  was marked `.part`, not presented as media. Original media was not modified.
+  Resolve GUI is reachable but an edited Untitled project is left untouched;
+  read-only external SDK attachment remains unavailable. Live relink validation,
+  independent three-profile annotations/ablations and final RC gates remain open.
+
 ## Source-Aware Interchange Slice
 
 - Previous turn: PR #94 / `7e928e3`, 258 tests and four CI jobs passed;

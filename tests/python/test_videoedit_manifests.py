@@ -243,7 +243,9 @@ class ManifestTests(unittest.TestCase):
         plan = self.root / "roughcut_plan.json"
         plan_roughcut(str(self.selection()), str(plan), handles=0.25, manifest_paths="redacted")
         plan_run = json.loads((self.root / "roughcut_plan_run.json").read_text())
-        self.assertEqual(plan_run["status"], "ok")
+        self.assertEqual(plan_run["status"], "partial")
+        self.assertFalse(plan_run["complete"])
+        self.assertIn("source_metadata_unavailable", plan_run["handoff"]["limitations"])
         self.assertEqual(plan_run["handoff"]["handles"], 0.25)
         self.assertFalse(plan_run["handoff"]["editor_verified"])
 
