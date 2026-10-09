@@ -84,7 +84,11 @@ images while recomputing their own scores. Injected custom samplers remain
 compatible but report extraction telemetry as `not_instrumented`. Native OpenCLIP
 creates its model only on the first usable inference miss, at most once per
 encoder lifetime. An all-hit or no-frame run initializes no model. A failed
-initialization is not retried for every source. Successful initialization count,
+initialization is not retried for that encoder instance, even across invocations;
+create a fresh encoder after repairing the failure. CLI invocations create fresh
+encoders automatically. Deferred dependency import failures retain installation
+guidance in warnings; usable cached rows remain visible in a partial artifact.
+Successful initialization count,
 attempts, and seconds are invocation deltas in top-level telemetry; unsupported
 custom encoders report null, not an assumed zero. Initialization time includes
 the deferred imports, model setup, and local-checkpoint integrity checks, not

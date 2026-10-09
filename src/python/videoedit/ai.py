@@ -627,6 +627,8 @@ class CommandClipJudgeProvider:
 
 
 class OpenCLIPEncoder:
+    """Load at most once; create a fresh encoder after any initialization failure."""
+
     provider_name = "openclip"
 
     def __init__(self, model: str = "ViT-B-32", pretrained: str = "laion2b_s34b_b79k") -> None:
@@ -687,6 +689,10 @@ class OpenCLIPEncoder:
             self._loaded_checkpoint_sha256 = checkpoint_checksum
             self.models_initialized = 1
         except Exception as exc:
+            if isinstance(exc, ImportError):
+                error = ImportError(f"{OPENCLIP_INSTALL_MESSAGE} Dependency import failed: {exc}")
+                self._initialization_error = error
+                raise error from exc
             self._initialization_error = exc
             raise
         finally:

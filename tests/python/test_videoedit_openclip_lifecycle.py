@@ -238,6 +238,52 @@ class OpenCLIPLifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(ImportError, "Install with"):
                 OpenCLIPEncoder(pretrained="named-model")
 
+    def test_deferred_openclip_and_pillow_imports_retain_install_guidance(self):
+        original = __import__
+        for dependency in ("open_clip", "PIL"):
+            with self.subTest(dependency=dependency):
+                def broken_import(name, *args, **kwargs):
+                    if name == dependency:
+                        raise ImportError("No module named 'fixture_dependency'")
+                    return original(name, *args, **kwargs)
+
+                with patch("builtins.__import__", side_effect=broken_import):
+                    result = self.run_scoring(cache=False)
+                self.assertEqual(result["status"], "error")
+                self.assertTrue(any("Install with" in warning and "fixture_dependency" in warning
+                                    for warning in result["warnings"]))
+                self.assertEqual(result["telemetry"]["model_initialization_attempts"], 1)
+
+    def test_deferred_import_failure_preserves_valid_cached_source(self):
+        second = self.root / "two.mp4"
+        second.write_bytes(b"another fixture")
+        self.run_scoring(self.root)
+        cached = self.read_scores()["sources"][0]["frames"]
+        second.write_bytes(b"changed fixture media")
+        original = __import__
+
+        def broken_import(name, *args, **kwargs):
+            if name == "open_clip":
+                raise ImportError("No module named 'fixture_dependency'")
+            return original(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=broken_import):
+            result = self.run_scoring(self.root)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["telemetry"]["cache_hits"], 1)
+        self.assertEqual(self.read_scores()["sources"][0]["frames"], cached)
+        self.assertTrue(any("Install with" in warning for warning in result["warnings"]))
+
+    def test_failed_encoder_requires_fresh_instance_to_retry_initialization(self):
+        encoder = OpenCLIPEncoder(pretrained=str(self.checkpoint))
+        self.factory.side_effect = RuntimeError("fixture transient load failure")
+        self.assertEqual(self.run_scoring(encoder=encoder)["status"], "error")
+        self.factory.side_effect = None
+        self.assertEqual(self.run_scoring(encoder=encoder, cache=False)["status"], "error")
+        self.factory.assert_called_once()
+        self.assertEqual(self.run_scoring(cache=False)["status"], "ok")
+        self.assertEqual(self.factory.call_count, 2)
+
     def test_checkpoint_replacement_during_model_load_cannot_be_cached(self):
         def replace_checkpoint(*_args, **_kwargs):
             self.checkpoint.write_bytes(b"weights-b")
