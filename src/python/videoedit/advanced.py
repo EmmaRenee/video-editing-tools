@@ -15,7 +15,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from .diagnostics import resolve_command
+from .diagnostics import OPENCV_FACE_PERSON_INSTALL, resolve_command
 from .coverage import SCHEMA as COVERAGE_SCHEMA, sample_coverage
 from ._version import __version__
 from .ffmpeg import has_command, probe_media, run_command, run_command_check, scan_video_files
@@ -477,7 +477,7 @@ def detect_face_person_presence(
         payload = _unavailable_payload(
             "face_person_presence",
             input_path,
-            "opencv-python is required for face/person presence detection",
+            "OpenCV is required for face/person presence detection. " + OPENCV_FACE_PERSON_INSTALL,
         )
         _write_json(output, payload)
         return {"output": output, "count": 0, "status": payload["status"]}
@@ -494,18 +494,23 @@ def detect_face_person_presence(
     hits: list[dict[str, Any]] = []
     face_detector = _opencv_face_detector(cv2, warnings)
     person_detector = _opencv_person_detector(cv2, warnings)
+    if face_detector is None or person_detector is None:
+        payload = _unavailable_payload(
+            "face_person_presence", input_path,
+            "face/person detector initialization incomplete. " + OPENCV_FACE_PERSON_INSTALL,
+        )
+        payload["warnings"] = warnings + payload["warnings"]
+        _write_json(output, payload)
+        return {"output": output, "count": 0, "status": payload["status"], "warnings": payload["warnings"]}
     sampler = FrameCache(frame_cache or os.path.join(output_dir, ".frame_cache"), timeout=timeout)
     samples, coverage = [], []
-    ready = face_detector is not None and person_detector is not None
-    if not ready:
-        warnings.append("face/person detector initialization incomplete")
 
     for source in _input_files(input_path):
         sampled = sampler.sample(source, sample_interval=sample_interval, max_frames=max_frames_per_file)
         samples.append(sampled)
         warnings.extend(sampled["warnings"])
         processed = []
-        for frame in sampled["frames"] if ready else []:
+        for frame in sampled["frames"]:
             try:
                 image = cv2.imread(frame["path"])
                 if image is None:
@@ -987,11 +992,15 @@ def _opencv_face_detector(cv2: Any, warnings: list[str]) -> Any:
     if not cascade_root or not os.path.exists(cascade_path):
         warnings.append("OpenCV face cascade not found")
         return None
-    detector = cv2.CascadeClassifier(cascade_path)
-    if detector.empty():
-        warnings.append("OpenCV face cascade failed to load")
+    try:
+        detector = cv2.CascadeClassifier(cascade_path)
+        if detector.empty():
+            warnings.append("OpenCV face cascade failed to load")
+            return None
+        return detector
+    except Exception as exc:
+        warnings.append(f"OpenCV face detector unavailable: {exc}")
         return None
-    return detector
 
 
 def _opencv_person_detector(cv2: Any, warnings: list[str]) -> Any:

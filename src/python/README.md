@@ -540,7 +540,7 @@ Advanced detectors are optional providers layered on top of the deterministic ra
 - `cluster_transcript_topics` reads transcript hits from `ratings.json` and writes `topic_clusters.json`.
 - `detect_ocr_signage` writes `ocr_signage.json`; it runs only when FFmpeg and Tesseract are installed.
 - `detect_visual_objects` writes `visual_objects.json`; the default command bridge parses YOLO labels. Opt-in `backend: native` uses the optional Ultralytics library and existing local weights, with verified continuous coverage and complete-only caching. Both keep bounded `detections`, `class_counts`, and time-based `segments`.
-- `detect_face_person_presence` writes `face_person_presence.json`; it runs only when FFmpeg and OpenCV are installed.
+- `detect_face_person_presence` writes `face_person_presence.json`; it requires FFmpeg and compatible OpenCV 4.8 through 4.x Haar/HOG detectors. The `advanced` extra constrains OpenCV below 5. Install only one OpenCV wheel variant; `doctor` and `modules doctor` report known incompatible versions without importing OpenCV. Initialization failures produce `status: unavailable` without extracting frames. See [OpenCV setup](../../INSTALL.md#verify-installation).
 - `score_ai_frames` writes `ai_frame_scores.json`; it runs only when OpenCLIP, Torch, Pillow, and FFmpeg are installed.
 
 These operations produce JSON artifacts and report `status: unavailable` when optional tools are missing, so normal inventory/rating/rough-cut automation does not depend on heavy AI packages.
