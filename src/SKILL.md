@@ -112,6 +112,13 @@ schemas require upgrade or re-generation. Consult
 `docs/provenance-and-manifests.md` for the complete contract. Generated EDL/XML
 and `editor_verified: false` are not proof of a successful Resolve handoff.
 
+Core rating uses the first video stream for scenes and the first audio stream
+for silence/RMS, independently of container default-track dispositions. It does
+not combine alternate tracks. Audio passes exclude video decoding and scenes
+exclude audio; one failed detector still makes the overall rating partial.
+Reanalyze caches created before explicit first-stream selection. Inspect
+multi-track sources before using the measurements as editorial evidence.
+
 For delivery timing, trust `start_seconds`/`end_seconds` over whole-second display
 timestamps. Current approval and selection writers retain fractional bounds;
 rough-cut planning carries them into extraction and assembly. Reuse precise

@@ -103,6 +103,17 @@ class AnalysisHealthTests(unittest.TestCase):
         self.assertEqual(report.signals[0].scene_changes, [2.0])
         self.assertEqual(self.manifest()["telemetry"]["cache_hits"], 0)
 
+    def test_automatic_stream_selection_cache_is_reanalyzed(self):
+        self.rate()
+        cache = self.output / ".cache" / "analysis-cache.json"
+        data = json.loads(cache.read_text())
+        next(iter(data.values()))["signature"]["analysis_policy"] = "fatal_decode_v3"
+        cache.write_text(json.dumps(data))
+        self.scene.return_value = ([2.0], None)
+        report = self.rate()
+        self.assertEqual(report.signals[0].scene_changes, [2.0])
+        self.assertEqual(self.manifest()["telemetry"]["cache_hits"], 0)
+
     def test_video_without_audio_is_not_an_audio_analysis_failure(self):
         self.asset.has_audio = False
         report = self.rate()

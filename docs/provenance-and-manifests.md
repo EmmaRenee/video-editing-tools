@@ -129,6 +129,18 @@ private storage for all sensitive footage and review content.
 
 ### Failures And Interruptions
 
+Core rating analyzes the first video stream (`0:v:0`) for scenes and the first
+audio stream (`0:a:0`) for silence/RMS, rather than following container default
+dispositions or selecting the largest video/most-channel audio stream. This
+matches the first-video metadata in the inventory. Audio passes do not decode
+video, and scene analysis does not decode audio. Additional tracks are not
+combined. A corrupt video can leave valid audio measurements, but the failed
+scene analysis still makes the overall rating partial and non-cacheable.
+Source signatures invalidate caches made before this explicit stream policy;
+rerun rating once rather than carrying forward automatic-selection results.
+FFmpeg may still inspect the input container/stream headers, so an unreadable
+container can prevent all detectors from running.
+
 Manifests are checkpointed atomically while running and after each step.
 `status` is `running`, `ok`, `partial`, `error`, or `interrupted`; `complete`
 is true only for `ok`. Failed media probes, missing review media, incomplete

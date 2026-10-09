@@ -535,6 +535,40 @@ evidence and design rulings, not a second backlog.
   reading info text as errors. Real multiline filenames, scene transitions and
   trailing silence have regressions. Cache policy v3 invalidates prior analyses.
 
+## Detector Stream Selection And Real Interview Rerun
+
+- Continued from the checked clean-install branch in an isolated
+  `codex/v17-detector-stream-selection` branch; primary experiments, original
+  footage and the user's open Resolve project remain unchanged.
+- The user-authorized Lexar workspace received a complete original interview
+  copy, verified against the source with full SHA-256 and unchanged source stat.
+  Private media, paths and outputs remain outside Git; this is not a proxy or
+  human annotation set.
+- A complete 300.033-second interview baseline using the clean installed wheel
+  reported all detectors successful and no warnings. Profiling showed audio-only
+  passes also decoding full-resolution video. Explicit `0:a:0`/video exclusion
+  removes that work; scenes explicitly use `0:v:0`/audio exclusion to match the
+  first-video inventory metadata.
+- Three actual FFmpeg regressions failed first: unrelated corrupt video broke
+  audio analysis, and default secondary video/audio tracks changed measurements.
+  First-stream mapping now passes those fixtures. A fourth red/green regression
+  invalidates the old automatic-stream-selection cache policy.
+- The first sequential original-media comparison observed 244.58 seconds before
+  and 87.11 seconds after, with identical signal reports, candidates, summaries
+  and configuration. Both were uncached application analyses on Apple Silicon,
+  Python 3.12.14 and FFmpeg 9.0.1. OS/disk caches were uncontrolled; this is one
+  functional parity observation, not a general speed or editorial-quality claim.
+- The installed optional environment imported Torch 2.12.1, OpenCLIP 3.3.0,
+  Ultralytics 8.4.90, OpenCV 5.0.0 and Whisper 20250625 successfully. Module
+  diagnostics reported AI/vision/transcript tools present, while the fresh
+  core-only wheel correctly reported optional Python providers absent. Cloud
+  adapters remain disabled without credentials. This is installed-state
+  diagnostics, not a clean full-extras install or provider quality evaluation.
+- Cache policy v4 reanalyzes previous stream-policy results once. Valid audio on
+  a corrupt-video file does not certify the overall rating: the scene failure
+  still prevents complete status and successful cache publication. Container
+  parsing/header failures can affect every detector even with output mapping.
+
 ## Remaining Execution Order
 
 Follow the dependencies recorded on GitHub: protocol and runner (#73/#74),
