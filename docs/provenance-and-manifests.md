@@ -113,11 +113,16 @@ unchanged source analysis.
 
 The `input_identity_v5` cache policy binds FFmpeg/ffprobe executable paths and
 version lines, detector settings, source size/nanosecond mtime/ctime and file
-identity, the actually selected transcript's path/content SHA-256, and canonical
+identity, the actually selected transcript's discovery path, parser format and
+resolved-path/content SHA-256, and canonical
 signal-artifact paths/content hashes (including direct AI-frame-score API paths).
 Transcript discovery uses the same directory/suffix priority as analysis. A
 new/deleted/replaced selected transcript invalidates; edits to an unselected
-fallback or disabled transcript do not. Earlier detector caches refresh once.
+fallback or disabled transcript do not. Symlinks with different parser suffixes
+remain distinct even when they resolve to the same content. Cached reports must
+retain detector fields, valid numeric metadata and their stored content digest;
+malformed or accidentally altered entries are recomputed. The digest detects
+corruption, not malicious cache forgery. Earlier detector caches refresh once.
 
 Media identity remains a fast local metadata fingerprint, not a cryptographic
 content checksum. Filesystem timestamp semantics vary; use `--no-cache` when
@@ -135,11 +140,15 @@ reason is counted per miss; an all-hit run has an empty map. These fixed codes,
 not filenames or transcript text, survive redaction. The reason map is additive;
 existing hit/miss counters and manifest/schema consumers remain compatible.
 
-Cache publication is atomic. Ordinary source/transcript changes during detector
-execution and signal-artifact changes during loading/analysis make the run
-incomplete and prevent publication of the affected new cache data. Retained old
-entries still need an exact input match on retry. Concurrent file mutation is
-not a supported input workflow; stabilize media and sidecars before analysis.
+New cache data is published atomically only after healthy analysis, output
+generation and successful manifest writing. Partial runs may prune invalidated
+old entries, but do not publish newly computed entries. Every source/transcript,
+including cache hits, is checked again after the scan and after output generation.
+Observed source/transcript or artifact mutation makes the run incomplete. Artifact
+mutation preserves the old cache unchanged; retained entries still need an exact
+input match on retry. These checks are not a filesystem snapshot or a multi-file
+transaction. Concurrent mutation is unsupported; stabilize media and sidecars
+before analysis.
 
 ### Path Modes
 

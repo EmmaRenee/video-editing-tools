@@ -6,6 +6,7 @@ import json
 import math
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +17,7 @@ from .inventory import write_inventory_outputs
 from .learning import apply_learned_scorer_to_candidates, load_learned_scorer
 from .manifests import RunManifest, atomic_json, fingerprint
 from .models import AudioLevel, CandidateClip, MediaAsset, ObjectHit, RatingReport, SignalReport
+from .provenance import canonical_hash
 from .reports import write_candidate_csv, write_rating_json, write_review_html, write_review_markdown, write_selection_sets
 from .signals import load_signal_artifacts, signal_artifact_paths
 from .timecode import clamp_window
@@ -35,7 +37,12 @@ def run_rating(
     with RunManifest(os.path.join(output_dir, "rating_run.json"), "rate_footage", inputs=inputs,
                      config=config.to_dict(), path_mode=manifest_paths) as manifest:
         try:
-            report = _run_rating(footage_dir, output_dir, config, stats, manifest)
+            report, cache = _run_rating(footage_dir, output_dir, config, stats, manifest)
+            if cache.revalidate(config):
+                report.summary["analysis_failed"] = sum(not item.analysis_complete for item in report.signals)
+                write_rating_json(report, os.path.join(output_dir, "ratings.json"))
+                write_review_markdown(report, os.path.join(output_dir, "review.md"))
+                write_review_html(report, os.path.join(output_dir, "review.html"))
         except BaseException as exc:
             manifest.record_step("rating", "rate_footage", config.to_dict(), {"telemetry": stats},
                                  time.monotonic() - manifest.started,
@@ -49,22 +56,70 @@ def run_rating(
             manifest.data["partial"] = True
             manifest.data["warnings"].append(f"media_analysis_failed:{failures}")
         manifest.record_step("rating", "rate_footage", config.to_dict(), result, time.monotonic() - manifest.started)
+    try:
+        cache.publish(output_dir, config, complete=manifest.data["complete"])
+    except BaseException as exc:
+        manifest.__exit__(type(exc), exc, exc.__traceback__)
+        raise
     return report
 
 
+@dataclass
+class _RatingCache:
+    original: dict[str, Any]
+    decoder: dict[str, Any]
+    artifacts: dict[str, Any]
+    updated: dict[str, Any] = field(init=False)
+    observed: list[tuple[str, dict[str, Any], SignalReport]] = field(default_factory=list)
+    invalidated: set[str] = field(default_factory=set)
+    artifacts_changed: bool = False
+
+    def __post_init__(self) -> None:
+        self.updated = dict(self.original)
+
+    def revalidate(self, config: AnalysisConfig) -> bool:
+        self.artifacts_changed |= _artifact_signatures(config) != self.artifacts
+        changed = False
+        for path, signature, report in self.observed:
+            try:
+                stable = _file_signature(path, config, decoder=self.decoder, artifacts=self.artifacts) == signature
+            except OSError:
+                stable = False
+            if stable and not self.artifacts_changed:
+                continue
+            changed = True
+            report.analysis_status["input_stability"] = "changed"
+            warning = ("signal artifacts changed during analysis; retry with stable inputs" if self.artifacts_changed else
+                       "source or transcript changed during analysis; retry with stable inputs")
+            if warning not in report.warnings:
+                report.warnings.append(warning)
+            key = os.path.abspath(path)
+            self.invalidated.add(key)
+            self.updated.pop(key, None)
+        return changed
+
+    def publish(self, output_dir: str, config: AnalysisConfig, *, complete: bool) -> None:
+        if not config.cache or self.artifacts_changed:
+            return
+        # Partial runs may prune stale entries, but cannot publish newly computed ones.
+        cache = self.updated if complete else {key: value for key, value in self.original.items()
+                                              if key not in self.invalidated}
+        if cache != self.original:
+            _write_cache(output_dir, cache)
+
+
 def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
-                stats: dict[str, Any], manifest: RunManifest) -> RatingReport:
+                stats: dict[str, Any], manifest: RunManifest) -> tuple[RatingReport, _RatingCache]:
     config = config or AnalysisConfig()
     footage_dir = os.fspath(footage_dir)
     output_dir = os.fspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     cache, cache_error = _load_cache(output_dir) if config.cache else ({}, "cache_disabled")
-    original_cache = dict(cache)
-    cache_changed = False
     signals: list[SignalReport] = []
     decoder = decoder_identity()
     artifact_signatures = _artifact_signatures(config)
+    pending_cache = _RatingCache(cache, decoder, artifact_signatures)
     signal_artifacts = load_signal_artifacts(config)
     if _artifact_signatures(config) != artifact_signatures:
         raise ValueError("signal artifacts changed while loading; retry with stable inputs")
@@ -75,20 +130,24 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
         key = os.path.abspath(path)
         signature = _file_signature(path, config, decoder=decoder, artifacts=artifact_signatures)
         if signature["transcript"]:
-            manifest.data["inputs"].append(signature["transcript"])
+            manifest.data["inputs"].append(signature["transcript"]["fingerprint"])
         cached = cache.get(key)
         reason = _cache_miss_reason(cached, signature, cache_error)
         if reason is None:
             try:
                 cached_report = SignalReport.from_dict(cached["report"])
                 reason = None if cached_report.analysis_complete else "cached_analysis_incomplete"
+                if reason is None:
+                    _validate_cached_report(cached, key)
+                    _rescore_report(cached_report, config)
             except (AttributeError, KeyError, TypeError, ValueError):
                 reason = "cache_entry_invalid"
         if reason is None:
             stats["cache_hits"] += 1
-            _rescore_report(cached_report, config)
             signals.append(cached_report)
+            pending_cache.observed.append((path, signature, cached_report))
             continue
+        pending_cache.invalidated.add(key)
         stats["cache_misses"] += 1
         stats["cache_miss_reasons"][reason] = stats["cache_miss_reasons"].get(reason, 0) + 1
         report = analyze_file(
@@ -97,24 +156,15 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
             object_hits=signal_artifacts.objects_for(path),
             advanced_hits=signal_artifacts.advanced_for(path),
         )
-        if _file_signature(path, config, decoder=decoder, artifacts=artifact_signatures) != signature:
-            report.analysis_status["input_stability"] = "changed"
-            report.warnings.append("source or transcript changed during analysis; retry with stable inputs")
         signals.append(report)
+        pending_cache.observed.append((path, signature, report))
         if config.cache and report.analysis_complete:
-            cache[key] = {"signature": signature, "report": report.to_dict()}
-            cache_changed = True
-        elif config.cache and key in cache:
-            del cache[key]
-            cache_changed = True
+            data = report.to_dict()
+            pending_cache.updated[key] = {"signature": signature, "report": data, "report_sha256": canonical_hash(data)}
+        else:
+            pending_cache.updated.pop(key, None)
 
-    if _artifact_signatures(config) != artifact_signatures:
-        for report in signals:
-            report.analysis_status["input_stability"] = "changed"
-            report.warnings.append("signal artifacts changed during analysis; retry with stable inputs")
-        cache, cache_changed = original_cache, False
-    if config.cache and cache_changed:
-        _write_cache(output_dir, cache)
+    pending_cache.revalidate(config)
 
     candidates = generate_candidates(signals, config)
     candidates = sorted(candidates, key=lambda item: (-item.score, item.source, item.start))[
@@ -173,7 +223,7 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
     write_review_html(report, os.path.join(output_dir, "review.html"))
     selections = write_selection_sets(candidates, os.path.join(output_dir, "selections"))
     manifest.add_outputs([os.path.join(output_dir, name) for name in ("inventory.csv", "inventory.md", "review.html")] + selections)
-    return report
+    return report, pending_cache
 
 
 def analyze_file(
@@ -733,6 +783,29 @@ def _rescore_report(report: SignalReport, config: AnalysisConfig) -> None:
                                        report.transcript_hits, report.object_hits, report.advanced_hits))
 
 
+def _validate_cached_report(cached: dict[str, Any], source: str) -> None:
+    data = cached["report"]
+    lists = ("scene_changes", "silence_intervals", "audio_levels", "transcript_hits", "object_hits",
+             "advanced_hits", "reasons", "warnings")
+    if (any(not isinstance(data.get(key), list) for key in lists)
+            or not isinstance(data.get("scores"), dict) or not isinstance(data.get("analysis_status"), dict)):
+        raise ValueError("cached report is missing detector fields")
+    asset = data["asset"]
+    if (not set(MediaAsset.__dataclass_fields__).issubset(asset)
+            or not isinstance(asset["filepath"], str) or os.path.abspath(asset["filepath"]) != source
+            or not isinstance(asset["filename"], str) or not isinstance(asset["has_audio"], bool)):
+        raise ValueError("cached metadata is invalid")
+    for key in ("size_mb", "duration", "width", "height", "fps"):
+        value = asset[key]
+        if value is None and key in {"width", "height", "fps"}:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError("cached numeric metadata is invalid")
+    # Integrity is a corruption check, not authentication of an untrusted cache.
+    if cached.get("report_sha256") != canonical_hash(data):
+        raise ValueError("cached detector report integrity mismatch")
+
+
 def _file_signature(path: str, config: AnalysisConfig, *, decoder: dict[str, Any] | None = None,
                     artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
     stat = os.stat(os.fspath(path))
@@ -746,7 +819,8 @@ def _file_signature(path: str, config: AnalysisConfig, *, decoder: dict[str, Any
         "inode": stat.st_ino,
         "device": stat.st_dev,
         "decoder": decoder if decoder is not None else decoder_identity(),
-        "transcript": fingerprint(transcript) if transcript else None,
+        "transcript": {"selection": os.path.abspath(transcript), "format": os.path.splitext(transcript)[1].lower(),
+                       "fingerprint": fingerprint(transcript)} if transcript else None,
         "scene_threshold": config.scene_threshold,
         "silence_threshold_db": config.silence_threshold_db,
         "min_silence_duration": config.min_silence_duration,

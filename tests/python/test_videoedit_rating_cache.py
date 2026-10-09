@@ -33,7 +33,7 @@ class RatingCacheTests(unittest.TestCase):
                                 width=1920, height=1080, codec="h264", has_audio=True)
         stack = ExitStack()
         self.addCleanup(stack.close)
-        stack.enter_context(patch("videoedit.rating.probe_media", return_value=self.asset))
+        self.probe = stack.enter_context(patch("videoedit.rating.probe_media", return_value=self.asset))
         self.scenes = stack.enter_context(patch("videoedit.rating.detect_scene_changes", return_value=([5], None)))
         stack.enter_context(patch("videoedit.rating.detect_silence", return_value=([], None)))
         stack.enter_context(patch("videoedit.rating.analyze_audio_levels", return_value=([AudioLevel(5, -20)], None)))
@@ -271,6 +271,144 @@ class RatingCacheTests(unittest.TestCase):
             }}, 0)
         self.assertEqual(json.loads(path.read_text())["telemetry"]["cache_miss_reasons"], {"transcript_changed": 1})
         self.assertNotIn("private_customer_name", path.read_text())
+
+    def add_second_source(self):
+        second = self.footage / "two.mp4"
+        second.write_bytes(b"second source")
+
+        def probe(path, **_kwargs):
+            values = vars(self.asset).copy()
+            values.update(filename=Path(path).name, filepath=path)
+            return MediaAsset(**values)
+
+        self.probe.side_effect = probe
+        return second
+
+    def test_interrupted_output_generation_does_not_publish_new_analysis_cache(self):
+        with patch("videoedit.rating.write_inventory_outputs", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.rate()
+        self.assertEqual(self.manifest()["status"], "interrupted")
+        self.assertFalse(self.cache_path().exists())
+
+    def test_partial_multi_source_run_does_not_publish_new_healthy_entries(self):
+        second = self.add_second_source()
+        original_probe = self.probe.side_effect
+        self.probe.side_effect = lambda path, **kwargs: (MediaAsset(second.name, str(second), status="error", error="fixture probe failure")
+                                                       if path == str(second) else original_probe(path, **kwargs))
+        self.rate()
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertFalse(self.cache_path().exists())
+
+    def test_later_source_analysis_mutation_invalidates_earlier_source(self):
+        second = self.add_second_source()
+
+        def scenes(path, **_kwargs):
+            if path == str(second):
+                self.source.write_bytes(b"changed while second source was being analyzed")
+            return [5], None
+
+        self.scenes.side_effect = scenes
+        report = self.rate()
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertFalse(self.cache_path().exists())
+
+    def test_later_mutation_of_a_cache_hit_is_revalidated_and_pruned(self):
+        self.rate()
+        second = self.add_second_source()
+
+        def scenes(path, **_kwargs):
+            if path == str(second):
+                self.source.write_bytes(b"changed after its cache hit")
+            return [5], None
+
+        self.scenes.side_effect = scenes
+        report = self.rate()
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertEqual(json.loads(self.cache_path().read_text()), {})
+
+    def test_missing_cached_detector_fields_are_rejected_not_defaulted(self):
+        self.rate()
+        cache = json.loads(self.cache_path().read_text())
+        next(iter(cache.values()))["report"].pop("scene_changes")
+        self.cache_path().write_text(json.dumps(cache))
+        report = self.rate()
+        self.assertEqual(report.signals[0].scene_changes, [5])
+        self.assert_miss_reason("cache_entry_invalid")
+
+    def test_invalid_cached_numeric_metadata_reanalyzes_instead_of_raising(self):
+        self.rate()
+        cache = json.loads(self.cache_path().read_text())
+        next(iter(cache.values()))["report"]["asset"]["duration"] = "invalid-duration"
+        self.cache_path().write_text(json.dumps(cache))
+        report = self.rate()
+        self.assertEqual(report.signals[0].asset.duration, 12)
+        self.assert_miss_reason("cache_entry_invalid")
+
+    def test_same_target_transcript_symlinks_preserve_parser_identity(self):
+        target = self.root / "transcript.data"
+        target.write_text("wow")
+        self.source.with_suffix(".txt").symlink_to(target)
+        self.assertEqual(len(self.rate().signals[0].transcript_hits), 1)
+        self.source.with_suffix(".srt").symlink_to(target)
+        warm = self.rate()
+        self.assertEqual(warm.signals[0].transcript_hits, [])
+        self.assert_miss_reason("transcript_changed")
+        cold = self.rate(AnalysisConfig(cache=False))
+        self.assertEqual(warm.candidates[0].score, cold.candidates[0].score)
+
+    def test_source_change_during_output_writing_prevents_cache_commit(self):
+        from videoedit.inventory import write_inventory_outputs
+
+        def mutate_source(*args, **kwargs):
+            self.source.write_bytes(b"changed before cache commit")
+            return write_inventory_outputs(*args, **kwargs)
+
+        with patch("videoedit.rating.write_inventory_outputs", side_effect=mutate_source):
+            report = self.rate()
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertFalse(self.cache_path().exists())
+
+    def test_detector_content_corruption_is_reanalyzed(self):
+        self.rate()
+        cache = json.loads(self.cache_path().read_text())
+        next(iter(cache.values()))["report"]["scene_changes"] = [9]
+        self.cache_path().write_text(json.dumps(cache))
+        report = self.rate()
+        self.assertEqual(report.signals[0].scene_changes, [5])
+        self.assert_miss_reason("cache_entry_invalid")
+
+    def test_interruption_after_output_writes_keeps_existing_cache(self):
+        from videoedit.manifests import RunManifest
+
+        self.rate()
+        original = self.cache_path().read_bytes()
+        self.source.write_bytes(b"changed source requires new analysis")
+        write = RunManifest.write
+
+        def interrupt_success(manifest):
+            if manifest.data["status"] == "ok":
+                raise KeyboardInterrupt
+            return write(manifest)
+
+        with patch.object(RunManifest, "write", interrupt_success):
+            with self.assertRaises(KeyboardInterrupt):
+                self.rate()
+        self.assertEqual(self.cache_path().read_bytes(), original)
+
+    def test_partial_run_prunes_stale_entries_without_replacing_other_entries(self):
+        self.rate()
+        self.source.write_bytes(b"changed source requires new analysis")
+        second = self.add_second_source()
+        original_probe = self.probe.side_effect
+        self.probe.side_effect = lambda path, **kwargs: (MediaAsset(second.name, str(second), status="error", error="fixture failure")
+                                                       if path == str(second) else original_probe(path, **kwargs))
+        self.rate()
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertEqual(json.loads(self.cache_path().read_text()), {})
 
 
 if __name__ == "__main__":
