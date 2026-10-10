@@ -28,6 +28,11 @@ diagnostics, not the edit files themselves.
   media retains drop-frame labels. XML uses media `clipitem`/`file` elements,
   escaped names, percent-encoded file URLs, native rates, source timecode and
   linked mono/stereo audio when a single supported audio stream is known.
+- XML declares a square-pixel sequence canvas at the timeline rate. Canvas
+  dimensions follow the first selected source when known; missing dimensions
+  stay unspecified for the importing editor to choose. Source dimensions and
+  native frame rates remain separate. This sequence-format block is necessary
+  for Resolve to import the tracks instead of silently creating an empty edit.
 - Relative source paths preserve an existing current-directory reference;
   otherwise they resolve beside the selection document. If both locations
   contain different media, export fails and requires an absolute path. Symlinks

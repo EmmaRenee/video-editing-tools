@@ -61,7 +61,17 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
     _text(sequence, "duration", timeline.duration_frames)
     _rate(sequence, timeline.rate)
     media = ET.SubElement(sequence, "media")
-    video_track = ET.SubElement(ET.SubElement(media, "video"), "track")
+    video_media = ET.SubElement(media, "video")
+    video_track = ET.SubElement(video_media, "track")
+    # Resolve silently drops tracks when the sequence has no video format.
+    canvas = ET.SubElement(ET.SubElement(video_media, "format"), "samplecharacteristics")
+    if timeline.clips:
+        first = timeline.clips[0].source.info
+        if first.width is not None and first.height is not None:
+            _text(canvas, "width", first.width)
+            _text(canvas, "height", first.height)
+    _text(canvas, "pixelaspectratio", "square")
+    _rate(canvas, timeline.rate)
     audio_tracks, emitted_files = {}, set()
 
     def file_element(parent, clip):
