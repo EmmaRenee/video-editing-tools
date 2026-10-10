@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import time
+from fractions import Fraction
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -112,14 +113,17 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
                 _text(ET.SubElement(audio, "samplecharacteristics"), "samplerate", streams[0]["sample_rate"])
 
     def item(parent, clip, item_id, kind, channel=None):
+        bounds = clip.xml_source_bounds(timeline.rate)
+        if bounds is None:
+            raise ValueError(f"XML clip {clip.event} timeline span cannot fit known video duration; use OTIO")
         node = ET.SubElement(parent, "clipitem", id=item_id)
         _text(node, "name", clip.label)
-        _text(node, "duration", clip.source_out - clip.source_in)
-        _rate(node, clip.source.rate)
+        _text(node, "duration", clip.record_out - clip.record_in)
+        _rate(node, timeline.rate)
         _text(node, "start", clip.record_in)
         _text(node, "end", clip.record_out)
-        _text(node, "in", clip.source_in)
-        _text(node, "out", clip.source_out)
+        _text(node, "in", bounds[0])
+        _text(node, "out", bounds[1])
         _text(node, "enabled", "TRUE")
         file_element(node, clip)
         source_track = ET.SubElement(node, "sourcetrack")
@@ -145,7 +149,8 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
                 pan_filter = ET.SubElement(audio_item, "filter")
                 _text(pan_filter, "enabled", "TRUE")
                 _text(pan_filter, "start", 0)
-                _text(pan_filter, "end", source_extent(clip))
+                _text(pan_filter, "end", seconds_to_frames(Fraction(source_extent(clip), 1) / clip.source.rate,
+                                                          timeline.rate))
                 effect = ET.SubElement(pan_filter, "effect")
                 for name, value in (("name", "Audio Pan"), ("effectid", "audiopan"),
                                     ("effecttype", "audiopan"), ("mediatype", "audio"),

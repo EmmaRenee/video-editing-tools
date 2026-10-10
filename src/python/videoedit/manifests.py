@@ -235,6 +235,8 @@ class RunManifest:
             handoff = dict(self.data["handoff"])
             safe_fields = {"event", "metadata_status", "source_fps", "source_timecode", "source_timecode_frames",
                            "duration_seconds", "width", "height", "start_seconds", "end_seconds",
+                           "source_in_frames", "source_out_frames", "xml_clip_rate",
+                           "xml_start_delta_seconds", "xml_end_delta_seconds",
                            "xml_in_frames", "xml_out_frames", "record_in_frames", "record_out_frames",
                            "edl_in", "edl_out", "edl_record_in", "edl_record_out", "timeline_start_seconds"}
             handoff["sources"] = [{**{key: value for key, value in row.items() if key in safe_fields},

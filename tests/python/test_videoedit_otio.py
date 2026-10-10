@@ -254,7 +254,9 @@ class OtioReadbackTests(_OtioFixture, unittest.TestCase):
         planned_clip = json.loads(plan.read_text())["clips"][0]
         self.assertEqual(planned_clip["handles_applied"], {"pre": .25, "post": .25})
         self.assertEqual(manifest["handoff"]["sources"][0]["xml_in_frames"], 0)
-        self.assertEqual(manifest["handoff"]["sources"][0]["xml_out_frames"], 120)
+        self.assertEqual(manifest["handoff"]["sources"][0]["xml_out_frames"], 125)
+        self.assertEqual(manifest["handoff"]["sources"][0]["source_out_frames"], 120)
+        self.assertEqual(manifest["handoff"]["sources"][0]["xml_clip_rate"], "25")
 
     def test_pipeline_validates_and_plans_otio_output_and_sidecar_reference(self):
         from videoedit.pipeline import plan_pipeline, run_pipeline, validate_pipeline

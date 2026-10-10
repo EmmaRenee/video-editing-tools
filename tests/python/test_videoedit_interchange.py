@@ -70,7 +70,8 @@ class InterchangeTests(unittest.TestCase):
         self.assertEqual((canvas.findtext("width"), canvas.findtext("height")), ("4096", "2160"))
         self.assertEqual((canvas.findtext("rate/timebase"), canvas.findtext("rate/ntsc")), ("30", "TRUE"))
         self.assertEqual(canvas.findtext("pixelaspectratio"), "square")
-        self.assertEqual(root.findtext("sequence/media/video/track/clipitem/rate/timebase"), "24")
+        self.assertEqual(root.findtext("sequence/media/video/track/clipitem/rate/timebase"), "30")
+        self.assertEqual(root.findtext("sequence/media/video/track/clipitem/file/rate/timebase"), "24")
 
     def test_xml_unknown_canvas_keeps_dimensions_unknown(self):
         info = media(fps="30/1")
@@ -98,12 +99,91 @@ class InterchangeTests(unittest.TestCase):
         timeline, _ = self.timeline(fps=30, info=media(fps="24/1", timecode="01:00:00:00"))
         root = ET.fromstring(generate_xml(self.clips, "mixed", 30, timeline=timeline))
         item = root.find("sequence/media/video/track/clipitem")
-        self.assertEqual(item.findtext("rate/timebase"), "24")
-        self.assertEqual((item.findtext("in"), item.findtext("out")), ("24", "72"))
+        self.assertEqual(item.findtext("rate/timebase"), "30")
+        self.assertEqual(item.findtext("file/rate/timebase"), "24")
+        self.assertEqual((item.findtext("in"), item.findtext("out")), ("30", "90"))
         self.assertEqual((item.findtext("start"), item.findtext("end")), ("0", "60"))
         self.assertEqual(root.findtext("sequence/duration"), "60")
         with self.assertRaisesRegex(ValueError, "mixed.rate"):
             generate_edl(self.clips, "mixed", 30, timeline=timeline)
+
+    def test_mixed_rate_eof_xml_uses_timeline_counters_and_native_file_metadata(self):
+        info = media(fps="60000/1001", timecode="00:00:00:00",
+                     audio=[{"index": 1, "channels": 2, "sample_rate": 48000}])
+        info.duration = 40.04
+        clips = [{**self.clips[0], "start_seconds": 39.00563333333333, "end_seconds": 40.04}]
+        timeline, _ = self.timeline(clips, info=info)
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        for item in root.findall("sequence/media/*/track/clipitem"):
+            self.assertEqual((item.findtext("rate/timebase"), item.findtext("rate/ntsc")), ("30", "TRUE"))
+            self.assertEqual((item.findtext("in"), item.findtext("out")), ("1169", "1200"))
+            self.assertEqual(item.findtext("duration"), "31")
+            self.assertEqual((item.findtext("start"), item.findtext("end")), ("0", "31"))
+        file = root.find("sequence/media/video/track/clipitem/file")
+        self.assertEqual((file.findtext("rate/timebase"), file.findtext("rate/ntsc")), ("60", "TRUE"))
+        self.assertEqual(file.findtext("duration"), "2400")
+        self.assertEqual(file.findtext("timecode/frame"), "0")
+        for item in root.findall("sequence/media/audio/track/clipitem"):
+            self.assertEqual(item.findtext("filter/end"), "1200")
+        mapping = timeline.to_dict()["sources"][0]
+        self.assertEqual((mapping["source_in_frames"], mapping["source_out_frames"]), (2338, 2400))
+        self.assertEqual((mapping["xml_in_frames"], mapping["xml_out_frames"]), (1169, 1200))
+        self.assertEqual(mapping["xml_clip_rate"], "30000/1001")
+        self.assertEqual(mapping["xml_start_delta_seconds"], 0)
+        self.assertEqual(mapping["xml_end_delta_seconds"], 0)
+
+    def test_mixed_rate_xml_reports_rounding_and_preserves_record_duration(self):
+        clips = [{**self.clips[0], "start_seconds": 1 / 60, "end_seconds": 122 / 60}]
+        timeline, _ = self.timeline(clips, fps=30, info=media(fps="60", timecode="00:00:00:00"))
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        item = root.find("sequence/media/video/track/clipitem")
+        self.assertEqual((item.findtext("in"), item.findtext("out")), ("1", "62"))
+        self.assertEqual(int(item.findtext("out")) - int(item.findtext("in")), 61)
+        row = timeline.to_dict()["sources"][0]
+        self.assertAlmostEqual(row["xml_start_delta_seconds"], 1 / 60)
+        self.assertAlmostEqual(row["xml_end_delta_seconds"], 1 / 30)
+        self.assertIn("xml_source_range_quantized", timeline.limitations)
+
+    def test_mixed_rate_xml_shifts_eof_rounding_inward_without_extending_media(self):
+        info = media(fps="60", timecode="00:00:00:00")
+        info.duration = 121 / 60
+        clips = [{**self.clips[0], "start_seconds": 119 / 60, "end_seconds": 121 / 60}]
+        timeline, _ = self.timeline(clips, fps=30, info=info)
+        item = ET.fromstring(generate_xml([], "mixed", timeline=timeline)).find("sequence/media/video/track/clipitem")
+        self.assertEqual((item.findtext("in"), item.findtext("out")), ("59", "60"))
+        self.assertLessEqual(int(item.findtext("out")) / 30, info.duration)
+        self.assertIn("xml_source_range_quantized", timeline.limitations)
+
+    def test_xml_rejects_a_record_span_that_cannot_fit_known_video(self):
+        info = media(fps="60", timecode="00:00:00:00")
+        info.duration = 121 / 60
+        clips = [{**self.clips[0], "start_seconds": 0, "end_seconds": 121 / 60}]
+        timeline, _ = self.timeline(clips, fps=30, info=info)
+        with self.assertRaisesRegex(ValueError, "XML.*timeline.*video.*OTIO"):
+            generate_xml([], "mixed", timeline=timeline)
+        mapping = timeline.to_dict()
+        self.assertFalse(mapping["xml_supported"])
+        self.assertIsNone(mapping["sources"][0]["xml_in_frames"])
+        self.assertIn("xml_source_range_unrepresentable", mapping["limitations"])
+
+    def test_high_rate_eof_shift_is_reported_even_when_greater_than_one_record_frame(self):
+        info = media(fps="120", timecode="00:00:00:00")
+        info.duration = 11 / 120
+        clips = [{**self.clips[0], "start_seconds": 5 / 120, "end_seconds": 11 / 120}]
+        timeline, _ = self.timeline(clips, fps=30, info=info)
+        row = timeline.to_dict()["sources"][0]
+        self.assertEqual((row["xml_in_frames"], row["xml_out_frames"]), (0, 2))
+        self.assertAlmostEqual(row["xml_start_delta_seconds"], -1.25 / 30)
+        self.assertAlmostEqual(row["xml_end_delta_seconds"], -0.75 / 30)
+        self.assertIn("xml_source_range_quantized", timeline.limitations)
+
+    def test_edl_manifest_states_required_resolve_frame_count_mode(self):
+        timeline, _ = self.timeline(info=media(timecode="01:00:00;00"))
+        self.assertEqual(timeline.to_dict()["edl_frame_count_mode"], "DROP FRAME")
+        timeline, _ = self.timeline(info=media(timecode="01:00:00:00"))
+        self.assertEqual(timeline.to_dict()["edl_frame_count_mode"], "NON-DROP FRAME")
+        timeline, _ = self.timeline(info=media(fps="60"))
+        self.assertIsNone(timeline.to_dict()["edl_frame_count_mode"])
 
     def test_mono_and_stereo_audio_are_linked_to_video(self):
         audio = [{"index": 1, "channels": 2, "sample_rate": 48000, "codec": "pcm_s16le"}]
@@ -304,7 +384,7 @@ class InterchangeTests(unittest.TestCase):
             paths = export_selection_file(str(selection), str(self.root / "out"))
         root = ET.fromstring(Path(paths[1]).read_text())
         item = root.find("sequence/media/video/track/clipitem")
-        self.assertEqual((item.findtext("in"), item.findtext("out")), ("36", "60"))
+        self.assertEqual((item.findtext("in"), item.findtext("out")), ("45", "75"))
 
     def test_numeric_bounds_override_ambiguous_smpte_display_text(self):
         selection = self.root / "approved.json"
@@ -313,7 +393,7 @@ class InterchangeTests(unittest.TestCase):
         with patch("videoedit.handoff.probe_handoff_media", return_value=media(fps="24/1")):
             paths = export_selection_file(str(selection), str(self.root / "out"))
         item = ET.fromstring(Path(paths[1]).read_text()).find("sequence/media/video/track/clipitem")
-        self.assertEqual((item.findtext("in"), item.findtext("out")), ("36", "60"))
+        self.assertEqual((item.findtext("in"), item.findtext("out")), ("45", "75"))
 
     def test_rounding_at_eof_cannot_add_an_unavailable_video_frame(self):
         info = media(fps="24/1")
@@ -380,6 +460,7 @@ class InterchangeTests(unittest.TestCase):
         cases = [(f"{rate.numerator}/{rate.denominator}", rate, "01:00:00:00") for rate in sorted(CMX_RATES)] + [
             ("30000/1001", 29.97, "01:00:00;00"), ("60000/1001", 59.94, "01:00:00;00"),
             ("24/1", 30, "01:00:00:00"), ("24000/1001", 30, "01:00:00:00"),
+            ("60000/1001", 29.97, "00:00:00:00"), ("30000/1001", 24, "01:00:00;00"),
             ("120/1", 120, "01:00:00:00")]
         for source_rate, fps, tc in cases:
             with self.subTest(source_rate=source_rate, fps=fps, tc=tc):
@@ -391,9 +472,15 @@ class InterchangeTests(unittest.TestCase):
                 for loaded, normalized in zip(xml.video_tracks()[0], timeline.clips):
                     actual = loaded.source_range
                     self.assertEqual(loaded.media_reference.target_url, Path(normalized.source.path).as_uri())
-                    self.assertAlmostEqual(actual.start_time.rate, float(frame_rate(source_rate)))
-                    self.assertAlmostEqual(actual.start_time.value, normalized.source.timecode_frames + normalized.source_in)
-                    self.assertLessEqual(abs(actual.end_time_exclusive().value - normalized.source.timecode_frames - normalized.source_out), 1)
+                    self.assertAlmostEqual(actual.start_time.rate, float(timeline.rate))
+                    native_rate = float(frame_rate(source_rate))
+                    media_origin = normalized.source.timecode_frames / native_rate
+                    expected_start = media_origin + normalized.source_in / native_rate
+                    expected_end = media_origin + normalized.source_out / native_rate
+                    self.assertLessEqual(abs(actual.start_time.to_seconds() - expected_start), 1 / float(timeline.rate))
+                    self.assertLessEqual(abs(actual.end_time_exclusive().to_seconds() - expected_end), 1 / float(timeline.rate))
+                    self.assertAlmostEqual(actual.duration.value, normalized.record_out - normalized.record_in)
+                    self.assertAlmostEqual(loaded.media_reference.available_range.start_time.rate, native_rate)
                 if timeline.edl_supported:
                     edit = otio.adapters.read_from_string(generate_edl([], "mixed", fps, timeline=timeline),
                                                          adapter_name="cmx_3600", rate=float(timeline.rate))

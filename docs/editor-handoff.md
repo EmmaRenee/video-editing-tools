@@ -21,18 +21,36 @@ diagnostics, not the edit files themselves.
   numeric seconds. Export never silently reinterprets existing SMPTE selections.
 - Source in/out points round to native frames, nearest with ties upward. Record
   positions accumulate source spans rescaled to timeline FPS and quantized to
-  record frames. XML keeps native source counters separate from record counters.
+  record frames. XML file metadata retains native counters, while clip items
+  use timeline-rate counters, matching Resolve's own FCP7 XML representation.
   Decimal NTSC rates use exact `1000/1001` fractions internally.
 - EDL uses standard single-line event columns, a deterministic eight-character
   reel, cut-only video events, and a frame-count-mode header. Uniform drop-frame
   media retains drop-frame labels. XML uses media `clipitem`/`file` elements,
-  escaped names, percent-encoded file URLs, native rates, source timecode and
+  escaped names, percent-encoded file URLs, native file rates, source timecode and
   linked mono/stereo audio when a single supported audio stream is known.
 - XML declares a square-pixel sequence canvas at the timeline rate. Canvas
   dimensions follow the first selected source when known; missing dimensions
   stay unspecified for the importing editor to choose. Source dimensions and
   native frame rates remain separate. This sequence-format block is necessary
   for Resolve to import the tracks instead of silently creating an empty edit.
+- XML clip `rate`, `in`, `out`, and `duration` use timeline FPS. Native file FPS,
+  timecode and full video extent are unchanged. Resolve misinterprets mixed-rate
+  native clip counters even when the import mode is Final Cut Pro 7; a 59.94 fps
+  EOF clip on a 29.97 fps timeline can otherwise seek beyond its source.
+  The manifest separates `source_in_frames`/`source_out_frames` (native) from
+  `xml_in_frames`/`xml_out_frames` at `xml_clip_rate`. Matching-rate values are
+  unchanged. XML starts round to the nearest timeline frame; the out point is
+  that start plus the quantized record duration. At known EOF, the range shifts
+  inward to fit whole timeline frames. Ordinary start rounding is at most half
+  a timeline frame and end rounding at most one. EOF adjustment can move the
+  start inward by up to 1.5 timeline frames. All are relative to the native-snapped
+  selection and are reported as
+  `xml_start_delta_seconds`/`xml_end_delta_seconds`, with
+  `xml_source_range_quantized` and partial status when nonzero. If a full record
+  span cannot fit the known video extent, XML fails explicitly; use native OTIO.
+  `xml_supported` is false for that case. Do not interpret the XML counters using
+  native `source_fps` or treat frame rounding as an editorially approved change.
 - XML splits a supported stereo stream into linked mono items with explicit
   left/right clip panning. Without that panning, Resolve centers both channels
   and mixes them into identical outputs. Mono sources remain centered, including
@@ -106,6 +124,23 @@ verification remains necessary for variable-rate footage.
 M3U start/stop values are numeric seconds, not formatted timecodes. The script
 uses precise offsets, but `-c copy` remains keyframe-dependent. Use rendered
 extraction/assembly for precise cuts.
+
+## Resolve Import Settings
+
+Use a separate test project before importing into an editorial project. For
+CMX EDL, inspect `FCM` and the manifest's `edl_frame_count_mode`. Project/timeline
+FPS **and** drop-frame mode must match the EDL, as must the EDL frame-rate and
+drop-frame controls in Resolve's import dialog. The header alone does not safely
+configure those controls. Matching 29.97 numeric FPS while mixing DF/NDF modes
+can offset a cut, leave an EOF clip offline, or fail with a conforming-rate error.
+Set this before creating timelines; Resolve can lock project timing settings.
+
+For XML, keep the native media frame rates and use the generated timeline rate;
+do not change source clip attributes to force a match. Re-export from Resolve
+and compare source/record bounds with the manifest, including rounding deltas.
+EDL is video-only; audio Resolve automatically attaches from the media pool is
+not evidence that EDL exported audio. Optional OTIO preserves native mixed-rate
+source cuts, but Resolve can still quantize their timeline placement on import.
 
 ## Optional OTIO Export
 

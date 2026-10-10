@@ -70,6 +70,20 @@ class HandoffClip:
     record_in: int
     record_out: int
 
+    def xml_source_bounds(self, timeline_rate: Fraction) -> tuple[int, int] | None:
+        """Resolve interprets clip counters at timeline rate, not file rate."""
+        start = seconds_to_frames(Fraction(self.source_in, 1) / self.source.rate, timeline_rate)
+        duration = self.record_out - self.record_in
+        if self.source.info.duration is not None:
+            native_extent = seconds_to_frames(self.source.info.duration, self.source.rate)
+            extent = Fraction(native_extent, 1) * timeline_rate / self.source.rate
+            last_frame = extent.numerator // extent.denominator
+            if duration > last_frame:
+                return None
+            # Move rounding inward at EOF; never add an unavailable video frame.
+            start = min(start, last_frame - duration)
+        return start, start + duration
+
 
 @dataclass(frozen=True)
 class HandoffTimeline:
@@ -97,6 +111,7 @@ class HandoffTimeline:
             source = clip.source
             tc = drop_timecode if source.drop_frame else frames_to_timecode
             record_tc = drop_timecode if self.edl_drop_frame else frames_to_timecode
+            xml_bounds = clip.xml_source_bounds(self.rate)
             rows.append({"source": source.path, "reel": source.reel, "label": clip.label,
                          "file_id": source.file_id, "event": clip.event,
                          "pathurl": Path(source.path).as_uri(), "metadata_status": source.info.status,
@@ -106,7 +121,14 @@ class HandoffTimeline:
                          "width": source.info.width, "height": source.info.height,
                          "audio_streams": source.info.audio_streams,
                          "start_seconds": clip.start_seconds, "end_seconds": clip.end_seconds,
-                         "xml_in_frames": clip.source_in, "xml_out_frames": clip.source_out,
+                         "source_in_frames": clip.source_in, "source_out_frames": clip.source_out,
+                         "xml_in_frames": xml_bounds[0] if xml_bounds else None,
+                         "xml_out_frames": xml_bounds[1] if xml_bounds else None,
+                         "xml_clip_rate": str(self.rate),
+                         "xml_start_delta_seconds": float(Fraction(xml_bounds[0], 1) / self.rate -
+                                                          Fraction(clip.source_in, 1) / source.rate) if xml_bounds else None,
+                         "xml_end_delta_seconds": float(Fraction(xml_bounds[1], 1) / self.rate -
+                                                        Fraction(clip.source_out, 1) / source.rate) if xml_bounds else None,
                          "record_in_frames": clip.record_in, "record_out_frames": clip.record_out,
                          "edl_in": tc(source.timecode_frames + clip.source_in, source.rate) if self.edl_supported else None,
                          "edl_out": tc(source.timecode_frames + clip.source_out, source.rate) if self.edl_supported else None,
@@ -116,6 +138,8 @@ class HandoffTimeline:
         return {"schema_version": HANDOFF_SCHEMA, "timeline_fps": self.requested_fps,
                 "timeline_rate": str(self.rate), "duration_frames": self.duration_frames,
                 "sources": rows, "handles": handles, "edl_supported": self.edl_supported,
+                "edl_frame_count_mode": ("DROP FRAME" if self.edl_drop_frame else "NON-DROP FRAME") if self.edl_supported else None,
+                "xml_supported": all(clip.xml_source_bounds(self.rate) is not None for clip in self.clips),
                 "rounding": {"edl": "nearest_frame_half_up", "xml": "nearest_frame_half_up"},
                 "fps_assumption": "native_source_rates_when_available",
                 "editor_verified": False, "warnings": list(self.warnings),
@@ -219,8 +243,15 @@ def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
         label = str(clip.get("label") or f"Clip_{event:03d}")
         if not _valid_xml_text(label):
             raise ValueError(f"clip {event} label contains characters forbidden in XML")
-        rows.append(HandoffClip(event, label, source,
-                                start, end, source_in, source_out, cursor, cursor + record_duration))
+        row = HandoffClip(event, label, source,
+                          start, end, source_in, source_out, cursor, cursor + record_duration)
+        rows.append(row)
+        xml_bounds = row.xml_source_bounds(rate)
+        if xml_bounds is None:
+            warn("xml_source_range_unrepresentable", event)
+        elif (Fraction(xml_bounds[0], 1) / rate != Fraction(source_in, 1) / source.rate or
+              Fraction(xml_bounds[1], 1) / rate != Fraction(source_out, 1) / source.rate):
+            warn("xml_source_range_quantized", event)
         cursor += record_duration
         if source.rate != rate:
             warn("edl_unsupported_mixed_rate", event)

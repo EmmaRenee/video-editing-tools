@@ -215,6 +215,14 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(data["handoff"]["rounding"]["xml"], "nearest_frame_half_up")
         self.assertIn("source_metadata_unavailable", data["handoff"]["limitations"])
         self.assertFalse(data["handoff"]["editor_verified"])
+        self.assertEqual(data["handoff"]["edl_frame_count_mode"], "NON-DROP FRAME")
+        self.assertTrue(data["handoff"]["xml_supported"])
+        row = data["handoff"]["sources"][0]
+        self.assertEqual(row["xml_clip_rate"], "30000/1001")
+        self.assertIn("source_in_frames", row)
+        self.assertIn("source_out_frames", row)
+        self.assertEqual(row["xml_start_delta_seconds"], 0)
+        self.assertEqual(row["xml_end_delta_seconds"], 0)
         self.assertNotIn(str(self.root), path.read_text())
 
     def test_assembly_failure_has_manifest_without_output_claim(self):
