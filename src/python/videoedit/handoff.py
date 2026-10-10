@@ -143,7 +143,8 @@ def _source_path(value: str, base_dir: str | None) -> str:
 def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
                            *, base_dir: str | None = None,
                            original_clips: list[dict] | None = None,
-                           media_info: dict[str, HandoffMediaInfo] | None = None) -> HandoffTimeline:
+                           media_info: dict[str, HandoffMediaInfo] | None = None,
+                           require_record_frame: bool = True) -> HandoffTimeline:
     rate = frame_rate(fps)
     sources, reels = {}, {}
     rows, warnings, limitations = [], [], []
@@ -213,7 +214,7 @@ def build_handoff_timeline(clips: list[dict], source_file: str, fps=30,
         if source.info.duration is not None and source_out > seconds_to_frames(source.info.duration, source.rate):
             raise ValueError(f"clip {event} rounded end exceeds video duration in frames")
         record_duration = seconds_to_frames(Fraction(source_out - source_in, 1) / source.rate, rate)
-        if record_duration <= 0:
+        if record_duration <= 0 and require_record_frame:
             raise ValueError(f"clip {event} does not span a timeline frame")
         label = str(clip.get("label") or f"Clip_{event:03d}")
         if not _valid_xml_text(label):

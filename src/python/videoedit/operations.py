@@ -31,6 +31,7 @@ from .frames import sample_frames
 from .inventory import build_inventory, write_inventory_outputs
 from .learning import build_review_dataset, train_local_scorer
 from .modules import all_modules, is_module_enabled, load_module_config, module_for_operation, operation_enabled
+from .otio import export_otio_file
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
 from .roughcut import plan_roughcut
@@ -110,6 +111,7 @@ def default_registry(enabled_only: bool = True, cwd: str | None = None) -> Opera
     _register(registry, enabled_only, cwd, "evaluate_provider_ablations", "Compare controlled optional-provider additions", op_evaluate_provider_ablations)
     _register(registry, enabled_only, cwd, "extract_segments", "Extract clips from selection JSON files", op_extract_segments)
     _register(registry, enabled_only, cwd, "generate_edl", "Generate EDL/XML/M3U from selection JSON files", op_generate_edl)
+    _register(registry, enabled_only, cwd, "generate_otio", "Export selection or rough-cut JSON to optional OTIO", op_generate_otio)
     _register(registry, enabled_only, cwd, "generate_review_assets", "Generate thumbnails and an HTML contact sheet", op_review_assets)
     _register(registry, enabled_only, cwd, "approve_candidates", "Create approved.json from rating candidates", op_approve_candidates)
     _register(registry, enabled_only, cwd, "plan_roughcut", "Plan a deterministic rough cut from approved selections", op_plan_roughcut)
@@ -327,6 +329,15 @@ def op_generate_edl(context: dict[str, Any], params: dict[str, Any]) -> dict[str
     return {"output": output_dir, "files": written,
             "run_manifests": [os.path.join(output_dir, os.path.splitext(os.path.basename(path))[0] + "_handoff.json")
                               for path in selection_paths]}
+
+
+def op_generate_otio(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    selection = params.get("input") or context.get("roughcut_plan") or context.get("approved")
+    if not isinstance(selection, (str, os.PathLike)):
+        raise ValueError("generate_otio requires one selection or rough-cut JSON input")
+    output = params.get("output") or os.path.join(context["output"], "edit.otio")
+    return export_otio_file(selection, output, fps=params.get("fps"),
+                            manifest_paths=params.get("manifest_paths", context.get("manifest_paths", "absolute")))
 
 
 def op_review_assets(context: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:

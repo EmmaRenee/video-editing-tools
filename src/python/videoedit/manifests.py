@@ -19,8 +19,8 @@ from .provenance import canonical_hash, file_sha256, library_version, public_pro
 
 RUN_SCHEMA = "videoedit.run_manifest.v1"
 PATH_MODES = {"absolute", "relative", "redacted"}
-JSON_SUFFIXES = {".json", ".yaml", ".yml", ".csv", ".srt", ".ass", ".edl", ".xml", ".m3u", ".sh", ".md", ".html", ".txt"}
-PROVIDER_LIBRARIES = ("open_clip_torch", "torch", "Pillow", "opencv-python", "ultralytics", "openai-whisper")
+JSON_SUFFIXES = {".json", ".yaml", ".yml", ".csv", ".srt", ".ass", ".edl", ".xml", ".otio", ".m3u", ".sh", ".md", ".html", ".txt"}
+PROVIDER_LIBRARIES = ("open_clip_torch", "torch", "Pillow", "opencv-python", "ultralytics", "openai-whisper", "opentimelineio")
 CACHE_REASON_CODES = frozenset({
     "cache_disabled", "cache_not_found", "cache_unreadable", "cache_invalid", "cache_entry_invalid",
     "analysis_policy_changed", "source_changed", "decoder_changed", "transcript_changed",
@@ -243,6 +243,16 @@ class RunManifest:
             handoff["warning_count"] = len(handoff.get("warnings", []))
             handoff["warnings"] = []
             payload["handoff"] = handoff
+        if "otio" in self.data:
+            details = self.data["otio"]
+            safe_fields = {"schema_version", "timeline_rate", "duration_seconds", "limitations",
+                           "editor_verified", "rounding"}
+            payload["otio"] = {key: value for key, value in details.items() if key in safe_fields}
+            payload["otio"]["provider"] = {key: value for key, value in details.get("provider", {}).items()
+                                             if key in {"name", "version"}}
+            safe_placement = {"event", "start_seconds", "duration_seconds", "record_quantization_delta_seconds"}
+            payload["otio"]["placements"] = [{key: value for key, value in row.items() if key in safe_placement}
+                                              for row in details.get("placements", [])]
         return payload
 
     def __exit__(self, error_type: Any, error: BaseException | None, _traceback: Any) -> bool:

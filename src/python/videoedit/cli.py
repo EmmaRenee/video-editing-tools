@@ -51,6 +51,7 @@ from .modules import (
     scaffold_module,
 )
 from .operations import default_registry, op_extract_segments
+from .otio import export_otio_file
 from .pipeline import available_presets, load_pipeline, plan_pipeline, run_pipeline, validate_pipeline, write_preset
 from .rating import run_rating
 from .review import assemble, create_approval_file, generate_review_assets
@@ -87,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_edl.add_argument("--output", "-o", required=True)
     export_edl.add_argument("--fps", type=float, default=None)
     export_edl.set_defaults(func=cmd_export_edl)
+
+    export_otio = sub.add_parser("export-otio", help="Export selection or rough-cut JSON to optional OTIO")
+    export_otio.add_argument("selection")
+    export_otio.add_argument("--output", "-o", required=True, help="Output .otio file")
+    export_otio.add_argument("--fps", type=float, default=None)
+    export_otio.set_defaults(func=cmd_export_otio)
 
     extract_segments = sub.add_parser("extract-segments", help="Extract clips from selection JSON files")
     extract_segments.add_argument("selections", nargs="+")
@@ -406,7 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     modules_scaffold.add_argument("--output", "-o", required=True)
     modules_scaffold.set_defaults(func=cmd_modules_scaffold)
 
-    for command in (rate, export_edl, review_assets, assemble_cmd, roughcut_plan):
+    for command in (rate, export_edl, export_otio, review_assets, assemble_cmd, roughcut_plan):
         command.add_argument("--manifest-paths", choices=["absolute", "relative", "redacted"], default="absolute")
     return parser
 
@@ -536,6 +543,15 @@ def cmd_export_edl(args: argparse.Namespace) -> int:
             if manifest.get("handoff", {}).get("edl_supported") is False:
                 print("warning: EDL is not an importable edit; use XML.", file=sys.stderr)
     print(f"Wrote {len(written)} handoff files to {output}")
+    return 0
+
+
+def cmd_export_otio(args: argparse.Namespace) -> int:
+    require_module_enabled("editor.otio")
+    result = export_otio_file(args.selection, args.output, fps=args.fps, manifest_paths=args.manifest_paths)
+    print(json.dumps(result, indent=2))
+    if result["warnings"]:
+        print("warning: Partial OTIO handoff; inspect its handoff manifest before editing.", file=sys.stderr)
     return 0
 
 

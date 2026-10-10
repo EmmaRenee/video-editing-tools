@@ -107,6 +107,84 @@ M3U start/stop values are numeric seconds, not formatted timecodes. The script
 uses precise offsets, but `-c copy` remains keyframe-dependent. Use rendered
 extraction/assembly for precise cuts.
 
+## Optional OTIO Export
+
+```bash
+python -m pip install -e "./src/python[editor]"
+videoedit modules doctor
+videoedit export-otio approved.json --output handoff/edit.otio
+videoedit export-otio roughcut_plan.json --output handoff/roughcut.otio --manifest-paths redacted
+```
+
+`editor.otio` is optional and can be disabled through `videoedit modules disable
+editor.otio`. OpenTimelineIO 0.18.x is supported, with 0.18.1 exercised in CI.
+It is loaded only on export; base installation, `doctor`, and the legacy
+four-file `export-edl` contract do not require it. Native `.otio` writing needs
+no FCP/CMX adapters. The public Python APIs are
+`videoedit.otio.export_otio_file(selection_path, output, fps=None,
+manifest_paths="absolute")` and `generate_otio(HandoffTimeline, name=...)`.
+
+The same shared loader accepts per-source selections, approved JSON, Drive-style
+soundbites and rough-cut plans. `--fps` overrides document FPS, then defaults to
+30. Native source FPS stays separate. Output must end in `.otio`. Input/output/
+sidecar collisions with the selection or source media are rejected before
+writing; a failed atomic output replacement leaves the previous edit intact.
+
+Pipeline operation `generate_otio` accepts one JSON `input`, then falls back to
+the current `roughcut_plan` or `approved` context. It returns `output`, `clips`,
+`duration_seconds`, `warnings`, and `run_manifest`. The sidecar is named
+`<edit-stem>_otio_handoff.json`, separate from legacy XML/EDL handoff reports.
+A step with no explicit
+output defaults to `<output>/<step-name>.otio`:
+
+```yaml
+requires_modules:
+  - editor.otio
+steps:
+  - name: edit
+    operation: generate_otio
+    input: ${input}
+    params:
+      output: ${output}/edit.otio
+```
+
+The cut-only timeline contains one video track and, when supported audio exists,
+one audio track. Media URLs refer to resolved originals, not review proxies.
+Each `available_range` starts at the embedded media-start frame, with the full
+known native video duration. Each selected `source_range` starts at that origin
+plus the selected offset. Unknown availability remains null; a probed duration
+is not invented for offline sources. Out-of-range known selections fail.
+
+Source ranges retain integer native frames. Unlike the compatibility XML/EDL
+record counters, OTIO track placement accumulates those native durations without
+an implicit retime. Mixed-rate placement can therefore land between timeline
+frames. `otio.placements` records actual elapsed placement and differences from
+the legacy quantized record durations. A nonzero difference produces
+`native_duration_differs_from_quantized_record` and partial status, requiring
+editor inspection. The sidecar's `handoff` block remains the shared legacy
+mapping, not an alternative claim about OTIO track placement.
+
+Native source-frame cuts shorter than a timeline frame remain representable in
+OTIO even when their legacy record duration rounds to zero. Legacy XML/EDL
+minimum-frame validation is unchanged. Redacted sidecars retain the path-free
+OTIO placement and quantization diagnostics.
+
+A single known mono/stereo audio stream becomes one audio clip with the same
+range as video. Silent or unsupported-audio sources become gaps when an audio
+track is present. Surround and multiple streams are not exported; limitations
+remain visible. This avoids splitting stereo into centered mono tracks but does
+not establish editor channel routing, codec support or linked-selection behavior.
+Transitions, retiming, effects and compounds remain omitted with warnings.
+
+Timeline metadata `videoedit.otio.v1` records exact rate strings, source offsets,
+embedded timecode, deterministic reel/event identifiers, actual placements,
+provider version, limitations and `editor_verified: false`. The run sidecar
+fingerprints the `.otio` by content and sources by metadata; it does not claim a
+full source-byte checksum. Redaction applies only to the sidecar, **not** the
+operational edit's media URLs. Parse/collision validation occurs before manifest
+creation to protect inputs; dependency/export failures are recorded once the
+manifest safely starts. Keep private edits off public issue attachments.
+
 ## Verification
 
 Run the core suite without optional readers:
@@ -120,6 +198,7 @@ Independent format checks are also available in an isolated development venv:
 ```bash
 python -m pip install opentimelineio==0.18.1 otio-fcp-adapter==1.0.0 otio-cmx3600-adapter==1.0.0
 python -m unittest discover -s tests/python -p test_videoedit_interchange.py
+python -m unittest discover -s tests/python -p test_videoedit_otio.py
 ```
 
 CI runs this separately from core tests and wheel installation. These readers
@@ -127,10 +206,12 @@ verify integer/fractional, DF/NDF and mixed-rate XML ranges, media URLs and audi
 structure. They do not establish editor codec support, real-media relinking or
 audio fidelity. `editor_verified` remains false until a separately recorded live
 Resolve import verifies original-media relink, timeline boundaries, timecode,
-ordering, handles and audio. OTIO is currently a validation dependency only,
-not a required runtime dependency or an automatically promoted experimental
-Resolve/OTIO integration.
+ordering, handles and audio. Optional OTIO readback validates SDK structure,
+native timecode origins, mixed-rate durations, audio gaps, failure behavior and
+pipeline compatibility. This does not promote the separate experimental Resolve
+SDK integration or prove that every Resolve version interprets the edit equally.
 
 Format references: [Apple FCP7 XML elements](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html),
 [official OTIO FCP adapter](https://github.com/OpenTimelineIO/otio-fcp-adapter),
-[official OTIO CMX adapter](https://github.com/OpenTimelineIO/otio-cmx3600-adapter).
+[official OTIO CMX adapter](https://github.com/OpenTimelineIO/otio-cmx3600-adapter),
+[OTIO timeline/media-time structure](https://opentimelineio.readthedocs.io/en/v0.14/tutorials/otio-timeline-structure.html).

@@ -170,6 +170,12 @@ def run_workflow(output: Path, checkout: Path) -> dict:
         assert len(xml.findall("sequence/media/audio/track")) == 2, "xml_audio_tracks"
         assert xml.findtext("sequence/media/video/track/clipitem/file/timecode/string") == "01:00:00:00", "xml_source_timecode"
 
+        assert importlib.util.find_spec("opentimelineio") is None, "core_environment_has_optional_otio"
+        absent_otio = output / "missing-sdk.otio"
+        cli("otio_absent", "export-otio", str(plan), "--output", str(absent_otio), expected=1)
+        assert not absent_otio.exists(), "missing_otio_wrote_edit"
+        assert read(output / "missing-sdk_otio_handoff.json")["status"] == "error", "missing_otio_not_diagnosed"
+
         pipeline = output / "roughcut.yaml"
         cli("preset", "init", "roughcut", "--output", str(pipeline))
         cli("validate", "validate", str(pipeline))

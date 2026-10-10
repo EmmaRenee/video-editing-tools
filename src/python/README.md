@@ -356,6 +356,7 @@ Regenerating review assets into the same folder preserves matching decisions, no
 | `generate_review_assets` | Generate thumbnails and an HTML contact sheet |
 | `approve_candidates` | Create approved.json from rating candidates |
 | `plan_roughcut` | Plan clip order, target duration, handles, format, and render settings |
+| `generate_otio` | Optional native OTIO export from selections or rough-cut plans (`editor.otio`) |
 | `assemble_rough_cut` | Assemble a rough cut from approved selections |
 | `format_video` | Apply an FFmpeg video filter |
 | `burn_captions` | Burn subtitles into video |
@@ -534,6 +535,23 @@ See [Editor Handoff](../../docs/editor-handoff.md) for the mapping, offline
 fallback and independent-reader checks. Actual Resolve relink/timecode/audio/
 handle validation remains required before claiming production readiness.
 
+### Optional OTIO Handoff
+
+```bash
+python -m pip install -e "./src/python[editor]"
+videoedit modules enable editor.otio
+videoedit export-otio approved.json --output handoff/edit.otio
+videoedit export-otio roughcut_plan.json --output handoff/roughcut.otio --manifest-paths redacted
+```
+
+`videoedit.otio.export_otio_file` returns `output`, `clips`, `duration_seconds`,
+`warnings`, and `run_manifest`. The `generate_otio` operation accepts one JSON
+`input`, otherwise the current `roughcut_plan` or `approved` context, and defaults
+to a `.otio` file. The optional SDK loads only when exporting; core commands
+and the existing four-file `export-edl` contract remain unchanged.
+See [OTIO timing and audio](../../docs/editor-handoff.md#optional-otio-export)
+before relying on mixed-rate edits or importing into an editor.
+
 ### Content Planning
 
 ```bash
@@ -642,7 +660,7 @@ python --version
 
 `videoedit` 0.5.0 supports Python 3.10+. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
-The base package has no mandatory Python runtime dependencies beyond the standard library. Optional provider dependencies stay in extras: `whisper`, `advanced`, `ai`, `ui`, and `cloud`.
+The base package has no mandatory Python runtime dependencies beyond the standard library. Optional provider dependencies stay in extras: `whisper`, `advanced`, `ai`, `editor`, `ui`, and `cloud`.
 
 ---
 

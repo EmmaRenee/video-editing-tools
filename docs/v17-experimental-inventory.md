@@ -98,6 +98,11 @@ replace the established package.
 
 On the isolated `main` baseline, `python3.12 -m unittest discover -s
 tests/python` passed 95 tests. This establishes the base package only.
-The primary checkout remains unchanged after discovery. Resolve/OTIO,
-provider performance, human annotations, and multi-project validation are
-still outstanding and are tracked by their V17 issues.
+The user approved these architecture recommendations on 2026-10-09, including
+a separate Resolve validation project. The optional OTIO capability is being
+promoted as `videoedit.otio`, module `editor.otio`, and operation `generate_otio`
+using shared selection/rough-cut artifacts. This is not wholesale promotion of
+the experimental Resolve SDK package or its ShootDB dependency. Direct SDK
+automation remains a separate #79 acceptance item. The primary checkout and
+experimental files remain unchanged. Live-editor, human annotation, provider
+quality and multi-project acceptance gates still require their recorded evidence.
