@@ -60,6 +60,29 @@ class InterchangeTests(unittest.TestCase):
         self.assertEqual(root.findtext("sequence/rate/timebase"), "30")
         self.assertEqual(root.findtext("sequence/rate/ntsc"), "TRUE")
 
+    def test_xml_sequence_format_uses_timeline_rate_and_known_canvas(self):
+        info = media(fps="24/1")
+        info.width, info.height = 4096, 2160
+        timeline, _ = self.timeline(fps=29.97, info=info)
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        canvas = root.find("sequence/media/video/format/samplecharacteristics")
+        self.assertIsNotNone(canvas, "Resolve ignores clip tracks without a sequence format")
+        self.assertEqual((canvas.findtext("width"), canvas.findtext("height")), ("4096", "2160"))
+        self.assertEqual((canvas.findtext("rate/timebase"), canvas.findtext("rate/ntsc")), ("30", "TRUE"))
+        self.assertEqual(canvas.findtext("pixelaspectratio"), "square")
+        self.assertEqual(root.findtext("sequence/media/video/track/clipitem/rate/timebase"), "24")
+
+    def test_xml_unknown_canvas_keeps_dimensions_unknown(self):
+        info = media(fps="30/1")
+        info.width, info.height = None, None
+        timeline, _ = self.timeline(fps=30, info=info)
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        canvas = root.find("sequence/media/video/format/samplecharacteristics")
+        self.assertIsNotNone(canvas)
+        self.assertIsNone(canvas.find("width"))
+        self.assertIsNone(canvas.find("height"))
+        self.assertEqual((canvas.findtext("rate/timebase"), canvas.findtext("rate/ntsc")), ("30", "FALSE"))
+
     def test_nonzero_source_timecode_and_native_bounds(self):
         timeline, _ = self.timeline()
         edl = generate_edl(self.clips, "mixed", 29.97, timeline=timeline)
