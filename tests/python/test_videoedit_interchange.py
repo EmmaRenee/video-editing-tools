@@ -177,6 +177,19 @@ class InterchangeTests(unittest.TestCase):
         self.assertAlmostEqual(row["xml_end_delta_seconds"], -0.75 / 30)
         self.assertIn("xml_source_range_quantized", timeline.limitations)
 
+    def test_unknown_video_extent_covers_all_quantized_xml_ranges_in_native_frames(self):
+        info = media(fps="60", timecode="00:00:00:00")
+        info.duration = None
+        clips = [{**self.clips[0], "start_seconds": 1 / 60, "end_seconds": 121 / 60},
+                 {**self.clips[0], "start_seconds": 122 / 60, "end_seconds": 241 / 60}]
+        timeline, _ = self.timeline(clips, fps=30, info=info)
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        file = root.find("sequence/media/video/track/clipitem/file")
+        self.assertEqual(file.findtext("duration"), "242")
+        for item in root.findall("sequence/media/video/track/clipitem"):
+            self.assertLessEqual(int(item.findtext("out")) / 30, int(file.findtext("duration")) / 60)
+        self.assertTrue(all(row["duration_seconds"] is None for row in timeline.to_dict()["sources"]))
+
     def test_edl_manifest_states_required_resolve_frame_count_mode(self):
         timeline, _ = self.timeline(info=media(timecode="01:00:00;00"))
         self.assertEqual(timeline.to_dict()["edl_frame_count_mode"], "DROP FRAME")
@@ -184,6 +197,15 @@ class InterchangeTests(unittest.TestCase):
         self.assertEqual(timeline.to_dict()["edl_frame_count_mode"], "NON-DROP FRAME")
         timeline, _ = self.timeline(info=media(fps="60"))
         self.assertIsNone(timeline.to_dict()["edl_frame_count_mode"])
+
+    def test_unknown_extent_rounds_up_fractional_native_requirements(self):
+        info = media(fps="24", timecode="00:00:00:00")
+        info.duration = None
+        clips = [{**self.clips[0], "start_seconds": 2 / 24, "end_seconds": 26 / 24}]
+        timeline, _ = self.timeline(clips, fps=30, info=info)
+        item = ET.fromstring(generate_xml([], "mixed", timeline=timeline)).find("sequence/media/video/track/clipitem")
+        self.assertEqual(item.findtext("out"), "33")
+        self.assertEqual(item.findtext("file/duration"), "27")
 
     def test_mono_and_stereo_audio_are_linked_to_video(self):
         audio = [{"index": 1, "channels": 2, "sample_rate": 48000, "codec": "pcm_s16le"}]

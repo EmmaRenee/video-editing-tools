@@ -48,6 +48,12 @@ class _OtioFixture:
 
 
 class OtioBaseTests(_OtioFixture, unittest.TestCase):
+    def test_xml_only_quantization_is_not_an_otio_limitation(self):
+        clips = [{**self.clips[0], "start_seconds": 1 / 24, "end_seconds": 25 / 24}]
+        timeline = self.timeline(clips, fps=30, media=info("24", "01:00:00:00", duration=20))
+        self.assertIn("xml_source_range_quantized", timeline.limitations)
+        self.assertEqual(self.api()._details(timeline)["limitations"], [])
+
     def test_core_cli_import_does_not_load_the_optional_sdk_or_shoot_database(self):
         self.api()
         result = subprocess.run([sys.executable, "-c", "import sys; import videoedit.cli; "
@@ -115,6 +121,18 @@ class OtioReadbackTests(_OtioFixture, unittest.TestCase):
     def read(self, timeline, name="Example"):
         import opentimelineio as otio
         return otio.adapters.read_from_string(self.api().generate_otio(timeline, name=name), "otio_json")
+
+    def test_exact_native_export_stays_complete_when_only_xml_source_start_would_round(self):
+        self.selection.write_text(json.dumps({"fps": 30, "clips": [
+            {**self.clips[0], "start_seconds": 1 / 24, "end_seconds": 25 / 24}]}))
+        with patch("videoedit.handoff.probe_handoff_media", return_value=info("24", "01:00:00:00", duration=20)):
+            result = self.api().export_otio_file(self.selection, self.root / "native.otio")
+        report = json.loads(Path(result["run_manifest"]).read_text())
+        self.assertEqual(report["status"], "ok")
+        self.assertTrue(report["complete"])
+        self.assertEqual(result["warnings"], [])
+        self.assertIn("xml_source_range_quantized", report["handoff"]["limitations"])
+        self.assertEqual(report["otio"]["limitations"], [])
 
     def test_native_timecode_available_range_and_offsets_survive_serialization(self):
         timeline = self.read(self.timeline())

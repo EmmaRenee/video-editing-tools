@@ -27,7 +27,7 @@ def _require_otio():
 
 
 def _details(timeline: HandoffTimeline) -> dict:
-    limitations = [code for code in timeline.limitations if not code.startswith("edl_")]
+    limitations = [code for code in timeline.limitations if not code.startswith(("edl_", "xml_"))]
     rows, cursor = [], Fraction(0)
     for clip in timeline.clips:
         duration = Fraction(clip.source_out - clip.source_in, 1) / clip.source.rate

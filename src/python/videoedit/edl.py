@@ -79,7 +79,13 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
         source, info = clip.source, clip.source.info
         if info.duration is not None:
             return seconds_to_frames(info.duration, source.rate)
-        return max(item.source_out for item in timeline.clips if item.source.path == source.path)
+        minimum = 0
+        for item in timeline.clips:
+            if item.source.path == source.path:
+                bounds = item.xml_source_bounds(timeline.rate)
+                native_out = Fraction(bounds[1], 1) * source.rate / timeline.rate
+                minimum = max(minimum, item.source_out, -(-native_out.numerator // native_out.denominator))
+        return minimum
 
     def file_element(parent, clip):
         source, info = clip.source, clip.source.info

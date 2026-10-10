@@ -51,6 +51,9 @@ diagnostics, not the edit files themselves.
   span cannot fit the known video extent, XML fails explicitly; use native OTIO.
   `xml_supported` is false for that case. Do not interpret the XML counters using
   native `source_fps` or treat frame rounding as an editorially approved change.
+  For unknown-duration media, the XML file's minimum extent also covers all
+  quantized XML out points, rounded upward to native frames. The manifest's
+  actual `duration_seconds` remains null; this is not a probed availability claim.
 - XML splits a supported stereo stream into linked mono items with explicit
   left/right clip panning. Without that panning, Resolve centers both channels
   and mixes them into identical outputs. Mono sources remain centered, including
@@ -198,6 +201,9 @@ the legacy quantized record durations. A nonzero difference produces
 `native_duration_differs_from_quantized_record` and partial status, requiring
 editor inspection. The sidecar's `handoff` block remains the shared legacy
 mapping, not an alternative claim about OTIO track placement.
+XML-only rounding or unrepresentability remains in that shared mapping, not
+in OTIO's format-specific limitations/status. Exact native OTIO exports do not
+become partial solely because a different XML representation would round.
 
 Native source-frame cuts shorter than a timeline frame remain representable in
 OTIO even when their legacy record duration rounds to zero. Legacy XML/EDL
