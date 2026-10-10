@@ -23,6 +23,51 @@ approval. Core execution remains standard-library Python plus FFmpeg/ffprobe;
 AI, vision, UI, cloud and editor adapters remain optional, with explicit
 unavailable/partial diagnostics rather than a successful empty result.
 
+## V17 Evidence Status (2026-10-10)
+
+The package remains **0.5.0**. The `0.6.0rc1` proposal above is not an approved
+version change or a qualified release candidate. [Milestone 13](https://github.com/EmmaRenee/video-editing-tools/milestone/13)
+and [#66](https://github.com/EmmaRenee/video-editing-tools/issues/66) remain the
+backlog and completion authority; this dated snapshot is evidence, not a second
+task list.
+
+At validation commit `3d923e71469ebc3bed2df5de848d23b5bc31f316` in
+[PR #105](https://github.com/EmmaRenee/video-editing-tools/pull/105):
+
+- All eight [CI checks](https://github.com/EmmaRenee/video-editing-tools/actions/runs/38040047777)
+  passed, including Python 3.10-3.12 tests, tracked archive audit, fresh core-only
+  installed workflows and optional interchange readers.
+- Local core tests ran 481 cases with 18 optional-reader skips and no failures.
+  Separate SDK environments passed all 45 interchange and 23 OTIO cases without
+  skips. A clean core-only wheel passed the 23-step installed synthetic workflow
+  outside the checkout. These are technical checks, not independent human review.
+- Approved optional OTIO is implemented in
+  [PR #104](https://github.com/EmmaRenee/video-editing-tools/pull/104). Native
+  export remains separate from the unpromoted experimental Resolve SDK code.
+- Separate Resolve Studio 20.3.2 test projects reimported linked original-media
+  copies. Uniform DF EDL matched 151 record frames when project, timeline and
+  import DF controls agreed. Mixed-rate XML and native OTIO readback matched the
+  expected editor-rounded 184-frame timeline, with start/EOF handle clamps.
+  XML rendering verified nonblank/source-matching pixels and distinct stereo
+  channels in measured interior windows. Scope, failed controls and limitations
+  are recorded in [#79](https://github.com/EmmaRenee/video-editing-tools/issues/79#issuecomment-6095961013)
+  and the [execution record](v17-execution.md#evidence-snapshot-2026-10-10).
+
+The evidence does not qualify an RC: independent full-window human annotations
+and a genuine motion/event profile are incomplete, so representative quality,
+provider value and editorial no-regression conclusions are not established.
+The linked PR stack remains unmerged at this snapshot. Refresh GitHub and rerun
+the gates against the final approved commit before claiming qualification.
+Private footage, review exports and operational edit paths stay outside Git;
+only redacted evidence summaries are public. No version bump, merge, tag or
+publishing is implied by these checks.
+
+Readers consuming handoff counters must follow the tested
+[legacy/current XML migration](editor-handoff.md#xml-counter-reader-migration).
+The unchanged schema name is not proof that mixed-rate counter semantics match
+older manifests. Command names, selection input shapes and the four-file legacy
+export return contract remain unchanged.
+
 ## Local Verification
 
 Run these commands from the repository root before opening a release PR:
@@ -93,7 +138,8 @@ Pull requests and pushes to `main` run `.github/workflows/ci.yml`:
 - Wheel/source archive audit against the tracked snapshot.
 - Fresh core-only wheel installations on Python 3.10, 3.11 and 3.12, each running
   the synthetic installed workflow outside the checkout with FFmpeg installed.
-- Independent CMX/FCP7 readers in their own optional development environment.
+- Independent CMX/FCP7 readers and native OTIO checks in their own optional
+  development environment.
 
 Jobs use the explicit `ubuntu-24.04` runner baseline, immutable official action
 revisions and a read-only repository token without persisted Git credentials.

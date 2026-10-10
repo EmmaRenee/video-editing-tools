@@ -69,6 +69,68 @@ diagnostics, not the edit files themselves.
   Export rejects out-of-range selection endpoints instead of silently extending
   the source. It does not repair missing historical references.
 
+## XML Counter Reader Migration
+
+The mixed-rate XML correction in [PR #105](https://github.com/EmmaRenee/video-editing-tools/pull/105)
+keeps the `videoedit.handoff.v1` schema name and accepted selection formats.
+Readers of its `sources` rows must distinguish two representations:
+
+| Manifest row | Native source offsets | XML clip offsets |
+| --- | --- | --- |
+| Legacy, without `xml_clip_rate` | `xml_in_frames` / `xml_out_frames` at `source_fps` | The old writer emitted these same native counters |
+| Current, with `xml_clip_rate` | `source_in_frames` / `source_out_frames` at `source_fps` | `xml_in_frames` / `xml_out_frames` at `xml_clip_rate` |
+
+These are offsets from media start, **not** absolute embedded timecodes or record
+positions. The schema name alone cannot distinguish these rows. Use the explicit
+rate marker; do not relabel old native counters as timeline frames. Legacy
+mixed-rate XML can mis-seek in Resolve: regenerate the edit from authoritative
+selection JSON with the corrected exporter, rather than patching only its
+manifest. Historical selections that already lost precision need regeneration
+from the original ratings/decisions, not guessed frame bounds.
+
+The following standard-library examples show a reader accepting both row shapes.
+`xml_offset_seconds` describes the counters the writer emitted, not proof that
+an editor interpreted a legacy mixed-rate edit correctly. Native offsets remain
+the source-cut reference even when current XML is quantized or unsupported.
+
+```python
+>>> from fractions import Fraction
+>>> def native_offset_seconds(row):
+...     keys = ("source_in_frames", "source_out_frames") if "xml_clip_rate" in row else ("xml_in_frames", "xml_out_frames")
+...     return tuple(Fraction(row[key], 1) / Fraction(row["source_fps"]) for key in keys)
+>>> def xml_offset_seconds(row):
+...     if row["xml_in_frames"] is None or row["xml_out_frames"] is None:
+...         return None
+...     rate = Fraction(row.get("xml_clip_rate", row["source_fps"]))
+...     return tuple(Fraction(row[key], 1) / rate for key in ("xml_in_frames", "xml_out_frames"))
+>>> legacy = {"source_fps": "60000/1001", "xml_in_frames": 2338, "xml_out_frames": 2400}
+>>> current = {"source_fps": "60000/1001", "source_in_frames": 2338, "source_out_frames": 2400,
+...            "xml_clip_rate": "30000/1001", "xml_in_frames": 1169, "xml_out_frames": 1200}
+>>> native_offset_seconds(legacy) == native_offset_seconds(current)
+True
+>>> xml_offset_seconds(current) == native_offset_seconds(current)
+True
+>>> xml_offset_seconds(legacy) == native_offset_seconds(legacy)
+True
+>>> rounded = dict(current, source_in_frames=1, source_out_frames=121, xml_in_frames=1, xml_out_frames=61)
+>>> xml_offset_seconds(rounded)[0] - native_offset_seconds(rounded)[0] == Fraction(1001, 60000)
+True
+>>> unsupported = dict(current, source_in_frames=0, source_out_frames=1,
+...                    xml_in_frames=None, xml_out_frames=None)
+>>> xml_offset_seconds(unsupported) is None
+True
+>>> native_offset_seconds(unsupported) == (Fraction(0), Fraction(1001, 60000))
+True
+
+```
+
+For current manifests, the top-level `xml_supported` and per-row null counters
+diagnose a source span that cannot fit the XML representation. Null is **not**
+frame zero. Native offsets remain available for optional OTIO export. Keep the
+XML rounding deltas and warnings visible; this migration does not approve a
+changed editorial cut. The examples are exercised by
+`tests/python/test_videoedit_release_guidance.py` alongside exporter regressions.
+
 ## Rough-Cut Bounds And Targets
 
 `videoedit roughcut plan approved.json --output roughcut_plan.json --handles 0.5
