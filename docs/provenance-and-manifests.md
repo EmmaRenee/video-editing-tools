@@ -149,8 +149,15 @@ change to source identity, decoder, selected transcript, detector settings,
 keywords or cache policy prevents this reuse. `--no-cache` bypasses it as well.
 Step and aggregate `detector_cache_reuses` count report-cache misses that took
 this path, not report hits, decoded frames or inference calls; an ordinary rating
-run reports zero. This numeric counter also survives redaction. It is recorded in
-the rating sidecar, not inferred for operations that do not report it.
+run reports zero. This numeric counter also survives redaction. Pipeline steps
+retain reuse counts and fixed miss reasons from the same selected telemetry source
+as their hit/miss counters, including output sidecars. Duplicate sidecars are not
+summed. The counter is not inferred for operations that do not report it, and a
+count above known report misses is not recorded. Benchmark and ablation JSON and
+Markdown retain known reuse counts; legacy unknown counts remain null/unknown.
+Benchmark imports take cache counters together from the run manifest rather
+than mixing them with declared values. Unevaluated ablations retain known cost
+context without receiving quality attribution.
 
 New cache data is published atomically only after healthy analysis, output
 generation and successful manifest writing. Partial runs may prune invalidated

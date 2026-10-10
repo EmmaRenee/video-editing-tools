@@ -82,14 +82,24 @@ a successful benchmark run. Provider artifact and metadata hashes are
 recorded without copying prompts, transcript text, model paths, or secrets.
 An explicit `run_manifest` must describe a successful execution.
 
-`telemetry` may declare `elapsed_seconds`, `cache_hits`, `cache_misses`, and
-`storage_bytes`. These must be finite and nonnegative. A run manifest may
+`telemetry` may declare `elapsed_seconds`, `cache_hits`, `cache_misses`,
+`storage_bytes`, and `detector_cache_reuses`. Values must be finite and nonnegative;
+detector reuses must be integers and cannot exceed known report misses. A run manifest may
 provide the same fields in its `telemetry` object. Footage mode measures
 rating elapsed time directly. Existing pipeline `duration_seconds` is
 imported when manifest telemetry does not contain `elapsed_seconds`.
 Values from a manifest or declared telemetry
 are identified by origin; absent measurements are JSON `null`, not zero.
+An imported run manifest supplies the entire cache-counter group (hits, misses,
+and detector reuses). Missing or null imported counters remain unknown; declared
+counters cannot fill these gaps from a different execution.
 Do not use declared timings as measured production-performance evidence.
+The JSON and Markdown runtime/cache table retain detector-reuse counts from
+rating or pipeline manifests. A report-cache miss may reuse healthy detector
+measurements when only optional artifacts changed, so a zero report hit rate
+does not establish cold detector execution. Unknown legacy reuse counts stay
+null/unknown, never zero. Hold detector-cache conditions constant before
+interpreting provider cost deltas; reuse is not proof of selection quality.
 
 ## Human Ground Truth
 

@@ -19,6 +19,13 @@ class ManifestTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def test_benchmark_validates_imported_elapsed_before_measured_override(self):
+        from videoedit.benchmark import _telemetry
+        for elapsed in ("private-invalid", True, -1, float("nan"), float("inf")):
+            with self.subTest(elapsed=elapsed):
+                with self.assertRaisesRegex(ValueError, "invalid input manifest telemetry"):
+                    _telemetry({}, {"status": "ok", "telemetry": {"elapsed_seconds": elapsed}}, 1.25)
+
     def test_manifest_success_fingerprints_versions_and_cache(self):
         from videoedit.manifests import RunManifest
         source, output = self.root / "input.json", self.root / "result.json"
@@ -60,6 +67,56 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual([step.get("detector_cache_reuses") for step in data["steps"]],
                          [0, 2, None, None, None, None, None, None])
         self.assertNotIn("private-path", path.read_text())
+
+    def test_output_sidecar_reuse_context_survives_pipeline_redaction(self):
+        from videoedit.manifests import RunManifest
+        sidecar = self.root / "private-rating-run.json"
+        sidecar.write_text(json.dumps({"status": "ok", "telemetry": {
+            "cache_hits": 0, "cache_misses": 3, "detector_cache_reuses": 3,
+            "cache_miss_reasons": {"signal_artifacts_changed": 3, "private-source-path": 1}}}))
+        path = self.root / "pipeline_run.json"
+        with RunManifest(str(path), "pipeline", path_mode="redacted") as run:
+            run.record_step("rating", "rate_footage", {}, {"run_manifest": str(sidecar)}, .1)
+        data = json.loads(path.read_text())
+        for counters in (data["telemetry"], data["steps"][0]):
+            self.assertEqual(counters.get("detector_cache_reuses"), 3)
+            self.assertEqual(counters["cache_miss_reasons"], {"signal_artifacts_changed": 3})
+        self.assertNotIn("private-", path.read_text())
+        self.assertNotIn(str(self.root), path.read_text())
+
+    def test_cache_context_stays_with_the_selected_counter_source(self):
+        from videoedit.manifests import RunManifest
+        sidecar = self.root / "sidecar.json"
+        sidecar.write_text(json.dumps({"status": "ok", "telemetry": {
+            "cache_hits": 0, "cache_misses": 3, "detector_cache_reuses": 3,
+            "cache_miss_reasons": {"signal_artifacts_changed": 3}}}))
+        path = self.root / "run.json"
+        with RunManifest(str(path), "fixture") as run:
+            run.record_step("fixture", "fixture", {}, {"output": str(sidecar),
+                            "telemetry": {"cache_hits": 1, "cache_misses": 0}}, .1)
+        data = json.loads(path.read_text())
+        self.assertEqual(data["telemetry"]["cache_hits"], 1)
+        self.assertNotIn("detector_cache_reuses", data["telemetry"])
+        self.assertNotIn("cache_miss_reasons", data["telemetry"])
+
+    def test_duplicate_sidecars_do_not_double_count_detector_reuse(self):
+        from videoedit.manifests import RunManifest
+        sidecars = [self.root / "one.json", self.root / "two.json"]
+        for path in sidecars:
+            path.write_text(json.dumps({"telemetry": {
+                "cache_hits": 0, "cache_misses": 3, "detector_cache_reuses": 3}}))
+        path = self.root / "run.json"
+        with RunManifest(str(path), "fixture") as run:
+            run.record_step("fixture", "fixture", {}, {"outputs": list(map(str, sidecars))}, .1)
+        self.assertEqual(json.loads(path.read_text())["telemetry"]["detector_cache_reuses"], 3)
+
+    def test_detector_reuse_above_selected_report_misses_is_not_recorded(self):
+        from videoedit.manifests import RunManifest
+        path = self.root / "run.json"
+        with RunManifest(str(path), "fixture", path_mode="redacted") as run:
+            run.record_step("fixture", "fixture", {}, {"telemetry": {
+                "cache_hits": 0, "cache_misses": 1, "detector_cache_reuses": 2}}, .1)
+        self.assertNotIn("detector_cache_reuses", json.loads(path.read_text())["telemetry"])
 
     def test_input_paths_and_warning_text_are_not_output_files(self):
         from videoedit.manifests import RunManifest

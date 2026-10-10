@@ -136,7 +136,12 @@ Cached analysis is rescored with current weights; scoring-only tuning need not
 decode again. Optional artifact changes remain report-cache misses but can reuse
 healthy, integrity-checked detector measurements when every detector input still
 matches; optional hits are replaced and scores/candidates regenerated. Check
-`detector_cache_reuses` separately from report hits/misses. Changed source,
+`detector_cache_reuses` separately from report hits/misses in rating/pipeline
+manifests and benchmark/ablation reports; unknown legacy counts are not zero.
+Imported manifest cache counters are authoritative as a group; do not fill
+unknown fields from a different declared run. Unevaluated ablations retain cost
+context but do not establish provider quality.
+Hold detector-cache conditions constant when comparing provider costs. Changed source,
 transcript, decoder or detector settings require fresh detection.
 Source identity uses local metadata, not a full byte checksum;
 use `--no-cache` when metadata is untrusted and keep input files stable during runs.

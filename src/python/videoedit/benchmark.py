@@ -27,6 +27,7 @@ MANIFEST_SCHEMA = "videoedit.benchmark.v1"
 REPORT_SCHEMA = "videoedit.benchmark_report.v1"
 COMPARE_SCHEMA = "videoedit.benchmark_compare.v1"
 PROFILES = {"interview", "motion_event", "general_broll", "shop_build", "documentary", "social"}
+TELEMETRY_FIELDS = ("elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes", "detector_cache_reuses")
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 DEFAULT_GATES = {
     "min_reviewed_seconds": 600, "min_positive_annotations": 20,
@@ -69,6 +70,19 @@ def _path(base: Path, value: str) -> Path:
 
 def _number(value: Any, minimum: float = 0, maximum: float = float("inf")) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and minimum <= value <= maximum
+
+
+def _valid_telemetry(values: dict[str, Any]) -> bool:
+    for key, value in values.items():
+        if key not in TELEMETRY_FIELDS:
+            return False
+        if key == "detector_cache_reuses":
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                return False
+        elif not _number(value):
+            return False
+    reused, misses = values.get("detector_cache_reuses"), values.get("cache_misses")
+    return reused is None or misses is None or reused <= misses
 
 
 def _times(row: dict[str, Any]) -> tuple[float, float]:
@@ -185,7 +199,7 @@ def validate_manifest(manifest: str) -> dict[str, Any]:
             telemetry = run.get("telemetry", {})
             if not isinstance(telemetry, dict):
                 errors.append(f"{label} run telemetry must be an object")
-            elif any(key not in {"elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes"} or not _number(value) for key, value in telemetry.items()):
+            elif not _valid_telemetry(telemetry):
                 errors.append(f"{label} run telemetry is invalid")
             artifacts = run.get("provider_artifacts", {})
             if not isinstance(artifacts, dict) or any(key not in providers or not isinstance(value, str) or not value.strip() for key, value in artifacts.items()):
@@ -248,21 +262,26 @@ def _telemetry(run: dict[str, Any], manifest: dict[str, Any] | None, measured: f
         if not isinstance(manifest.get("telemetry", {}), dict):
             raise ValueError("input manifest telemetry must be an object")
         imported = dict(manifest.get("telemetry", {}))
+        # Cache counters describe one execution; never fill gaps from another source.
+        for key in ("cache_hits", "cache_misses", "detector_cache_reuses"):
+            values.pop(key, None)
         if imported.get("storage_scope") == "tracked_output_files":
             storage_scope = "tracked_output_files"
         if "elapsed_seconds" not in imported and manifest.get("duration_seconds") is not None:
             imported["elapsed_seconds"] = manifest["duration_seconds"]
-        for key in ("elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes"):
+        for key in TELEMETRY_FIELDS:
             value = imported.get(key)
             if value is not None:
-                if not _number(value):
-                    raise ValueError("invalid input manifest telemetry")
                 values[key] = value
+    if not _valid_telemetry(values):
+        raise ValueError("invalid input manifest telemetry")
     if measured is not None:
         values["elapsed_seconds"] = round(measured, 6)
+    if not _valid_telemetry(values):
+        raise ValueError("invalid input manifest telemetry")
     hits, misses = values.get("cache_hits"), values.get("cache_misses")
     rate = hits / (hits + misses) if hits is not None and misses is not None and hits + misses > 0 else None
-    return {**{key: values.get(key) for key in ("elapsed_seconds", "cache_hits", "cache_misses", "storage_bytes")},
+    return {**{key: values.get(key) for key in TELEMETRY_FIELDS},
             "storage_scope": storage_scope,
             "cache_hit_rate": round(rate, 4) if rate is not None else None,
             "origin": "measured" if measured is not None else "run_manifest" if manifest else "declared" if values else "unavailable"}
@@ -516,6 +535,16 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         failures.append(f"Suite gate failures: {', '.join(report['suite_gate_failures'])}.")
     if failures:
         lines.extend(["", *failures])
+    lines.extend(["", "## Runtime And Cache", "",
+                  "| Project | Run | Rating seconds | Report hits | Report misses | Detector reuses | Output bytes |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"])
+    for project in report["projects"]:
+        for run in project["runs"]:
+            telemetry = run.get("telemetry", {})
+            cells = [project["id"], run["id"]] + [str(telemetry[key]) if telemetry.get(key) is not None else "unknown"
+                for key in ("elapsed_seconds", "cache_hits", "cache_misses", "detector_cache_reuses", "storage_bytes")]
+            lines.append("| " + " | ".join(cells) + " |")
+    lines.extend(["", "A report miss may reuse detector measurements. Unknown reuse counts are not zero; hold detector-cache conditions constant for cost comparisons."])
     lines.extend(["", "Synthetic results verify contracts and never qualify a production release.", ""])
     path.write_text("\n".join(lines), encoding="utf-8")
 

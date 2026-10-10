@@ -91,6 +91,47 @@ class AblationTests(unittest.TestCase):
         self.assertEqual(row["attribution"], "combination_only")
         self.assertEqual([item["id"] for item in row["providers"]], ["openclip", "yolo"])
 
+    def test_ablation_retains_baseline_and_candidate_detector_reuse_context(self):
+        self.candidate()
+        data = self.read(self.manifest)
+        data["projects"][0]["runs"][0]["telemetry"]["detector_cache_reuses"] = 0
+        data["projects"][0]["runs"][1]["telemetry"].update(
+            cache_hits=0, cache_misses=1, detector_cache_reuses=1)
+        self.write(self.manifest, data)
+        row = self.effect()
+        self.assertEqual(row["baseline_telemetry"].get("detector_cache_reuses"), 0)
+        self.assertEqual(row["telemetry"].get("detector_cache_reuses"), 1)
+        self.assertEqual(row["delta"]["f1"], .5)
+        self.assertIn("| dialogue | with-signals | 0 | 1 |",
+                      (self.output / "ablation_report.md").read_text())
+
+    def test_legacy_ablation_detector_reuse_is_unknown(self):
+        self.candidate()
+        row = self.effect()
+        self.assertIsNone(row["baseline_telemetry"].get("detector_cache_reuses"))
+        self.assertIsNone(row["telemetry"].get("detector_cache_reuses"))
+        self.assertIn("| dialogue | with-signals | unknown | unknown |",
+                      (self.output / "ablation_report.md").read_text())
+
+    def test_rejected_attribution_keeps_known_cache_context_without_quality_credit(self):
+        self.candidate()
+        data = self.read(self.manifest)
+        data["projects"][0]["runs"][0]["telemetry"]["detector_cache_reuses"] = 0
+        data["projects"][0]["runs"][1]["telemetry"].update(
+            cache_hits=0, cache_misses=1, detector_cache_reuses=1)
+        self.write(self.manifest, data)
+        ratings = self.read(self.inputs / "candidate.json")
+        ratings["config"] = {}
+        self.write(self.inputs / "candidate.json", ratings)
+        row = self.effect()
+        self.assertEqual(row["status"], "not_evaluated")
+        self.assertIn("artifact_not_consumed", row["reason_codes"])
+        self.assertIsNone(row["delta"])
+        self.assertEqual(row.get("baseline_telemetry", {}).get("detector_cache_reuses"), 0)
+        self.assertEqual(row.get("telemetry", {}).get("detector_cache_reuses"), 1)
+        self.assertIn("| dialogue | with-signals | 0 | 1 |",
+                      (self.output / "ablation_report.md").read_text())
+
     def test_native_face_artifact_kind_is_distinct_from_configuration_binding(self):
         self.candidate(("face_person",))
         row = self.effect()
