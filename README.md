@@ -41,6 +41,18 @@ Exports use standard CMX/FCP7 media structures and native source metadata; see
 [Editor Handoff](docs/editor-handoff.md) for mixed-rate EDL limits, audio support,
 offline fallbacks and the still-required live Resolve validation.
 
+Optional native OTIO export uses the same selections and rough-cut plans:
+
+```bash
+python -m pip install -e "./src/python[editor]"
+videoedit modules doctor
+videoedit export-otio roughcut_plan.json --output handoff/edit.otio
+```
+
+The `editor.otio` module adds `generate_otio` to YAML pipelines without requiring
+a shoot database or changing `export-edl` outputs. Inspect its `*_handoff.json`
+sidecar for native timing, supported audio, missing metadata and editor limits.
+
 **What it does:**
 - Cut dead air and silence from footage
 - Extract highlights and create rough cuts
@@ -370,7 +382,7 @@ video-editing-tools/
 
 `videoedit` 0.5.0 supports Python 3.10+; Python 3.12 is recommended for the full local toolchain. Python 3.9 users should stay on the 0.4.x package line or upgrade Python before installing current `main`.
 
-The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library. Install optional provider groups only when needed: `./src/python[whisper]`, `./src/python[advanced]`, `./src/python[ui]`, or `./src/python[cloud]`.
+The core `videoedit` package intentionally has no mandatory Python runtime dependencies beyond the standard library. Install optional provider groups only when needed: `./src/python[whisper]`, `./src/python[advanced]`, `./src/python[editor]`, `./src/python[ui]`, or `./src/python[cloud]`.
 
 ---
 

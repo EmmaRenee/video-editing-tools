@@ -161,6 +161,20 @@ diagnostics; out-of-range known-source selections fail. Mixed-rate or mixed
 DF/NDF EDLs are diagnostic-only, with no importable edit events: use XML.
 Independent-reader tests are not live Resolve validation. Do not claim actual
 relink, timecode, audio or handle fidelity without recorded editor evidence.
+
+For optional OTIO delivery, install `./src/python[editor]`, inspect
+`videoedit modules doctor`, and use `videoedit export-otio approved.json --output
+handoff/edit.otio` or export the existing `roughcut_plan.json`. The `editor.otio`
+module and `generate_otio` operation use the shared selection loader, not ShootDB.
+Native OTIO source ranges include the embedded media-start frame; selections
+remain offsets. Mono/stereo from one known audio stream becomes one aligned
+audio clip. Do not infer editor A/V linking from this structural alignment.
+Mixed-rate source durations remain native, without an implicit retime; inspect
+`otio.placements` and quantization warnings in the sidecar instead of assuming
+legacy record counters describe OTIO placement. `--manifest-paths redacted`
+redacts the sidecar only, never the operational `.otio` media URLs. Missing media,
+unknown extents and unsupported edits remain partial. Import into a separate
+Resolve test project and record actual relink, timing and audio evidence.
 For release qualification, follow `docs/release.md`: audit clean tracked wheel/
 source archives, then run `tests/smoke/installed_workflow.py` with the core-only
 wheel's Python outside the checkout. It uses synthetic media and checks the
@@ -276,6 +290,7 @@ Available built-in modules:
 | `content.reports` | Content maps and quote mining |
 | `project.scaffold` | Project folder scaffolding |
 | `advanced.vision` | OCR, object, face/person providers |
+| `editor.otio` | Optional native OTIO selection/rough-cut export |
 | `advanced.ai` | AI profiles, OpenCLIP frame scoring, clip judging, review learning, missed-moment discovery |
 | `advanced.motorsports` | Motorsports event/topic artifacts |
 | `cloud.adapters` | Optional ElevenLabs, HeyGen, and Descript-style cloud handoff planning |

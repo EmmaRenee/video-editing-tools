@@ -25,6 +25,7 @@ OPTIONAL_COMMANDS = {
 
 OPTIONAL_MODULES = {
     "cv2": "face/person presence detection",
+    "opentimelineio": "optional OTIO editor handoff (videoedit[editor])",
 }
 
 OPENCV_FACE_PERSON_INSTALL = 'Install one OpenCV 4.x wheel: python -m pip install "opencv-python>=4.8,<5"'

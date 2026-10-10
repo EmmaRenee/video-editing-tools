@@ -140,5 +140,7 @@ jobs:
       - name: Install independent interchange readers
         run: python -m pip install opentimelineio==0.18.1 otio-fcp-adapter==1.0.0 otio-cmx3600-adapter==1.0.0
 
-      - name: Verify CMX and FCP XML contracts
-        run: python -m unittest discover -s tests/python -p test_videoedit_interchange.py
+      - name: Verify CMX, FCP XML and optional OTIO contracts
+        run: |
+          python -m unittest discover -s tests/python -p test_videoedit_interchange.py
+          python -m unittest discover -s tests/python -p test_videoedit_otio.py

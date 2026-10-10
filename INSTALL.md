@@ -426,6 +426,23 @@ videoedit export-edl approved.json --output edl/
 ```
 
 Generated handoff files include EDL, XML, M3U, and FFmpeg extraction scripts. Use DaVinci Resolve for color, sound mix, fine timing, and final delivery.
+
+For optional native OTIO handoff, install the `editor` extra (OpenTimelineIO
+0.18.x; tested with 0.18.1) inside the same virtual environment:
+
+```bash
+python -m pip install -e "./src/python[editor]"
+videoedit modules enable editor.otio
+videoedit modules doctor
+videoedit export-otio roughcut_plan.json --output handoff/edit.otio
+```
+
+For an installed wheel, use `python -m pip install "videoedit[editor]"` with
+your approved package source. No additional adapter packages are needed to
+write native `.otio`; FCP/CMX adapters are test-only readers. Missing OTIO does
+not break base commands. Disable with `videoedit modules disable editor.otio`
+when the feature is not wanted. Use a separate editor test project and verify
+original-media relinking, bounds, timecode and audio before production use.
 See [Editor Handoff](docs/editor-handoff.md) for native rates/timecode, mono/stereo
 audio, missing-media diagnostics and mixed-rate XML. Independent OpenTimelineIO
 readers are optional development/CI checks, not required runtime tools or proof

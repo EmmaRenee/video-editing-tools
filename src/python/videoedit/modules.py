@@ -91,6 +91,11 @@ BUILTIN_MODULES: dict[str, FeatureModule] = {
         description="Styled caption burning and delivery formatting",
         category="delivery",
     ),
+    "editor.otio": FeatureModule(
+        id="editor.otio",
+        description="Optional source-aware OTIO selection and rough-cut handoff",
+        category="editor",
+    ),
     "content.series": FeatureModule(
         id="content.series",
         description="Reusable content-series planning from rated footage",
@@ -144,6 +149,7 @@ OPERATION_MODULES = {
     "evaluate_provider_ablations": "core.calibration",
     "extract_segments": "core.handoff",
     "generate_edl": "core.handoff",
+    "generate_otio": "editor.otio",
     "generate_review_assets": "core.review",
     "approve_candidates": "core.review",
     "plan_roughcut": "core.review",
@@ -634,6 +640,11 @@ def _validate_external_module(module: FeatureModule) -> None:
 
 
 def _module_dependency_check(module_id: str) -> dict[str, Any]:
+    if module_id == "editor.otio":
+        check = _python_module_status("opentimelineio")
+        if not check["available"]:
+            check["message"] = 'Install OTIO support: python -m pip install "videoedit[editor]"'
+        return {"module": module_id, "checks": [check]}
     if module_id == "advanced.vision":
         return {
             "module": module_id,

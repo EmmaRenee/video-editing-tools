@@ -41,6 +41,7 @@ OPERATION_OUTPUTS = {
     },
     "extract_segments": {"output", "files"},
     "generate_edl": {"output", "files", "run_manifests"},
+    "generate_otio": {"output", "clips", "duration_seconds", "warnings", "run_manifest"},
     "generate_review_assets": {"manifest", "contact_sheet", "decisions", "clips", "thumbnails", "proxies", "warnings", "run_manifest"},
     "approve_candidates": {"approved"},
     "plan_roughcut": {"plan", "report", "clips", "duration", "run_manifest"},
@@ -214,7 +215,7 @@ def run_pipeline(
                 params = _resolve_value(dict(step.get("params") or {}), context)
                 if "input" in step:
                     params.setdefault("input", _resolve_value(step["input"], context))
-                step_output = os.path.join(output_dir, step_name)
+                step_output = os.path.join(output_dir, step_name + (".otio" if operation.name == "generate_otio" else ""))
                 if operation.name not in {"generate_edl", "extract_segments"}:
                     params.setdefault("output", step_output)
                 result = operation.func(context, params)
@@ -253,7 +254,7 @@ def plan_pipeline(path: str, input_path: str, output_dir: str) -> dict[str, Any]
             step_input = _planned_implicit_input(operation.name, params, context)
             if step_input is not None:
                 params.setdefault("input", step_input)
-        step_output = os.path.join(output_dir, step_name)
+        step_output = os.path.join(output_dir, step_name + (".otio" if operation.name == "generate_otio" else ""))
         if operation.name not in {"generate_edl", "extract_segments"}:
             params.setdefault("output", step_output)
         elif "output" not in params:
@@ -359,6 +360,10 @@ def _planned_result(
         root, _ext = os.path.splitext(output)
         return {"plan": output, "report": params.get("report_output") or f"{root}_report.md", "clips": "unknown",
                 "duration": "unknown", "run_manifest": f"{root}_run.json"}
+    if operation_name == "generate_otio":
+        root, _ext = os.path.splitext(output)
+        return {"output": output, "clips": "unknown", "duration_seconds": "unknown", "warnings": [],
+                "run_manifest": root + "_otio_handoff.json"}
     if operation_name in {"generate_edl", "extract_segments"}:
         result = {"output": output, "files": []}
         if operation_name == "generate_edl":
@@ -470,6 +475,8 @@ def _planned_implicit_input(operation_name: str, params: dict[str, Any], context
         return context["ratings"]
     if operation_name == "plan_roughcut" and context.get("approved"):
         return context["approved"]
+    if operation_name == "generate_otio":
+        return context.get("roughcut_plan") or context.get("approved")
     if operation_name == "assemble_rough_cut" and context.get("approved"):
         return context["approved"]
     return None
