@@ -171,6 +171,13 @@ an exploratory run; document changes when reporting production evidence.
 These are provisional thresholds to calibrate from #75, not a measured
 claim that the current tool reaches them.
 
+Reviewed-duration gates use the unrounded sum of unioned windows, allowing
+only floating-point endpoint/summation roundoff, capped at one nanosecond.
+Large offsets or fragmented windows cannot increase this allowance.
+The displayed duration is
+rounded to milliseconds; that rounding cannot make a short review pass.
+Annotation and source-count gates remain exact.
+
 `insufficient_evidence` indicates missing sample coverage or dependent
 review. `quality_failed` indicates sufficient samples below targets.
 `synthetic` indicates artificial ground truth. `failed` indicates unavailable

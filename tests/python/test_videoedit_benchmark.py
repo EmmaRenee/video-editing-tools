@@ -129,6 +129,97 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(report["status"], "insufficient_evidence")
         self.assertIn("min_positive_annotations", report["projects"][0]["runs"][0]["gate_failures"])
 
+    def test_fractional_review_windows_meet_exact_duration_gate(self):
+        self.check_fractional_review_duration(200, False)
+
+    def test_fractional_review_windows_below_duration_gate_remain_insufficient(self):
+        self.check_fractional_review_duration(199.999999, True)
+
+    def test_large_offset_microsecond_short_review_remains_insufficient(self):
+        self.check_fractional_review_duration(199.999999, True, starts=(2 ** 30,) * 3)
+
+    def test_extreme_offset_short_review_remains_insufficient(self):
+        self.check_fractional_review_duration(192, True, starts=(2 ** 56,) * 3, expected_seconds=576)
+
+    def test_integer_duration_gate_retains_precision_beyond_float_range(self):
+        self.check_fractional_review_duration(2 ** 53, True, starts=(0,) * 3,
+                                             expected_seconds=2 ** 53 + 400, duration_gate=2 ** 53 + 401)
+
+    def test_fragmented_windows_cannot_expand_roundoff_allowance(self):
+        data = self.read(self.manifest)
+        project = data["projects"][0]
+        start = 8192
+        windows = [{"source": "source_a.mp4", "start": start + index / 16,
+                    "end": start + index / 16 + 1 / 32} for index in range(19200)]
+        project["review"].update(origin="human", windows=windows)
+        data["quality_gates"].update(min_reviewed_seconds=600, min_positive_annotations=1,
+                                      min_negative_annotations=1, min_sources=1,
+                                      min_precision=1, min_recall=1, min_f1=1)
+        self.write(self.manifest.parent / "ratings.json", {
+            "inventory": [{"path": "source_a.mp4", "duration": 10000, "status": "ok"}],
+            "candidates": [{"id": "clip_1", "source": "source_a.mp4", "start": start,
+                            "end": start + 1 / 64, "score": 90}],
+        })
+        self.write(self.manifest.parent / "annotations.json", {"clips": [
+            {"source": "source_a.mp4", "start": start, "end": start + 1 / 64, "rating": "select"},
+            {"source": "source_a.mp4", "start": start + 1 / 16,
+             "end": start + 1 / 16 + 1 / 64, "rating": "reject"},
+        ]})
+        original_end = windows[-1]["end"]
+        for shortage in (0, 2e-9, 1e-6):
+            with self.subTest(shortage=shortage):
+                windows[-1]["end"] = original_end - shortage
+                self.write(self.manifest, data)
+                run = self.run_report()["projects"][0]["runs"][0]
+                self.assertEqual("min_reviewed_seconds" in run["gate_failures"], shortage > 0)
+                self.assertEqual(run["status"], "insufficient_evidence" if shortage else "ok")
+                self.assertEqual(run["metrics"]["reviewed_seconds"], 600)
+
+    def test_count_gates_remain_strict(self):
+        data = self.read(self.manifest)
+        data["projects"][0]["review"]["origin"] = "human"
+        for key, actual in (("min_positive_annotations", 2), ("min_negative_annotations", 1), ("min_sources", 1)):
+            for shortage in (1, 0.25):
+                with self.subTest(gate=key, shortage=shortage):
+                    candidate = json.loads(json.dumps(data))
+                    candidate["quality_gates"][key] = actual + shortage
+                    self.write(self.manifest, candidate)
+                    run = self.run_report()["projects"][0]["runs"][0]
+                    self.assertIn(key, run["gate_failures"])
+                    self.assertEqual(run["status"], "insufficient_evidence")
+
+    def check_fractional_review_duration(self, final_duration, insufficient,
+                                         starts=(1173.272, 848.89, 612.862), expected_seconds=600,
+                                         duration_gate=600):
+        data = self.read(self.manifest)
+        project = data["projects"][0]
+        project["review"].update(origin="human", windows=[])
+        data["quality_gates"].update(min_reviewed_seconds=duration_gate, min_positive_annotations=3,
+                                      min_negative_annotations=3, min_sources=3,
+                                      min_precision=1, min_recall=1, min_f1=1)
+        ratings, annotations = {"inventory": [], "candidates": []}, {"clips": []}
+        for index, start in enumerate(starts):
+            source = f"source_{index}.mp4"
+            end = start + (final_duration if index == 2 else 200)
+            project["review"]["windows"].append({"source": source, "start": start, "end": end})
+            ratings["inventory"].append({"path": source, "duration": end + 1600, "status": "ok"})
+            ratings["candidates"].append({"id": f"clip_{index}", "source": source,
+                                           "start": start + 32, "end": start + 64, "score": 90})
+            annotations["clips"].extend([
+                {"id": f"positive_{index}", "source": source, "start": start + 32,
+                 "end": start + 64, "rating": "select"},
+                {"id": f"negative_{index}", "source": source, "start": start + 96,
+                 "end": start + 128, "rating": "reject"},
+            ])
+        self.write(self.manifest, data)
+        self.write(self.manifest.parent / "ratings.json", ratings)
+        self.write(self.manifest.parent / "annotations.json", annotations)
+        run = self.run_report()["projects"][0]["runs"][0]
+        self.assertEqual("min_reviewed_seconds" in run["gate_failures"], insufficient)
+        self.assertEqual(run["status"], "insufficient_evidence" if insufficient else "ok")
+        self.assertEqual(run["metrics"]["reviewed_sources"], 3)
+        self.assertEqual(run["metrics"]["reviewed_seconds"], expected_seconds)
+
     def test_comparison_reports_delta_and_rejects_changed_annotations(self):
         baseline = self.run_report()
         baseline_path = self.workspace / "baseline.json"
