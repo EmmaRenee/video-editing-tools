@@ -33,6 +33,11 @@ diagnostics, not the edit files themselves.
   stay unspecified for the importing editor to choose. Source dimensions and
   native frame rates remain separate. This sequence-format block is necessary
   for Resolve to import the tracks instead of silently creating an empty edit.
+- XML splits a supported stereo stream into linked mono items with explicit
+  left/right clip panning. Without that panning, Resolve centers both channels
+  and mixes them into identical outputs. Mono sources remain centered, including
+  mono clips sharing a timeline track with stereo items. This does not certify
+  surround layouts, bus routing, or every editor's audio interpretation.
 - Relative source paths preserve an existing current-directory reference;
   otherwise they resolve beside the selection document. If both locations
   contain different media, export fails and requires an absolute path. Symlinks
