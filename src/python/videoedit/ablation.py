@@ -147,6 +147,7 @@ def _effect(project: dict[str, Any], run: dict[str, Any], result: dict[str, Any]
             baseline_ratings: dict[str, Any], base: Path, output: Path, policy: dict[str, float]) -> dict[str, Any]:
     row = {"project": project["id"], "profile": project["profile"], "run": run["id"], "baseline": baseline["id"],
            "status": "not_evaluated", "reason_codes": [], "providers": [], "delta": None,
+           "baseline_telemetry": baseline.get("telemetry", {}), "telemetry": result.get("telemetry", {}),
            "attribution": "single_provider" if len(run.get("providers", [])) == 1 else "combination_only",
            "review_origin": project["review"]["origin"], "baseline_status": baseline["status"], "candidate_status": result["status"]}
     ratings_path = _ratings_path(run, base, output, project["id"])
@@ -200,8 +201,7 @@ def _effect(project: dict[str, Any], run: dict[str, Any], result: dict[str, Any]
     for key in ("elapsed_seconds", "storage_bytes"):
         before, after = baseline.get("telemetry", {}).get(key), result.get("telemetry", {}).get(key)
         deltas[key] = round(after - before, 6) if before is not None and after is not None else None
-    row.update(status="evaluated", delta=deltas, baseline_metrics=baseline["metrics"], metrics=result["metrics"],
-               baseline_telemetry=baseline.get("telemetry", {}), telemetry=result.get("telemetry", {}))
+    row.update(status="evaluated", delta=deltas, baseline_metrics=baseline["metrics"], metrics=result["metrics"])
     return row
 
 
@@ -303,7 +303,15 @@ def evaluate_ablations(manifest: str, output_dir: str) -> dict[str, Any]:
                          f"coverage {coverage.get('status', 'unknown')} ({coverage.get('scope', 'unknown')}); "
                          f"source/unit/time ratios {coverage.get('source_ratio', 'unknown')}/{coverage.get('unit_ratio', 'unknown')}/{coverage.get('temporal_ratio', 'unknown')}; "
                          f"provider time {provider.get('elapsed_seconds')}s; JSON bytes {provider.get('artifact_size_bytes')}. {provider['diagnostic']}")
-    lines.extend(["", "## Recommendations", "", "Recommendations are evidence summaries, not automatic configuration changes.",
+    lines.extend(["", "## Detector Cache Context", "",
+                  "| Project | Run | Baseline detector reuses | Candidate detector reuses |",
+                  "| --- | --- | --- | --- |"])
+    for row in effects:
+        counts = [row.get(key, {}).get("detector_cache_reuses") for key in ("baseline_telemetry", "telemetry")]
+        cells = [row["project"], row["run"], *[str(count) if count is not None else "unknown" for count in counts]]
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.extend(["", "Report misses can reuse warm detectors. Unknown counts are not zero; hold detector-cache conditions constant before interpreting runtime deltas.",
+                  "", "## Recommendations", "", "Recommendations are evidence summaries, not automatic configuration changes.",
                   "Synthetic or insufficient evidence cannot establish production quality. Combination effects do not isolate each provider.", ""])
     for card in cards:
         lines.append(f"- {', '.join(card['providers'])}: {card['recommendation']} ({', '.join(card['reason_codes']) or 'qualified evidence'}).")

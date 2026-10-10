@@ -33,7 +33,7 @@ def run_rating(
     config = config or AnalysisConfig()
     inputs = [os.fspath(footage_dir), *signal_artifact_paths(config).values()]
     inputs.extend(path for path in (config.learned_scorer_path, config.ai_clip_judgments_path) if path)
-    stats = {"cache_hits": 0, "cache_misses": 0, "cache_miss_reasons": {}}
+    stats = {"cache_hits": 0, "cache_misses": 0, "cache_miss_reasons": {}, "detector_cache_reuses": 0}
     with RunManifest(os.path.join(output_dir, "rating_run.json"), "rate_footage", inputs=inputs,
                      config=config.to_dict(), path_mode=manifest_paths) as manifest:
         try:
@@ -151,15 +151,22 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
             manifest.data["inputs"].append(signature["transcript"]["fingerprint"])
         cached = cache.get(key)
         reason = _cache_miss_reason(cached, signature, cache_error)
-        if reason is None:
+        reuse_detectors = (reason == "signal_artifacts_changed"
+                           and _same_detector_inputs(cached["signature"], signature))
+        if reason is None or reuse_detectors:
             try:
                 cached_report = SignalReport.from_dict(cached["report"])
-                reason = None if cached_report.analysis_complete else "cached_analysis_incomplete"
-                if reason is None:
+                if not cached_report.analysis_complete:
+                    reason, reuse_detectors = "cached_analysis_incomplete", False
+                else:
                     _validate_cached_report(cached, key)
+                    if reuse_detectors:
+                        cached_report.object_hits = signal_artifacts.objects_for(path)
+                        cached_report.advanced_hits = signal_artifacts.advanced_for(path)
                     _rescore_report(cached_report, config)
             except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
                 reason = "cache_entry_invalid"
+                reuse_detectors = False
         if reason is None:
             stats["cache_hits"] += 1
             signals.append(cached_report)
@@ -168,12 +175,16 @@ def _run_rating(footage_dir: str, output_dir: str, config: AnalysisConfig,
         pending_cache.invalidated.add(key)
         stats["cache_misses"] += 1
         stats["cache_miss_reasons"][reason] = stats["cache_miss_reasons"].get(reason, 0) + 1
-        report = analyze_file(
-            path,
-            config,
-            object_hits=signal_artifacts.objects_for(path),
-            advanced_hits=signal_artifacts.advanced_for(path),
-        )
+        if reuse_detectors:
+            report = cached_report
+            stats["detector_cache_reuses"] += 1
+        else:
+            report = analyze_file(
+                path,
+                config,
+                object_hits=signal_artifacts.objects_for(path),
+                advanced_hits=signal_artifacts.advanced_for(path),
+            )
         signals.append(report)
         pending_cache.observed.append((path, signature, report))
         if config.cache and report.analysis_complete:
@@ -859,6 +870,13 @@ def _artifact_signature(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
     return fingerprint(path)
+
+
+def _same_detector_inputs(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    # Optional hits are fused after detection; every other input must remain identical.
+    optional = {"visual_objects_path", "signal_artifacts", "signal_artifacts_signature"}
+    return ({key: value for key, value in previous.items() if key not in optional}
+            == {key: value for key, value in current.items() if key not in optional})
 
 
 def _cache_miss_reason(cached: Any, signature: dict[str, Any], cache_error: str | None) -> str | None:

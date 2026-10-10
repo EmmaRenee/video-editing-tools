@@ -346,6 +346,76 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(telemetry["origin"], "run_manifest")
         self.assertEqual(telemetry["storage_scope"], "tracked_output_files")
 
+    def test_report_retains_detector_reuse_from_imported_run_manifest(self):
+        self.write(self.manifest.parent / "execution.json", {"status": "ok", "telemetry": {
+            "elapsed_seconds": 4.25, "cache_hits": 0, "cache_misses": 3,
+            "detector_cache_reuses": 3, "storage_bytes": 400, "private_text": "private-source"}})
+        data = self.read(self.manifest)
+        data["projects"][0]["runs"][0].update(run_manifest="execution.json", telemetry={})
+        self.write(self.manifest, data)
+        report = self.run_report()
+        counters = report["projects"][0]["runs"][0]["telemetry"]
+        self.assertEqual(counters.get("detector_cache_reuses"), 3)
+        self.assertEqual(counters["cache_hit_rate"], 0)
+        self.assertNotIn("private-source", json.dumps(report))
+        self.assertIn("| dialogue | baseline | 4.25 | 0 | 3 | 3 | 400 |",
+                      (self.output / "benchmark_report.md").read_text())
+
+    def test_declared_detector_reuse_requires_a_valid_count_within_report_misses(self):
+        original = self.read(self.manifest)
+        for value, valid in ((0, True), (1, True), (2, False), (1.0, False),
+                             (True, False), (-1, False), ("private-source", False), (None, False)):
+            with self.subTest(value=value):
+                data = json.loads(json.dumps(original))
+                data["projects"][0]["runs"][0]["telemetry"].update(
+                    cache_misses=1, detector_cache_reuses=value)
+                self.write(self.manifest, data)
+                result = self.cli("validate", self.manifest)
+                self.assertEqual(result.returncode, 0 if valid else 1)
+
+    def test_invalid_imported_detector_reuse_fails_with_redacted_diagnostics(self):
+        data = self.read(self.manifest)
+        data["projects"][0]["runs"][0].update(run_manifest="execution.json", telemetry={})
+        self.write(self.manifest, data)
+        for index, value in enumerate((True, -1, 1.5, 2, "private-source", 10 ** 350)):
+            with self.subTest(value=value):
+                self.output = self.workspace / f"invalid-{index}"
+                self.write(self.manifest.parent / "execution.json", {"status": "ok", "telemetry": {
+                    "cache_hits": 0, "cache_misses": 1, "detector_cache_reuses": value}})
+                result = self.cli("run", self.manifest, "--output", self.output)
+                self.assertEqual(result.returncode, 1)
+                self.assertTrue((self.output / "benchmark_report.json").is_file(), result.stderr)
+                report = self.read(self.output / "benchmark_report.json")
+                self.assertEqual(report["projects"][0]["runs"][0]["status"], "failed")
+                self.assertNotIn("private-source", json.dumps(report))
+
+    def test_legacy_detector_reuse_remains_unknown_not_zero(self):
+        report = self.run_report()
+        self.assertIsNone(report["projects"][0]["runs"][0]["telemetry"].get("detector_cache_reuses"))
+        self.assertIn("| dialogue | baseline | 2.0 | 1 | 1 | unknown | 1024 |",
+                      (self.output / "benchmark_report.md").read_text())
+
+    def test_imported_cache_context_cannot_mix_declared_counter_values(self):
+        data = self.read(self.manifest)
+        run = data["projects"][0]["runs"][0]
+        run.update(run_manifest="execution.json")
+        run["telemetry"].update(cache_hits=0, cache_misses=1, detector_cache_reuses=1)
+        self.write(self.manifest, data)
+        cases = [
+            ({"cache_hits": 0, "cache_misses": 3}, (0, 3, None)),
+            ({"cache_hits": 0, "cache_misses": 3, "detector_cache_reuses": None}, (0, 3, None)),
+            ({"cache_hits": 3, "cache_misses": 0}, (3, 0, None)),
+            ({"cache_hits": 0, "cache_misses": 3, "detector_cache_reuses": 3}, (0, 3, 3)),
+            ({"detector_cache_reuses": 3}, (None, None, 3)),
+            ({}, (None, None, None)),
+        ]
+        for imported, want in cases:
+            with self.subTest(imported=imported):
+                self.write(self.manifest.parent / "execution.json", {"status": "ok", "telemetry": imported})
+                result = self.run_report()["projects"][0]["runs"][0]["telemetry"]
+                self.assertEqual(tuple(result.get(key) for key in
+                    ("cache_hits", "cache_misses", "detector_cache_reuses")), want)
+
     def test_malformed_rating_rows_fail_with_a_redacted_report(self):
         original = self.read(self.manifest.parent / "ratings.json")
         for field, value in [("inventory", [None]), ("signals", [None]), ("candidates", [None])]:

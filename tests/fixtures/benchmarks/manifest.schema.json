@@ -99,6 +99,7 @@
             "elapsed_seconds": {"$ref": "#/$defs/nonnegative"},
             "cache_hits": {"$ref": "#/$defs/nonnegative"},
             "cache_misses": {"$ref": "#/$defs/nonnegative"},
+            "detector_cache_reuses": {"type": "integer", "minimum": 0},
             "storage_bytes": {"$ref": "#/$defs/nonnegative"}
           }
         }

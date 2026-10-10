@@ -97,6 +97,13 @@ generation time, and provider JSON size. Unknown values stay null/blank, not zer
 JSON-only provider bytes exclude weights/frames; run bytes cover tracked outputs,
 not all caches/footage. Generation and rating times may overlap: do not blindly
 sum them. Warm/cold cache conditions must be held constant and disclosed.
+Per-effect baseline/candidate telemetry and the Markdown detector-cache context
+table preserve `detector_cache_reuses`. Report misses with reuse are warm detector
+conditions, not cold scans. Unknown counts remain null/unknown; do not infer zero
+reuse from legacy artifacts or compare rating runtimes as if their cache states
+were identical. This context does not change quality metrics or recommendations.
+Known telemetry is retained even when an ablation is `not_evaluated`; rejected
+attribution still has no quality delta or recommendation credit.
 
 Recommendations change no defaults: `experimental`,
 `profile_only_enablement_supported`, `default_enablement_supported`, or

@@ -119,11 +119,12 @@ def _artifact(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
     return row, data
 
 
-def _cache_counts(result: dict[str, Any], artifacts: list[dict[str, Any]]) -> tuple[int | None, int | None]:
+def _cache_details(result: dict[str, Any], artifacts: list[dict[str, Any]]) -> tuple[int | None, int | None, dict[str, Any]]:
+    # Keep reuse context tied to the selected counters; do not sum duplicate sidecars.
     for data in [result.get("telemetry", {}), result.get("summary", {}), result, *[item.get("telemetry", {}) for item in artifacts]]:
         if isinstance(data, dict) and all(isinstance(data.get(key), int) and not isinstance(data[key], bool) and data[key] >= 0 for key in ("cache_hits", "cache_misses")):
-            return data["cache_hits"], data["cache_misses"]
-    return None, None
+            return data["cache_hits"], data["cache_misses"], data
+    return None, None, result["telemetry"] if isinstance(result.get("telemetry"), dict) else {}
 
 
 class RunManifest:
@@ -165,17 +166,20 @@ class RunManifest:
         artifacts = [_artifact(path) for path in paths]
         outputs, artifact_data = [item[0] for item in artifacts], [item[1] for item in artifacts]
         self._remember_outputs(outputs)
-        hits, misses = _cache_counts(result, artifact_data)
+        hits, misses, telemetry = _cache_details(result, artifact_data)
         cache_status = "unknown" if hits is None or not hits + misses else "mixed" if hits and misses else "cached" if hits else "computed"
         step = {"name": name, "operation": operation, "status": status, "duration_seconds": round(duration, 6),
                 "config_sha256": canonical_hash(params), "cache_status": cache_status,
                 "cache_hits": hits, "cache_misses": misses, "outputs": outputs, "result": result,
                 "warnings": result.get("warnings", [])}
-        reasons = result.get("telemetry", {}).get("cache_miss_reasons") if isinstance(result.get("telemetry"), dict) else None
+        reasons = telemetry.get("cache_miss_reasons")
         if isinstance(reasons, dict):
             step["cache_miss_reasons"] = {key: value for key, value in reasons.items()
                                          if key in CACHE_REASON_CODES and isinstance(value, int)
                                          and not isinstance(value, bool) and value >= 0}
+        reused = telemetry.get("detector_cache_reuses")
+        if isinstance(reused, int) and not isinstance(reused, bool) and reused >= 0 and (misses is None or reused <= misses):
+            step["detector_cache_reuses"] = reused
         if error is not None:
             step.update(error=str(error), error_type=type(error).__name__)
         self.data["steps"].append(step)
@@ -224,6 +228,8 @@ class RunManifest:
             row.update(name=f"step_{index:03d}", warning_count=len(step["warnings"]), outputs=records(step["outputs"], "output"), result={})
             if "cache_miss_reasons" in step:
                 row["cache_miss_reasons"] = step["cache_miss_reasons"]
+            if "detector_cache_reuses" in step:
+                row["detector_cache_reuses"] = step["detector_cache_reuses"]
             if step.get("error_type"):
                 row["error_type"] = step["error_type"]
             payload["steps"].append(row)
@@ -269,6 +275,8 @@ class RunManifest:
         self.data["telemetry"] = {"elapsed_seconds": self.data["duration_seconds"], **counters,
                                   "storage_scope": "tracked_output_files",
                                   "storage_bytes": sum(row.get("size_bytes", 0) for row in self.data["outputs"] if row.get("type") == "file")}
+        if any("detector_cache_reuses" in step for step in steps):
+            self.data["telemetry"]["detector_cache_reuses"] = sum(step.get("detector_cache_reuses", 0) for step in steps)
         if any("cache_miss_reasons" in step for step in steps):
             self.data["telemetry"]["cache_miss_reasons"] = {
                 key: sum(step.get("cache_miss_reasons", {}).get(key, 0) for step in steps)
