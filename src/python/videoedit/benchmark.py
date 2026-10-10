@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -371,7 +372,10 @@ def _evaluate_run(project: dict[str, Any], run: dict[str, Any], base: Path,
     top_evaluation = evaluate_candidate_set(ratings, annotations, candidates[:limit])
     positive = sum(clip.rating in POSITIVE_RATINGS for clip in annotations.clips)
     negative = sum(clip.rating in NEGATIVE_RATINGS for clip in annotations.clips)
-    seconds = sum(end - start for intervals in windows.values() for start, end in intervals)
+    seconds = math.fsum(end - start for intervals in windows.values() for start, end in intervals)
+    # Bound roundoff to one nanosecond, even for extreme/fragmented timestamps.
+    duration_error = math.fsum(math.ulp(start) + math.ulp(end)
+                               for intervals in windows.values() for start, end in intervals) + math.ulp(seconds)
     tags = sorted(evaluation["metrics"]["recall_by_tag"])
     tag_aliases = {tag: f"tag_{num:03d}" for num, tag in enumerate(tags, 1)}
     decisions = _read(_path(base, run["decisions"])) if run.get("decisions") else None
@@ -382,7 +386,16 @@ def _evaluate_run(project: dict[str, Any], run: dict[str, Any], base: Path,
                "negative_annotations": negative, "reviewed_seconds": round(seconds, 3), "reviewed_sources": len(windows)}
     sample_values = {"min_reviewed_seconds": seconds, "min_positive_annotations": positive,
                      "min_negative_annotations": negative, "min_sources": len(windows)}
-    insufficient = [key for key, value in sample_values.items() if value < gates[key]]
+    insufficient = []
+    for key, value in sample_values.items():
+        if key == "min_reviewed_seconds":
+            tolerance = min(duration_error + math.ulp(gates[key]), 1e-9)
+            # Preserve integer gates beyond binary64's exact integer range.
+            short = Fraction(gates[key]) - Fraction(value) > tolerance
+        else:
+            short = value < gates[key]
+        if short:
+            insufficient.append(key)
     if not project["review"]["independent"]:
         insufficient.append("independent_review_required")
     quality_failures = [key for key in ("min_precision", "min_recall", "min_f1") if metrics[key[4:]] < gates[key]]
