@@ -3,6 +3,61 @@
 Source of truth: milestone 13 and umbrella issue #66. This is implementation
 evidence and design rulings, not a second backlog.
 
+## Evidence Snapshot (2026-10-10)
+
+The sections below are historical slices, not current blocker declarations.
+User approval on 2026-10-09 accepted the architecture dispositions, a separate
+Resolve test project and an independent review pack. Experimental files and the
+user's editorial projects remain untouched. The pack is prepared, not completed
+human ground truth. [#66](https://github.com/EmmaRenee/video-editing-tools/issues/66)
+and its linked task issues remain authoritative for acceptance.
+
+- Approved adaptation: [PR #104](https://github.com/EmmaRenee/video-editing-tools/pull/104)
+  adds optional `editor.otio`, `[editor]`, `export-otio` and `generate_otio` on the
+  shared handoff model. The separate experimental Shoot/Resolve SDK architecture
+  was not promoted. Sources, native timecode origins and audio gaps are explicit;
+  mixed native durations can land between timeline frames and require inspection.
+- Current technical validation: [PR #105](https://github.com/EmmaRenee/video-editing-tools/pull/105),
+  commit `3d923e71469ebc3bed2df5de848d23b5bc31f316`, passed all eight
+  [CI checks](https://github.com/EmmaRenee/video-editing-tools/actions/runs/38040047777).
+  Local runs covered 481 core cases (18 optional-reader skips), 45 interchange
+  and 23 native OTIO cases (no SDK skips), distribution audits and a fresh
+  core-only wheel's 23-step installed workflow outside the checkout. Version
+  remains 0.5.0; these are validation builds, not a qualified RC.
+- Live Resolve Studio 20.3.2 checks used separate saved test projects and
+  byte-verified copies of real originals. Uniform 29.97 DF EDL readback matched
+  151 record frames and selected source offsets with matching project/timeline
+  and import DF settings. NDF conform controls reproduced a one-frame shift and
+  offline EOF; the EDL header alone did not correct the mismatch. EDL is video
+  only; media-pool audio auto-attachment is not exported EDL audio.
+- Mixed 29.97/59.94 XML with 0.5-second requested handles and source-bound clamps
+  matched all four source/record ranges over 184 record frames. Native-rate XML
+  clip counters reproduced an EOF mis-seek in both Resolve/FCP7 import modes.
+  Timeline-rate clip counters fixed it without changing native file metadata.
+  The [reader migration](editor-handoff.md#xml-counter-reader-migration) separates
+  native offsets from XML counters and preserves unsupported/rounding diagnostics.
+- The XML render contained 184 nonblank, source-matching frames; per-clip median
+  PSNR ranged from 42.20 to 44.36 dB against the stated frame-sampled reference.
+  Interior stereo comparisons exceeded 0.9989 channel correlation with zero or
+  one sample of lag at 48 kHz. Boundary/AAC effects were excluded. This is scoped
+  technical evidence, not universal color, codec or full audio fidelity approval.
+- Native OTIO preserves the selected source durations. Resolve rounded their
+  mixed-rate 183.5-frame-equivalent placement to 184 timeline frames, matching
+  the expected source offsets and XML readback. Sidecars distinguish native OTIO
+  placement from compatibility record counters rather than hiding that rounding.
+- [#79's evidence](https://github.com/EmmaRenee/video-editing-tools/issues/79#issuecomment-6095961013)
+  records live import/readback/render results without private paths or footage.
+  Complete source/copy/render checksums and measurements remain in the authorized
+  private validation tree, not committed media or public attachments.
+
+Remaining completion gates are not replaced by this technical evidence:
+independent full-window review, a genuine motion/event benchmark, representative
+three-profile quality/provider ablations and editorial no-regression evidence,
+followed by final approved-commit RC qualification. The PR stack is unmerged at
+this dated snapshot; no merge, version bump, release or publishing is authorized.
+See [release evidence status](release.md#v17-evidence-status-2026-10-10) and refresh
+the linked GitHub issues before further work.
+
 ## Rough-Cut Bounds Slice
 
 - Previous turn: PR #95 / `8ba94bb`, 325 tests, 33 independent-reader checks,

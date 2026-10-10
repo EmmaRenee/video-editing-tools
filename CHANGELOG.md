@@ -6,6 +6,26 @@ This project uses semantic versioning for the Python `videoedit` package once pu
 
 ## Unreleased
 
+- Added optional native OTIO export through `editor.otio`, the `[editor]` extra,
+  `videoedit export-otio`, and `generate_otio`, without promoting the experimental
+  Shoot/Resolve SDK architecture or requiring an editor dependency for core use.
+- Corrected source/record timebase handling, fractional selection precision,
+  bounded rough-cut handles/targets, source-aware CMX/FCP7 exports, XML sequence
+  format and stereo panning. Mixed-rate XML now uses timeline-rate clip counters
+  while retaining native file metadata and explicit rounding diagnostics.
+- Documented the [XML counter reader migration](docs/editor-handoff.md#xml-counter-reader-migration)
+  for legacy/current `videoedit.handoff.v1` rows, including null unsupported
+  ranges. Regenerate older mixed-rate XML; changing its manifest alone is not a fix.
+- Added shared sampled-frame reuse and per-run YOLO/OpenCLIP model lifecycles,
+  stricter rating-cache identities and decode-completion checks. Interrupted or
+  incomplete inference is not reused as a successful cache result.
+- Added tracked-distribution auditing and fresh core-only installed-workflow CI
+  on Python 3.10-3.12, plus independent CMX/FCP7/OTIO structure checks.
+- Recorded scoped Resolve Studio 20.3.2 validation of original-media relinking,
+  DF EDL controls, mixed-rate XML/OTIO ranges, bounded handles, rendered pixels
+  and stereo audio. See the [V17 evidence snapshot](docs/v17-execution.md#evidence-snapshot-2026-10-10)
+  for limitations; independent quality benchmarks and RC qualification remain open.
+
 - Added controlled provider-ablation scorecards with coverage, historical input
   binding, explicit cost limits, identity-separated recommendations, and no
   automatic default changes.
