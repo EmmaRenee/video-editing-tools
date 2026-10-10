@@ -159,6 +159,14 @@ XML includes linked mono/stereo audio from a single supported stream. Inspect
 limitations. Missing media or unsupported layouts/effects yield partial
 diagnostics; out-of-range known-source selections fail. Mixed-rate or mixed
 DF/NDF EDLs are diagnostic-only, with no importable edit events: use XML.
+For CMX import into Resolve, match project/timeline FPS and DF/NDF mode to
+`FCM`/`edl_frame_count_mode`, and verify the EDL import dialog's FPS/drop-frame
+controls. Numeric FPS alone is insufficient; set timing in a separate test
+project before creating timelines. XML clip counters use `xml_clip_rate`
+(timeline FPS), while `source_in_frames`/`source_out_frames` and file metadata
+remain native. Inspect XML source-range rounding deltas and partial warnings;
+EOF rounding shifts inward, never beyond known video availability. Use OTIO if
+the quantized XML span cannot fit the source. See the editor-handoff guide.
 Independent-reader tests are not live Resolve validation. Do not claim actual
 relink, timecode, audio or handle fidelity without recorded editor evidence.
 

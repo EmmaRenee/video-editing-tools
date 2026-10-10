@@ -527,9 +527,13 @@ remain partial diagnostics. See [rough-cut bounds](../../docs/editor-handoff.md#
 FFmpeg `copy` remains keyframe-dependent;
 use `--render-mode render` for precise cuts. Export now probes each unique local
 source, applies embedded start timecode in standard CMX events, and writes FCP7
-media clip items with native FPS, escaped paths and linked mono/stereo audio.
+media clip items with native file FPS, escaped paths and linked mono/stereo audio.
 Known source bounds are checked. Mixed-rate or mixed DF/NDF EDLs are explicitly
-diagnostic-only; XML retains the separate source and record rates. Missing media
+diagnostic-only. XML clip counters use timeline FPS, while file metadata stays
+native; the handoff manifest records both counters and any rounding/EOF shift.
+Unrepresentable known-source XML spans fail explicitly instead of extending
+video. Match Resolve's project/timeline and EDL import DF/NDF modes to `FCM` and
+`edl_frame_count_mode`, not just numeric FPS. Missing media
 and unsupported layouts/effects remain partial, not silently complete.
 See [Editor Handoff](../../docs/editor-handoff.md) for the mapping, offline
 fallback and independent-reader checks. Actual Resolve relink/timecode/audio/
