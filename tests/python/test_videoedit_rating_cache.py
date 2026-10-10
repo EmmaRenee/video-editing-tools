@@ -16,7 +16,8 @@ from videoedit.calibration import generate_config_candidates
 from videoedit.config import AnalysisConfig
 from videoedit.ffmpeg import CommandResult
 from videoedit.models import AudioLevel, MediaAsset
-from videoedit.rating import _write_cache, run_rating
+from videoedit.provenance import canonical_hash
+from videoedit.rating import _rescore_report, _write_cache, run_rating
 
 
 class RatingCacheTests(unittest.TestCase):
@@ -150,8 +151,157 @@ class RatingCacheTests(unittest.TestCase):
         data = artifact.read_bytes().replace(b'"count":1', b'"count":2')
         self.replace_preserving_mtime(artifact, data)
         self.rate(config)
-        self.assertEqual(self.scenes.call_count, 2)
+        self.assertEqual(self.scenes.call_count, 1)
         self.assert_miss_reason("signal_artifacts_changed")
+
+    def test_changed_optional_signals_refresh_without_repeating_unchanged_detectors(self):
+        objects = self.root / "objects.json"
+        ocr = self.root / "ocr.json"
+        objects.write_text(json.dumps({"sources": [{"source": str(self.source), "segments": [
+            {"class_name": "person", "class_id": 0, "start_seconds": 3,
+             "end_seconds": 6, "detection_count": 10}]}]}))
+        ocr.write_text(json.dumps({"hits": [{"source": str(self.source), "text": "old sign"}]}))
+        config = AnalysisConfig(visual_objects_path=str(objects), signal_artifacts={"ocr_signage": str(ocr)})
+        first = self.rate(config)
+        self.assertIn("object_person", first.candidates[0].labels)
+        self.assertEqual(first.signals[0].advanced_hits[0]["text"], "old sign")
+        objects.write_text(objects.read_text().replace('"person"', '"car"'))
+        ocr.unlink()
+        refreshed = self.rate(config)
+        self.assertEqual([hit.class_name for hit in refreshed.signals[0].object_hits], ["car"])
+        self.assertEqual(refreshed.signals[0].advanced_hits, [])
+        self.assertIn("object_car", refreshed.candidates[0].labels)
+        self.assertNotIn("object_person", refreshed.candidates[0].labels)
+        self.assertNotIn("ocr_signage", refreshed.candidates[0].labels)
+        self.assert_miss_reason("signal_artifacts_changed")
+        self.assertEqual(self.scenes.call_count, 1, "Optional JSON changes must not repeat FFmpeg detection")
+        self.rate(config)
+        self.assertEqual(self.scenes.call_count, 1)
+        self.assertEqual(self.manifest()["telemetry"]["cache_hits"], 1)
+        config.cache = False
+        uncached = self.rate(config)
+        self.assertEqual(refreshed.signals[0].to_dict(), uncached.signals[0].to_dict())
+        self.assertEqual([clip.to_dict() for clip in refreshed.candidates],
+                         [clip.to_dict() for clip in uncached.candidates])
+
+    def test_detector_reuse_is_counted_separately_from_report_hits_and_misses(self):
+        self.rate()
+        artifact = self.root / "ocr.json"
+        artifact.write_text(json.dumps({"hits": [{"source": str(self.source), "text": "private-sign"}]}))
+        self.rate(AnalysisConfig(signal_artifacts={"ocr_signage": str(artifact)}), manifest_paths="redacted")
+        manifest = self.manifest()
+        for counts in (manifest["telemetry"], manifest["steps"][0]):
+            self.assertEqual(counts["cache_hits"], 0)
+            self.assertEqual(counts["cache_misses"], 1)
+            self.assertEqual(counts["detector_cache_reuses"], 1)
+        self.assertNotIn(str(self.root), json.dumps(manifest))
+        self.assertNotIn("private-sign", json.dumps(manifest))
+
+    def test_removing_all_artifacts_and_changing_weights_reuses_only_detector_measurements(self):
+        objects = self.root / "objects.json"
+        objects.write_text(json.dumps({"sources": [{"source": str(self.source), "segments": [
+            {"class_name": "car", "start_seconds": 3, "end_seconds": 6, "detection_count": 10}]}]}))
+        ocr = self.root / "ocr.json"
+        ocr.write_text(json.dumps({"hits": [{"source": str(self.source), "text": "old sign"}]}))
+        self.rate(AnalysisConfig(visual_objects_path=str(objects), signal_artifacts={"ocr_signage": str(ocr)}))
+        config = AnalysisConfig()
+        config.weights["technical"] = 0
+        refreshed = self.rate(config)
+        self.assertEqual(self.scenes.call_count, 1)
+        self.assert_miss_reason("signal_artifacts_changed")
+        self.assertEqual(refreshed.signals[0].object_hits, [])
+        self.assertEqual(refreshed.signals[0].advanced_hits, [])
+        self.assertEqual(refreshed.signals[0].scores["technical_score"], 0)
+        config.cache = False
+        uncached = self.rate(config)
+        self.assertEqual(refreshed.signals[0].to_dict(), uncached.signals[0].to_dict())
+        self.assertEqual([clip.to_dict() for clip in refreshed.candidates],
+                         [clip.to_dict() for clip in uncached.candidates])
+
+    def test_artifact_changes_do_not_mask_changed_detector_inputs(self):
+        artifact = self.root / "scores.json"
+        for change in ("source", "decoder", "transcript", "scene", "silence", "minimum_silence", "keywords"):
+            with self.subTest(change=change):
+                self.output = self.root / change
+                artifact.write_text('{"sources":[],"schema_version":"videoedit.ai_frame_scores.v1","count":1}')
+                config = AnalysisConfig(ai_frame_scores_path=str(artifact))
+                self.rate(config)
+                before = self.scenes.call_count
+                artifact.write_text(artifact.read_text().replace('"count":1', '"count":2'))
+                if change == "source":
+                    self.source.write_bytes(self.source.read_bytes() + b"changed")
+                elif change == "transcript":
+                    self.source.with_suffix(".txt").write_text("wow")
+                elif change == "scene":
+                    config.scene_threshold = .5
+                elif change == "silence":
+                    config.silence_threshold_db = -40
+                elif change == "minimum_silence":
+                    config.min_silence_duration = 2
+                elif change == "keywords":
+                    config.keywords = ["new-keyword"]
+                if change == "decoder":
+                    with patch("videoedit.rating.decoder_identity", return_value={"changed": True}):
+                        self.rate(config)
+                else:
+                    self.rate(config)
+                self.assertEqual(self.scenes.call_count - before, 1)
+
+    def test_unhealthy_or_corrupt_reports_cannot_supply_reused_detector_measurements(self):
+        artifact = self.root / "ocr.json"
+        for damaged in ("health", "integrity"):
+            with self.subTest(damaged=damaged):
+                self.output = self.root / damaged
+                self.rate()
+                before = self.scenes.call_count
+                cache = json.loads(self.cache_path().read_text())
+                entry = next(iter(cache.values()))
+                if damaged == "health":
+                    entry["report"]["analysis_status"]["scenes"] = "error"
+                    entry["report_sha256"] = canonical_hash(entry["report"])
+                else:
+                    entry["report"]["scene_changes"] = [999]
+                self.cache_path().write_text(json.dumps(cache))
+                artifact.write_text(json.dumps({"hits": [{"source": str(self.source), "text": "new sign"}]}))
+                report = self.rate(AnalysisConfig(signal_artifacts={"ocr_signage": str(artifact)}))
+                self.assertEqual(self.scenes.call_count - before, 1)
+                self.assertTrue(report.signals[0].analysis_complete)
+                self.assertEqual(report.signals[0].scene_changes, [5])
+                self.assertEqual(report.signals[0].advanced_hits[0]["text"], "new sign")
+
+    def test_artifact_mutation_during_reuse_prevents_successful_publication(self):
+        self.rate()
+        previous = self.cache_path().read_bytes()
+        artifact = self.root / "ocr.json"
+        artifact.write_text(json.dumps({"hits": [{"source": str(self.source), "text": "new sign"}]}))
+        config = AnalysisConfig(signal_artifacts={"ocr_signage": str(artifact)})
+
+        def mutate(report, current_config):
+            _rescore_report(report, current_config)
+            artifact.write_text('{"hits":[]}')
+
+        with patch("videoedit.rating._rescore_report", side_effect=mutate):
+            report = self.rate(config)
+        self.assertEqual(self.scenes.call_count, 1)
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertEqual(self.cache_path().read_bytes(), previous)
+
+    def test_source_mutation_during_reuse_prunes_the_old_report(self):
+        self.rate()
+        artifact = self.root / "ocr.json"
+        artifact.write_text('{"hits":[]}')
+
+        def mutate(report, current_config):
+            _rescore_report(report, current_config)
+            self.source.write_bytes(b"changed during reuse")
+
+        with patch("videoedit.rating._rescore_report", side_effect=mutate):
+            report = self.rate(AnalysisConfig(signal_artifacts={"ocr_signage": str(artifact)}))
+        self.assertEqual(self.scenes.call_count, 1)
+        self.assertFalse(report.signals[0].analysis_complete)
+        self.assertEqual(self.manifest()["status"], "partial")
+        self.assertEqual(json.loads(self.cache_path().read_text()), {})
 
     def test_malformed_cache_entry_is_diagnosed_and_recomputed(self):
         self.rate()

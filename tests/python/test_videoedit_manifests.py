@@ -47,6 +47,20 @@ class ManifestTests(unittest.TestCase):
                 run.record_step("fixture", "fixture", {}, {"output": str(output)}, 0.1)
                 self.assertEqual(artifact.call_count, 1)
 
+    def test_redacted_detector_reuse_counts_are_validated_and_summed(self):
+        from videoedit.manifests import RunManifest
+        path = self.root / "run.json"
+        with RunManifest(str(path), "fixture", path_mode="redacted") as run:
+            for value in (0, 2, True, -1, 1.5, "private-path", None):
+                run.record_step("fixture", "fixture", {}, {"telemetry": {
+                    "cache_hits": 0, "cache_misses": 2, "detector_cache_reuses": value}}, .1)
+            run.record_step("unrelated", "fixture", {}, {}, .1)
+        data = json.loads(path.read_text())
+        self.assertEqual(data["telemetry"]["detector_cache_reuses"], 2)
+        self.assertEqual([step.get("detector_cache_reuses") for step in data["steps"]],
+                         [0, 2, None, None, None, None, None, None])
+        self.assertNotIn("private-path", path.read_text())
+
     def test_input_paths_and_warning_text_are_not_output_files(self):
         from videoedit.manifests import RunManifest
         source, output = self.root / "source.mp4", self.root / "result.json"

@@ -133,7 +133,12 @@ Core detector cache policy `input_identity_v5` also refreshes earlier caches onc
 it tracks decoder identity, selected transcript content and signal artifacts.
 Inspect `rating_run.json` telemetry `cache_miss_reasons` when reuse is unexpected.
 Cached analysis is rescored with current weights; scoring-only tuning need not
-decode again. Source identity uses local metadata, not a full byte checksum;
+decode again. Optional artifact changes remain report-cache misses but can reuse
+healthy, integrity-checked detector measurements when every detector input still
+matches; optional hits are replaced and scores/candidates regenerated. Check
+`detector_cache_reuses` separately from report hits/misses. Changed source,
+transcript, decoder or detector settings require fresh detection.
+Source identity uses local metadata, not a full byte checksum;
 use `--no-cache` when metadata is untrusted and keep input files stable during runs.
 
 For delivery timing, trust `start_seconds`/`end_seconds` over whole-second display

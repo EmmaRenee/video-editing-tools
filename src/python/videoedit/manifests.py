@@ -176,6 +176,9 @@ class RunManifest:
             step["cache_miss_reasons"] = {key: value for key, value in reasons.items()
                                          if key in CACHE_REASON_CODES and isinstance(value, int)
                                          and not isinstance(value, bool) and value >= 0}
+        reused = result.get("telemetry", {}).get("detector_cache_reuses") if isinstance(result.get("telemetry"), dict) else None
+        if isinstance(reused, int) and not isinstance(reused, bool) and reused >= 0:
+            step["detector_cache_reuses"] = reused
         if error is not None:
             step.update(error=str(error), error_type=type(error).__name__)
         self.data["steps"].append(step)
@@ -224,6 +227,8 @@ class RunManifest:
             row.update(name=f"step_{index:03d}", warning_count=len(step["warnings"]), outputs=records(step["outputs"], "output"), result={})
             if "cache_miss_reasons" in step:
                 row["cache_miss_reasons"] = step["cache_miss_reasons"]
+            if "detector_cache_reuses" in step:
+                row["detector_cache_reuses"] = step["detector_cache_reuses"]
             if step.get("error_type"):
                 row["error_type"] = step["error_type"]
             payload["steps"].append(row)
@@ -269,6 +274,8 @@ class RunManifest:
         self.data["telemetry"] = {"elapsed_seconds": self.data["duration_seconds"], **counters,
                                   "storage_scope": "tracked_output_files",
                                   "storage_bytes": sum(row.get("size_bytes", 0) for row in self.data["outputs"] if row.get("type") == "file")}
+        if any("detector_cache_reuses" in step for step in steps):
+            self.data["telemetry"]["detector_cache_reuses"] = sum(step.get("detector_cache_reuses", 0) for step in steps)
         if any("cache_miss_reasons" in step for step in steps):
             self.data["telemetry"]["cache_miss_reasons"] = {
                 key: sum(step.get("cache_miss_reasons", {}).get(key, 0) for step in steps)

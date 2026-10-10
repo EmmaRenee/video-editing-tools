@@ -140,6 +140,18 @@ reason is counted per miss; an all-hit run has an empty map. These fixed codes,
 not filenames or transcript text, survive redaction. The reason map is additive;
 existing hit/miss counters and manifest/schema consumers remain compatible.
 
+Changing, adding or removing optional signal artifacts still causes a report-cache
+miss and reloads all optional hits. If every detector input is identical, a healthy,
+integrity-checked cached report can supply metadata, scene, silence, audio and
+transcript measurements without decoding again. Scores, reasons and candidates
+are regenerated from those measurements and the current artifacts. Any concurrent
+change to source identity, decoder, selected transcript, detector settings,
+keywords or cache policy prevents this reuse. `--no-cache` bypasses it as well.
+Step and aggregate `detector_cache_reuses` count report-cache misses that took
+this path, not report hits, decoded frames or inference calls; an ordinary rating
+run reports zero. This numeric counter also survives redaction. It is recorded in
+the rating sidecar, not inferred for operations that do not report it.
+
 New cache data is published atomically only after healthy analysis, output
 generation and successful manifest writing. Partial runs may prune invalidated
 old entries, but do not publish newly computed entries. Every source/transcript,
