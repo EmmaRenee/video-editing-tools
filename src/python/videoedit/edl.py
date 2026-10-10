@@ -74,6 +74,12 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
     _rate(canvas, timeline.rate)
     audio_tracks, emitted_files = {}, set()
 
+    def source_extent(clip):
+        source, info = clip.source, clip.source.info
+        if info.duration is not None:
+            return seconds_to_frames(info.duration, source.rate)
+        return max(item.source_out for item in timeline.clips if item.source.path == source.path)
+
     def file_element(parent, clip):
         source, info = clip.source, clip.source.info
         node = ET.SubElement(parent, "file", id=source.file_id)
@@ -83,8 +89,7 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
         _text(node, "name", Path(source.path).name)
         _text(node, "pathurl", Path(source.path).as_uri())
         # Unknown media needs a minimum extent, not an invented probed duration.
-        extent = max(item.source_out for item in timeline.clips if item.source.path == source.path)
-        _text(node, "duration", seconds_to_frames(info.duration, source.rate) if info.duration is not None else extent)
+        _text(node, "duration", source_extent(clip))
         _rate(node, source.rate)
         timecode = ET.SubElement(node, "timecode")
         _rate(timecode, source.rate)
@@ -134,7 +139,24 @@ def generate_xml(clips: list[dict], source_file: str, fps: float = 30.0,
             if channel not in audio_tracks:
                 audio_tracks[channel] = ET.SubElement(audio_media, "track")
             audio_id = f"clip-{clip.event}-a{channel}"
-            nodes.append((item(audio_tracks[channel], clip, audio_id, "audio", channel), audio_id, "audio", channel))
+            audio_item = item(audio_tracks[channel], clip, audio_id, "audio", channel)
+            if channels == 2:
+                # Split stereo channels otherwise import as two centered mono tracks.
+                pan_filter = ET.SubElement(audio_item, "filter")
+                _text(pan_filter, "enabled", "TRUE")
+                _text(pan_filter, "start", 0)
+                _text(pan_filter, "end", source_extent(clip))
+                effect = ET.SubElement(pan_filter, "effect")
+                for name, value in (("name", "Audio Pan"), ("effectid", "audiopan"),
+                                    ("effecttype", "audiopan"), ("mediatype", "audio"),
+                                    ("effectcategory", "audiopan")):
+                    _text(effect, name, value)
+                parameter = ET.SubElement(effect, "parameter")
+                for name, value in (("name", "Pan"), ("parameterid", "pan"),
+                                    ("value", -1 if channel == 1 else 1),
+                                    ("valuemin", -1), ("valuemax", 1)):
+                    _text(parameter, name, value)
+            nodes.append((audio_item, audio_id, "audio", channel))
         for node, _, _, _ in nodes:
             for _, target_id, kind, channel in nodes:
                 link = ET.SubElement(node, "link")

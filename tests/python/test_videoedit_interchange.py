@@ -126,6 +126,35 @@ class InterchangeTests(unittest.TestCase):
         self.assertEqual(mapping[0]["reel"], mapping[1]["reel"])
         self.assertNotEqual(mapping[0]["reel"], mapping[2]["reel"])
 
+    def test_split_stereo_audio_has_explicit_left_right_pan(self):
+        audio = [{"index": 1, "channels": 2, "sample_rate": 48000, "codec": "pcm_s16le"}]
+        timeline, _ = self.timeline(info=media(audio=audio))
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        tracks = root.findall("sequence/media/audio/track")
+        self.assertEqual(len(tracks), 2)
+        for track, expected in zip(tracks, ("-1", "1")):
+            effect = track.find("clipitem/filter/effect")
+            self.assertIsNotNone(effect, "Resolve centers both mono tracks without explicit panning")
+            self.assertEqual(effect.findtext("effectid"), "audiopan")
+            self.assertEqual(effect.findtext("mediatype"), "audio")
+            self.assertEqual(effect.findtext("parameter/parameterid"), "pan")
+            self.assertEqual(effect.findtext("parameter/value"), expected)
+            self.assertEqual(track.findtext("clipitem/filter/start"), "0")
+            self.assertEqual(track.findtext("clipitem/filter/end"), "600")
+
+    def test_mixed_mono_stereo_panning_is_per_clip_not_per_track(self):
+        from videoedit.handoff import build_handoff_timeline
+        clips = [self.clips[0], {**self.clips[0], "source": str(self.root / "mono.mov")}]
+        stereo = media(audio=[{"index": 1, "channels": 2, "sample_rate": 48000}])
+        mono = media(audio=[{"index": 1, "channels": 1, "sample_rate": 48000}])
+        with patch("videoedit.handoff.probe_handoff_media", side_effect=[stereo, mono]):
+            timeline = build_handoff_timeline(clips, "mixed", 29.97)
+        root = ET.fromstring(generate_xml([], "mixed", timeline=timeline))
+        first_track = root.findall("sequence/media/audio/track")[0]
+        stereo_item, mono_item = first_track.findall("clipitem")
+        self.assertEqual(stereo_item.findtext("filter/effect/parameter/value"), "-1")
+        self.assertIsNone(mono_item.find("filter"), "Mono sources must remain centered")
+
     def test_metadata_conflicts_are_not_silently_accepted(self):
         with self.assertRaisesRegex(ValueError, "source_fps"):
             self.timeline([{**self.clips[0], "source_fps": 24}])
